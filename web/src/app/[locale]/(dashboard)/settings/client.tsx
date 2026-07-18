@@ -106,7 +106,7 @@ export function SettingsClient({ initial }: { initial: GatewaySettings }) {
             {pending ? t("saving") : t("save")}
           </Button>
           {result?.ok && (
-            <span className="text-sm text-emerald-600 dark:text-emerald-400">
+            <span className="text-sm text-success">
               {t("saved")}
             </span>
           )}
@@ -121,7 +121,7 @@ export function SettingsClient({ initial }: { initial: GatewaySettings }) {
 
 function HotBadge({ label }: { label: string }) {
   return (
-    <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
+    <span className="rounded-full bg-success/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-success">
       {label}
     </span>
   );

@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui";
 import { TraceCategories } from "@/components/trace/trace-categories";
 
@@ -60,7 +61,8 @@ export function TraceDetailClient({
         variant="outline"
         size="sm"
       >
-        ← {t("detail.backToSession")}
+        <ArrowLeft className="h-3.5 w-3.5" />
+        {t("detail.backToSession")}
       </Button>
 
       <div className="flex flex-col gap-2">

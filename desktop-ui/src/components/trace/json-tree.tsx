@@ -119,7 +119,7 @@ function KeyLabel({ node }: { node: JsonNode }) {
   if (node.path === "root") return null;
   const isIndex = /\[\d+\]$/.test(node.path);
   return (
-    <span className={cn("mr-1", isIndex ? "text-muted-foreground" : "text-sky-600 dark:text-sky-400")}>
+    <span className={cn("mr-1", isIndex ? "text-muted-foreground" : "text-sky-600")}>
       {isIndex ? `[${node.key}]` : node.key}:
     </span>
   );
@@ -128,11 +128,11 @@ function KeyLabel({ node }: { node: JsonNode }) {
 function PrimitiveValue({ node }: { node: JsonNode }) {
   const cls =
     node.type === "string"
-      ? "text-emerald-600 dark:text-emerald-400"
+      ? "text-emerald-600"
       : node.type === "number"
-        ? "text-amber-600 dark:text-amber-400"
+        ? "text-amber-600"
         : node.type === "boolean"
-          ? "text-violet-600 dark:text-violet-400"
+          ? "text-violet-600"
           : "text-muted-foreground";
   return <span className={cls}>{primitiveDisplay(node)}</span>;
 }

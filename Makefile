@@ -11,7 +11,7 @@ GOLANGCI_LINT_VERSION := v1.62.2
 .PHONY: help all build build-gateway build-admin run-gateway run-admin \
         devstack devstack-test adminstack adminstack-test stack-test-all \
         test test-race test-db cover test-e2e test-e2e-quick test-e2e-race fmt fmt-check vet lint audit \
-        check-i18n check-i18n-keys \
+        check-i18n check-i18n-keys check-ui \
         check-errors check-permissions \
         check-docs \
         arch-check tidy \
@@ -254,13 +254,19 @@ web-e2e: ## Run the Control Panel slice-0 e2e (auto start/stop)
 # `ci`). Keeping them separate so the default gate stays fast and npm-free.
 # check-i18n verifies en/zh locale key alignment (prevents parallel worktrees
 # from silently diverging message keys); jq is a dev-tool prerequisite.
-ci-web: check-i18n check-i18n-keys web-typecheck web-lint web-test-unit web-build ## Run web quality gates (i18n + typecheck + lint + unit tests + build)
+ci-web: check-i18n check-i18n-keys check-ui web-typecheck web-lint web-test-unit web-build ## Run web quality gates (i18n + typecheck + lint + unit tests + build)
 
 check-i18n: ## Verify locale key alignment across all locales (en is baseline)
 	@./scripts/check-i18n.sh
 
 check-i18n-keys: ## Verify every static t("key") call resolves to a locale message
 	@node ./scripts/check-i18n-keys.mjs
+
+# check-ui enforces design-system.md §1.2 hard rules (hex literals, rainbow
+# scales, dark: variants, native dialogs/selects, emoji icons, scaffold
+# assets) so the visual language can't drift; allowlists are shrink-only.
+check-ui: ## Verify UI hard rules (design-system.md §1.2, allowlists shrink-only)
+	@./scripts/check-ui.sh
 
 ## ---- Packaging ----
 docker: docker-gateway docker-admin ## Build both Docker images
@@ -283,7 +289,7 @@ dev-deps-down: ## Stop and remove local PostgreSQL
 # check-errors validates the internal/apperr catalog (unique codes, valid HTTP
 # statuses, i18n keys exist in web/src/locales/en/errors/<domain>.json) so
 # parallel worktrees can't silently diverge error codes or drop i18n keys.
-ci: fmt-check vet lint arch-check test check-errors check-permissions check-docs check-frontend-permissions check-i18n sdk-codegen-check sdk-typecheck sdk-lint sdk-test sdk-build stack-test-all ## Run the full verification pipeline
+ci: fmt-check vet lint arch-check test check-errors check-permissions check-docs check-frontend-permissions check-i18n check-ui sdk-codegen-check sdk-typecheck sdk-lint sdk-test sdk-build stack-test-all ## Run the full verification pipeline
 
 check-errors: ## Verify internal/apperr catalog (unique codes, valid statuses, i18n keys present)
 	@./scripts/check-errors.sh

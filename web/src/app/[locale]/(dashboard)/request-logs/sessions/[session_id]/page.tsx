@@ -30,7 +30,7 @@ export default async function SessionTracePage({
 
   let requests: RequestEntry[] = [];
   let costSummary: CostSummary = {};
-  let loadError = false;
+  const loadError = false;
   try {
     const client = await serverAdminClient();
     const res = unwrap(

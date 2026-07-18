@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui";
 import { microToDisplay } from "@/lib/money";
 
@@ -35,7 +36,8 @@ export function SessionTraceClient({
     return (
       <>
         <Button href="/request-logs" variant="outline" size="sm">
-          ← {t("back")}
+          <ArrowLeft className="h-3.5 w-3.5" />
+        {t("back")}
         </Button>
         <p className="text-sm text-destructive">{t("notFound")}</p>
       </>
@@ -62,7 +64,8 @@ export function SessionTraceClient({
   return (
     <>
       <Button href="/request-logs" variant="outline" size="sm">
-        ← {t("back")}
+        <ArrowLeft className="h-3.5 w-3.5" />
+        {t("back")}
       </Button>
 
       <div className="flex flex-col gap-2">
@@ -156,11 +159,11 @@ export function SessionTraceClient({
                                 : (r.error_type as string)}
                             </span>
                           ) : r.fallback === true ? (
-                            <span className="text-amber-600 dark:text-amber-400">
+                            <span className="text-warning">
                               {t("timeline.fallback")}
                             </span>
                           ) : (
-                            <span className="text-emerald-600 dark:text-emerald-400">
+                            <span className="text-success">
                               {t("timeline.success")}
                             </span>
                           )}

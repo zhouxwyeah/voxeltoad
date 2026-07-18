@@ -65,9 +65,9 @@ export function DataPlaneNodesTable({ rows }: { rows: NodeRow[] }) {
         cell: ({ getValue }) => {
           const s = (getValue() as string) ?? "unknown";
           const colors: Record<string, string> = {
-            online: "text-emerald-600 dark:text-emerald-400",
+            online: "text-success",
             offline: "text-destructive",
-            draining: "text-amber-500",
+            draining: "text-warning",
           };
           return (
             <span className={colors[s] ?? ""}>

@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui";
 import { microToDisplay } from "@/lib/money";
 
@@ -38,7 +39,8 @@ export function ModelDetailClient({ model }: { model: CatalogModel | null }) {
     return (
       <>
         <Button href="/model-catalog" variant="outline" size="sm">
-          ← {t("detail.back")}
+          <ArrowLeft className="h-3.5 w-3.5" />
+        {t("detail.back")}
         </Button>
         <p className="text-sm text-muted-foreground">{t("notFound")}</p>
       </>
@@ -52,7 +54,8 @@ export function ModelDetailClient({ model }: { model: CatalogModel | null }) {
   return (
     <>
       <Button href="/model-catalog" variant="outline" size="sm">
-        ← {t("detail.back")}
+        <ArrowLeft className="h-3.5 w-3.5" />
+        {t("detail.back")}
       </Button>
 
       <div className="flex flex-col gap-2">

@@ -49,6 +49,7 @@ export function OperatorForm({
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const onSuccessRef = useRef(onSuccess);
+  // eslint-disable-next-line react-hooks/refs
   onSuccessRef.current = onSuccess;
 
   // roleId: for create, the selected role's database id.

@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { CircleAlert } from "lucide-react";
 import { microToDisplay } from "@/lib/money";
 import type { SessionSummary } from "./page";
 
@@ -97,7 +98,7 @@ export function TraceSessionsClient({
                       {s.session_id}
                     </a>
                     {s.has_errors && (
-                      <span className="ml-2 text-destructive">●</span>
+                      <CircleAlert className="ml-2 inline h-3.5 w-3.5 text-destructive" />
                     )}
                   </td>
                   <td className="px-3 py-2">{s.agent_type || "—"}</td>

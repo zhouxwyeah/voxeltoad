@@ -120,7 +120,7 @@ export function RequestLogsTable({
           const blocked = row.original.blocked_by as string | undefined;
           if (!v && !blocked)
             return (
-              <span className="text-emerald-600 dark:text-emerald-400">
+              <span className="text-success">
                 {t("status.success")}
               </span>
             );

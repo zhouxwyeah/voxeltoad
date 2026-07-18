@@ -44,6 +44,7 @@ export function RoleForm({
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const onSuccessRef = useRef(onSuccess);
+  // eslint-disable-next-line react-hooks/refs
   onSuccessRef.current = onSuccess;
 
   const [scopeKind, setScopeKind] = useState(
