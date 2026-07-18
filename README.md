@@ -418,7 +418,7 @@ model    = deepseek-v4-flash  # 或 deepseek-v4-pro / hy3 / kimi-k2.7-code / kim
 # 一次性安装 Wails CLI（go install 的位置可能不在 PATH 上，脚本会自动找 $(go env GOPATH)/bin/wails）
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
 make desktop-build
-open deploy/desktop/build/bin/desktop-gateway.app
+open deploy/desktop/build/bin/voxeltoad-desktop.app
 ```
 
 构建脚本（`scripts/build-desktop.sh`）会：① `npm ci && npm run build`（desktop-ui）② 拷 `dist/` 到 `deploy/desktop/dist/` ③ `wails build -tags desktop -platform darwin/universal`。产出 `.app`（约 35MB）。双击启动：Wails 窗口加载 SPA，菜单栏支持 重载配置（Cmd+R）/ 打开配置文件位置 / 复制 API key（Cmd+Shift+K）。关闭窗口会隐藏到 dock（HTTP server 继续跑，Agent 还能打）。

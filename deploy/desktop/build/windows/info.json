@@ -1,0 +1,24 @@
+{
+  "fixed": {
+    "file_version": "0.1.0.0",
+    "product_version": "0.1.0.0"
+  },
+  "info": {
+    "0409": {
+      "ProductName": "voxeltoad Desktop",
+      "CompanyName": "voxeltoad",
+      "ProductVersion": "0.1.0",
+      "FileVersion": "0.1.0",
+      "Copyright": "Copyright © 2026 voxeltoad",
+      "Comments": "Desktop personal LLM gateway — local recording + trace viewer"
+    },
+    "0804": {
+      "ProductName": "voxeltoad 桌面",
+      "CompanyName": "voxeltoad",
+      "ProductVersion": "0.1.0",
+      "FileVersion": "0.1.0",
+      "Copyright": "Copyright © 2026 voxeltoad",
+      "Comments": "桌面个人 LLM 网关 — 本地录制 + Trace 查看器"
+    }
+  }
+}

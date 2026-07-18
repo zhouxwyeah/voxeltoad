@@ -8,6 +8,8 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -171,12 +173,20 @@ func (a *App) nativeMenu() *menu.Menu {
 	return menu.NewMenuFromItems(menu.AppMenu(), menu.EditMenu(), customView)
 }
 
-// openConfigFolder reveals the YAML config file in Finder via `open -R`.
+// openConfigFolder reveals the YAML config file in the platform's file manager:
+// macOS Finder (`open -R`), Windows Explorer (`explorer.exe /select,`), or the
+// Linux desktop's default folder opener (`xdg-open` on the parent dir).
 func (a *App) openConfigFolder() {
 	if a.CfgPath == "" {
 		return
 	}
-	// `open -R <path>` reveals the file in Finder (macOS only — guarded by the
-	// //go:build desktop tag, which is macOS-only in this iteration).
-	_ = exec.Command("open", "-R", a.CfgPath).Run()
+	switch runtime.GOOS {
+	case "darwin":
+		_ = exec.Command("open", "-R", a.CfgPath).Run()
+	case "windows":
+		// explorer.exe /select,<path> — backslash separators preferred by Explorer.
+		_ = exec.Command("explorer.exe", "/select,"+filepath.FromSlash(a.CfgPath)).Run()
+	default:
+		_ = exec.Command("xdg-open", filepath.Dir(a.CfgPath)).Run()
+	}
 }

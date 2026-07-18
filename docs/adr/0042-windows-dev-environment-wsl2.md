@@ -1,5 +1,10 @@
 # ADR-0042: Windows 开发者官方环境 = WSL2（脚本保持 POSIX-only，CI 仅 Linux）
 
+> **注**：§3「CI 平台仅 Linux」与 §39 中关于「Windows 桌面客户端打包」的部分
+> 已被 [ADR-0043](0043-windows-desktop-packaging.md) supersede——仅针对 desktop
+> 打包这一窄面新增 `desktop-windows-build` job。本 ADR 其余条款（开发者官方
+> 环境 = WSL2、脚本 POSIX-only、`make ci` 仅 Linux）继续有效。
+
 - Status: Accepted
 - Date: 2026-07-17
 

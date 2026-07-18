@@ -217,7 +217,7 @@ APIKey (实体, KeyStore, 仅种子 1 个默认)
 
 ### 10.1 技���选型
 - **CLI / 开发模式(`make desktop-web-dev`)**:前端是独立的 Vite + React SPA(顶层 `desktop-ui/`,与 `web/` 并列),由 Go 网关用 `http.FileServer` 同源服务。前端 `fetch` 走相对路径 `/api/v1/*`,生产同源、dev 模式靠 Vite `server.proxy`(见 `desktop-ui/vite.config.ts`)转到网关端口。`cmd/desktop/main.go` 走 `//go:build !desktop` 的 `run_cli.go`。
-- **Wails 打包(已落地,`deploy/desktop/`)**:用 Wails v2 把 Go binary + SPA 包成 `.app`。打包层 `deploy/desktop/`:`wails.json` + `assets.go`(`//go:embed all:dist`)+ `desktop.go`(app context:菜单栏 + 关闭隐藏到 dock + OnShutdown 优雅停服)+ `build/darwin/Info.plist`。**数据面必须保留独立 `net/http.Server`**:第三方 Agent 用 `base_url` 打 `/v1/*` 且依赖 `WriteTimeout:0` 的 SSE 流式,不可走 Wails AssetServer;Wails webview 里的 SPA 通过 AssetServer.Handler 反向代理打到本地 HTTP server 的 `/api/v1/*` + `/v1/*`。`cmd/desktop/main.go` 按 `//go:build desktop` 分两文件复用同一装配链。
+- **Wails 打包(已落地,`deploy/desktop/`)**:用 Wails v2 把 Go binary + SPA 包成原生安装包,双平台产物:**macOS `.app`**(darwin/universal)+ **Windows NSIS `.exe`**(amd64,ADR-0043)。打包层 `deploy/desktop/`:`wails.json` + `assets.go`(`//go:embed all:dist`)+ `desktop.go`(app context:菜单栏 + 关闭隐藏到 dock + OnShutdown 优雅停服 + `openConfigFolder` 按 `runtime.GOOS` 分支 Finder/Explorer/xdg-open)+ `build/darwin/Info.plist` + `build/windows/{info.json,icon.ico}`。构建脚本 `scripts/build-desktop.sh` 参数化 TARGET(`darwin`|`windows`|`windows-cross`),Makefile 暴露 `desktop-build` / `desktop-build-windows` / `desktop-build-windows-cross` 三个目标;Windows .exe 有两条构建路径——(A)WSL2/Linux 交叉编译(`apt install mingw-w64 nsis` 后跑 `make desktop-build-windows-cross`,开发者推荐)和(B)Windows 原生(`choco install nsis` 后跑 `make desktop-build-windows`);CI 在 push-to-main 时跑 `desktop-windows-build` job 产出 `.exe` artifact(ADR-0043 supersede ADR-0042 §3 的窄面)。**数据面必须保留独立 `net/http.Server`**:第三方 Agent 用 `base_url` 打 `/v1/*` 且依赖 `WriteTimeout:0` 的 SSE 流式,不可走 Wails AssetServer;Wails webview 里的 SPA 通过 AssetServer.Handler 反向代理打到本地 HTTP server 的 `/api/v1/*` + `/v1/*`。`cmd/desktop/main.go` 按 `//go:build desktop` 分两文件复用同一装配链。
 - 前端**复用 `web/` 的 TSX 组件形态**，但端点自管（桌面不构建 admin），用自写的薄客户端 `desktop-ui/src/lib/api.ts`。
 
 ### 10.2 API 端点(读 + 配置 CRUD)
@@ -336,6 +336,6 @@ APIKey (实体, KeyStore, 仅种子 1 个默认)
 
 **Phase 2 — 读 API + 基础 UI**：`server/server.go` 轻量读 API + Vite SPA 壳 + 概览页 / Session 浏览器 / Trace 查看器（复制 prompt）。这是"看 Agent 行为 + 学提示词"价值的首次闭环。
 
-**Phase 3 — 打磨**：各 Agent 过滤、SessionSource 标记、留存策略、凭证文件保护、可选 prompt 收藏。
+**Phase 3 — 打磨**：各 Agent 过滤、SessionSource 标记、留存策略、凭证文件保护、可选 prompt 收藏、**Windows 打包落地(ADR-0043)**。
 
 > 范围封顶：粒度 3（ML 归纳范式）明确不做；企业特性（RBAC/operator/billing/节点注册/配置版本历史）明确不做。
