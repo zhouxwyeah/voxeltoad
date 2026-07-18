@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"voxeltoad/internal/desktoplog"
 	"voxeltoad/internal/desktopstore"
 )
 
@@ -48,7 +49,7 @@ func seed(t *testing.T, db *desktopstore.DB) {
 func newTestServer(t *testing.T) (*httptest.Server, *desktopstore.DB) {
 	db := openTestDB(t)
 	seed(t, db)
-	return httptest.NewServer(New(db, "", nil).Handler()), db
+	return httptest.NewServer(New(db, "", nil, nil, nil).Handler()), db
 }
 
 func get(t *testing.T, ts *httptest.Server, path string) (int, map[string]any) {
@@ -211,7 +212,7 @@ func TestTraceByRequestIDWithSlash(t *testing.T) {
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	ts := httptest.NewServer(New(db, "", nil).Handler())
+	ts := httptest.NewServer(New(db, "", nil, nil, nil).Handler())
 	defer ts.Close()
 
 	// Raw slash in the path must match the "..." wildcard.
@@ -228,5 +229,37 @@ func TestTraceByRequestIDWithSlash(t *testing.T) {
 	code, _ = get(t, ts, "/api/v1/trace/requests/NODE%2Fabc-000001")
 	if code != 200 {
 		t.Errorf("encoded %%2F code = %d, want 200", code)
+	}
+}
+
+func TestLogs_ServesRingTail(t *testing.T) {
+	db := openTestDB(t)
+	ring := desktoplog.NewRing(10)
+	for _, l := range []string{"one", "two", "three"} {
+		_, _ = ring.Write([]byte(l + "\n"))
+	}
+	ts := httptest.NewServer(New(db, "", nil, ring, nil).Handler())
+	defer ts.Close()
+
+	code, m := get(t, ts, "/api/v1/logs?tail=2")
+	if code != 200 {
+		t.Fatalf("code = %d, want 200", code)
+	}
+	lines, ok := m["lines"].([]any)
+	if !ok || len(lines) != 2 {
+		t.Fatalf("lines = %v, want 2 entries", m["lines"])
+	}
+	if lines[0] != "two" || lines[1] != "three" {
+		t.Errorf("lines = %v, want [two three] (oldest first)", lines)
+	}
+}
+
+func TestLogs_UnavailableWithoutRing(t *testing.T) {
+	db := openTestDB(t)
+	ts := httptest.NewServer(New(db, "", nil, nil, nil).Handler())
+	defer ts.Close()
+	code, _ := get(t, ts, "/api/v1/logs")
+	if code != 503 {
+		t.Errorf("code = %d, want 503 when no ring is wired", code)
 	}
 }

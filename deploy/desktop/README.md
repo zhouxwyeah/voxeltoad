@@ -14,7 +14,14 @@ standard macOS `.app` bundle. See `design/desktop.md` §10 and ADR-0041.
   dependency (cgo linkage only happens at final `wails build` link time).
 - `app/desktop.go` — Wails app context: HTTP server lifecycle (`OnStartup`/
   `OnShutdown`), native menu (copy API key / reload config / open config
-  folder), hide-to-tray behavior.
+  folder), hide-to-dock behavior, single-instance lock (a second launch
+  focuses the existing window), and native dialogs for startup failures. The
+  gateway port is pre-bound in `internal/desktopapp.Main` (the bind doubles
+  as the conflict probe); on conflict the app shows a dialog with remediation
+  steps instead of dying silently. The "复制 API key" menu item copies the
+  real current key from the shared in-memory key state (updated when the key
+  is rotated via 设置 → API 密钥); after a restart with a rotated key the
+  plaintext is unrecoverable and the item explains how to rotate again.
 - `build/darwin/Info.plist` — bundle manifest. `CFBundleIdentifier` is
   `dev.voxeltoad.desktop`; declares `NSLocalNetworkUsageDescription`
   (the gateway binds 127.0.0.1 — macOS Sonoma+ prompts even for loopback).

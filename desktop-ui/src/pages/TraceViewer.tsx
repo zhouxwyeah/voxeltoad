@@ -8,6 +8,7 @@ import { EmptyState } from "../components/ui/empty-state";
 import { Tabs } from "../components/ui/tabs";
 import { TraceCategories } from "../components/trace/trace-categories";
 import { JsonTree } from "../components/trace/json-tree";
+import { PromptFormModal } from "../components/prompts/prompt-form-modal";
 import { getTraceByRowID, listRequestLogs, listTraceBySession } from "../lib/api";
 import type { RequestLogView, TraceDetail, TraceSummary } from "../lib/types";
 import {
@@ -183,6 +184,8 @@ function DetailView({
   // retrying (see design decision in plan).
   const [metrics, setMetrics] = useState<RequestLogView | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(true);
+  // Favorite modal: content prefilled from this trace row's messages.
+  const [favoriteOpen, setFavoriteOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -235,6 +238,9 @@ function DetailView({
         <span className="text-sm text-muted-foreground">{detail.model_requested}</span>
         <span className="font-mono text-xs text-muted-foreground">{shortId(detail.request_id, 18)}</span>
         <div className="ml-auto flex gap-2">
+          <Button size="sm" variant="outline" onClick={() => setFavoriteOpen(true)}>
+            收藏
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -271,6 +277,18 @@ function DetailView({
           </pre>
         )}
       </div>
+
+      {/* Favorite: prefill the messages JSON + provenance for this trace row */}
+      <PromptFormModal
+        open={favoriteOpen}
+        onClose={() => setFavoriteOpen(false)}
+        onSaved={() => setFavoriteOpen(false)}
+        initial={{
+          content: JSON.stringify(detail.messages, null, 2),
+          session_id: detail.session_id,
+          source_trace_row_id: detail.id,
+        }}
+      />
     </div>
   );
 }

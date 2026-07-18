@@ -20,9 +20,16 @@ import (
 )
 
 func runMain(d runMainDeps) {
+	// The port was pre-bound in Main; a conflict is fatal here but friendly:
+	// CLI users read stderr, so the assembled guidance (占用进程自查 + 改配置)
+	// is printed verbatim instead of a bare "address already in use".
+	if d.listenErr != nil {
+		log.Fatalf("startup failed:\n%v", d.listenErr)
+	}
+
 	go func() {
 		log.Printf("desktop gateway listening on %s", d.gatewayAddr)
-		if err := d.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := d.srv.Serve(d.listener); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("serve: %v", err)
 		}
 	}()

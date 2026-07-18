@@ -15,35 +15,50 @@ package desktopapi
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	desktopcfg "voxeltoad/cmd/desktop/config"
 	"voxeltoad/internal/app"
 	"voxeltoad/internal/config"
+	"voxeltoad/internal/desktoplog"
 	"voxeltoad/internal/desktopstore"
 )
 
 // Server wires the read endpoints + config CRUD. The configPath + watcher are
 // nil-safe: when zero, config endpoints return 503 (desktop started without a
-// writable config, e.g. in some tests). Read endpoints always work.
+// writable config, e.g. in some tests). Read endpoints always work. The logs
+// ring, key state and key store are likewise optional: nil disables their
+// endpoints (503).
 type Server struct {
 	repo       *desktopstore.QueryRepo
+	prompts    *desktopstore.PromptRepo
 	configPath string
 	watcher    *app.DispatcherWatcher
+	logs       *desktoplog.Ring
+	keyState   *KeyState
+	keys       *desktopstore.KeyStore
 }
 
 // New builds the read API server over the given SQLite connection. configPath
 // and watcher enable the /api/v1/{providers,models,routes} CRUD endpoints with
-// hot-reload; pass empty/nil to disable them (read-only mode).
-func New(db *desktopstore.DB, configPath string, watcher *app.DispatcherWatcher) *Server {
+// hot-reload; pass empty/nil to disable them (read-only mode). logs is the
+// process log ring for /api/v1/logs; keyState+keys back the API-key
+// endpoints; nil disables them.
+func New(db *desktopstore.DB, configPath string, watcher *app.DispatcherWatcher, logs *desktoplog.Ring, keyState *KeyState) *Server {
 	return &Server{
 		repo:       desktopstore.NewQueryRepo(db),
+		prompts:    desktopstore.NewPromptRepo(db),
 		configPath: configPath,
 		watcher:    watcher,
+		logs:       logs,
+		keyState:   keyState,
+		keys:       desktopstore.NewKeyStore(db),
 	}
 }
 
@@ -60,6 +75,19 @@ func (s *Server) Handler() http.Handler {
 	// (e.g. "NODE/abc-000001"), so a single-segment wildcard would 404. The
 	// "..." multi-segment wildcard (Go 1.22+) captures the full remainder.
 	mux.HandleFunc("GET /api/v1/trace/requests/{request_id...}", s.handleTraceByRequestID)
+	mux.HandleFunc("GET /api/v1/logs", s.handleLogs)
+	mux.HandleFunc("GET /api/v1/apikey", s.handleGetAPIKey)
+	mux.HandleFunc("POST /api/v1/apikey/rotate", s.handleRotateAPIKey)
+	// Playground needs only the dispatcher (works even in read-only mode when
+	// one was injected); the handler nil-guards it.
+	mux.HandleFunc("POST /api/v1/playground/chat", s.handlePlaygroundChat)
+
+	// Prompt favorites (design/desktop.md §10.3-7) — store-backed, always on.
+	mux.HandleFunc("GET /api/v1/prompts", s.handleListPrompts)
+	mux.HandleFunc("POST /api/v1/prompts", s.handleCreatePrompt)
+	mux.HandleFunc("GET /api/v1/prompts/{id}", s.handleGetPrompt)
+	mux.HandleFunc("PUT /api/v1/prompts/{id}", s.handleUpdatePrompt)
+	mux.HandleFunc("DELETE /api/v1/prompts/{id}", s.handleDeletePrompt)
 
 	// Config CRUD (providers / models / routes) + manual reload. Disabled when
 	// the server was built without a configPath/watcher (read-only mode).
@@ -83,6 +111,9 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("DELETE /api/v1/routes/{alias}", s.handleDeleteRoute)
 
 		mux.HandleFunc("POST /api/v1/config/reload", s.handleReload)
+
+		mux.HandleFunc("GET /api/v1/settings", s.handleGetSettings)
+		mux.HandleFunc("PUT /api/v1/settings", s.handlePutSettings)
 	}
 	return mux
 }
@@ -205,6 +236,17 @@ func (s *Server) handleTraceByRequestID(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, d)
 }
 
+// handleLogs serves the process log ring for the UI log viewer: the newest
+// `tail` lines, oldest first (the page renders newest-first itself).
+func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	if s.logs == nil {
+		writeError(w, http.StatusServiceUnavailable, "logs not available")
+		return
+	}
+	tail := clampInt(firstQuery(r.URL.Query(), "tail"), 1, maxLogTail, defaultLogTail)
+	writeJSON(w, http.StatusOK, map[string]any{"lines": s.logs.Tail(tail)})
+}
+
 // ---------------------------------------------------------------------------
 // response helpers + param parsers
 // ---------------------------------------------------------------------------
@@ -237,6 +279,8 @@ const (
 	maxPage         = 500
 	defaultLimit    = 50
 	maxLimit        = 500
+	defaultLogTail  = 500
+	maxLogTail      = 2000
 )
 
 func parsePage(q map[string][]string) int {
@@ -367,13 +411,18 @@ func (s *Server) loadConfig(w http.ResponseWriter) *config.Dynamic {
 
 // saveConfigAndReload is the post-write path shared by every POST/PUT/DELETE:
 // bump version (so DispatcherWatcher.rebuild sees a change) -> atomic write ->
-// rebuild dispatcher (force). Rebuild failure is logged but NOT returned as an
-// error: the file is already updated, and keeping the last-good dispatcher is
-// the documented behavior (watcher.go:71-73). The API returns 200 with a
-// warning field so the UI can surface "saved but live-reload failed".
-func (s *Server) saveConfigAndReload(w http.ResponseWriter, dyn *config.Dynamic) (warning string, ok bool) {
+// rebuild dispatcher (force). The write goes through SaveFile: a nil gateway
+// override preserves the bootstrap `gateway:` section (listen addr + session
+// headers, not modeled by config.Dynamic) as-is, while a non-nil override
+// replaces it (settings-editor path) — dropping the section would silently
+// move the gateway back to :8080 on the next restart. Rebuild failure is
+// logged but NOT returned as an error: the file is already updated, and
+// keeping the last-good dispatcher is the documented behavior
+// (watcher.go:71-73). The API returns 200 with a warning field so the UI can
+// surface "saved but live-reload failed".
+func (s *Server) saveConfigAndReload(w http.ResponseWriter, dyn *config.Dynamic, gateway *desktopcfg.GatewaySection) (warning string, ok bool) {
 	dyn.Version = "desktop-" + time.Now().UTC().Format("20060102-150405.000")
-	if err := desktopcfg.Save(s.configPath, dyn); err != nil {
+	if err := desktopcfg.SaveFile(s.configPath, dyn, gateway); err != nil {
 		writeError(w, http.StatusInternalServerError, "write config: "+err.Error())
 		return "", false
 	}
@@ -439,7 +488,7 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	dyn.Providers = append(dyn.Providers, p)
-	if warn, ok := s.saveConfigAndReload(w, dyn); ok {
+	if warn, ok := s.saveConfigAndReload(w, dyn, nil); ok {
 		writeJSON(w, http.StatusCreated, envelope{Data: p, Warning: warn})
 	}
 }
@@ -471,7 +520,7 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 	// Name in URL wins (renames via PUT are rejected to avoid breaking model/route refs).
 	p.Name = name
 	dyn.Providers[idx] = p
-	if warn, ok := s.saveConfigAndReload(w, dyn); ok {
+	if warn, ok := s.saveConfigAndReload(w, dyn, nil); ok {
 		writeJSON(w, http.StatusOK, envelope{Data: p, Warning: warn})
 	}
 }
@@ -514,7 +563,7 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dyn.Providers = append(dyn.Providers[:idx], dyn.Providers[idx+1:]...)
-	if warn, ok := s.saveConfigAndReload(w, dyn); ok {
+	if warn, ok := s.saveConfigAndReload(w, dyn, nil); ok {
 		writeJSON(w, http.StatusOK, envelope{Warning: warn})
 	}
 }
@@ -577,7 +626,7 @@ func (s *Server) handleCreateModel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	dyn.Models = append(dyn.Models, m)
-	if warn, ok := s.saveConfigAndReload(w, dyn); ok {
+	if warn, ok := s.saveConfigAndReload(w, dyn, nil); ok {
 		writeJSON(w, http.StatusCreated, envelope{Data: m, Warning: warn})
 	}
 }
@@ -612,7 +661,7 @@ func (s *Server) handleUpdateModel(w http.ResponseWriter, r *http.Request) {
 	}
 	m.Alias = alias
 	dyn.Models[idx] = m
-	if warn, ok := s.saveConfigAndReload(w, dyn); ok {
+	if warn, ok := s.saveConfigAndReload(w, dyn, nil); ok {
 		writeJSON(w, http.StatusOK, envelope{Data: m, Warning: warn})
 	}
 }
@@ -645,7 +694,7 @@ func (s *Server) handleDeleteModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dyn.Models = append(dyn.Models[:idx], dyn.Models[idx+1:]...)
-	if warn, ok := s.saveConfigAndReload(w, dyn); ok {
+	if warn, ok := s.saveConfigAndReload(w, dyn, nil); ok {
 		writeJSON(w, http.StatusOK, envelope{Warning: warn})
 	}
 }
@@ -731,7 +780,7 @@ func (s *Server) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	dyn.Routes = append(dyn.Routes, rt)
-	if warn, ok := s.saveConfigAndReload(w, dyn); ok {
+	if warn, ok := s.saveConfigAndReload(w, dyn, nil); ok {
 		writeJSON(w, http.StatusCreated, envelope{Data: rt, Warning: warn})
 	}
 }
@@ -766,7 +815,7 @@ func (s *Server) handleUpdateRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	rt.ModelAlias = alias
 	dyn.Routes[idx] = rt
-	if warn, ok := s.saveConfigAndReload(w, dyn); ok {
+	if warn, ok := s.saveConfigAndReload(w, dyn, nil); ok {
 		writeJSON(w, http.StatusOK, envelope{Data: rt, Warning: warn})
 	}
 }
@@ -792,7 +841,7 @@ func (s *Server) handleDeleteRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dyn.Routes = append(dyn.Routes[:idx], dyn.Routes[idx+1:]...)
-	if warn, ok := s.saveConfigAndReload(w, dyn); ok {
+	if warn, ok := s.saveConfigAndReload(w, dyn, nil); ok {
 		writeJSON(w, http.StatusOK, envelope{Warning: warn})
 	}
 }
@@ -828,6 +877,112 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{Data: map[string]string{"status": "reloaded"}})
+}
+
+// --- gateway settings (settings page) ---
+
+// settingsView is the GET/PUT payload for /api/v1/settings: the editable
+// subset of the desktop YAML — bootstrap gateway section (listen addr +
+// session headers, restart-applied) plus the hot-reloadable trace capture
+// knobs.
+type settingsView struct {
+	Gateway gatewaySettingsView `json:"gateway"`
+	Trace   traceSettingsView   `json:"trace"`
+}
+
+type gatewaySettingsView struct {
+	Addr           string   `json:"addr"`
+	SessionHeaders []string `json:"session_headers"`
+}
+
+type traceSettingsView struct {
+	CapturePayloadEnabled bool `json:"capture_payload_enabled"`
+	MaxBodyKB             int  `json:"max_body_kb"`
+	RetentionDays         int  `json:"retention_days"`
+}
+
+func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
+	if s.configDisabled(w) {
+		return
+	}
+	dyn := s.loadConfig(w)
+	if dyn == nil {
+		return
+	}
+	gw, err := desktopcfg.LoadGatewaySection(s.configPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "read gateway section: "+err.Error())
+		return
+	}
+	v := settingsView{Gateway: gatewaySettingsView{Addr: gw.Addr, SessionHeaders: gw.SessionHeaders}}
+	if dyn.Settings != nil {
+		v.Trace = traceSettingsView{
+			CapturePayloadEnabled: dyn.Settings.Trace.CapturePayloadEnabled,
+			MaxBodyKB:             dyn.Settings.Trace.MaxBodyKB,
+			RetentionDays:         dyn.Settings.Trace.RetentionDays,
+		}
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
+	if s.configDisabled(w) {
+		return
+	}
+	var v settingsView
+	if !readJSON(w, r, &v) {
+		return
+	}
+	if err := validateSettings(v); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	dyn := s.loadConfig(w)
+	if dyn == nil {
+		return
+	}
+	dyn.Settings = &config.GatewaySettings{
+		Trace: config.TraceSettings{
+			CapturePayloadEnabled: v.Trace.CapturePayloadEnabled,
+			MaxBodyKB:             v.Trace.MaxBodyKB,
+			RetentionDays:         v.Trace.RetentionDays,
+		},
+	}
+	gw := &desktopcfg.GatewaySection{Addr: v.Gateway.Addr, SessionHeaders: v.Gateway.SessionHeaders}
+	// The trace knobs hot-apply via the dispatcher rebuild below; addr and
+	// session headers are bootstrap-only and land on the next process start.
+	// Say so in the warning so the UI can set expectations honestly.
+	if warn, ok := s.saveConfigAndReload(w, dyn, gw); ok {
+		msg := "trace 设置已即时生效；监听地址与会话头将在重启后生效"
+		if warn != "" {
+			msg = warn + "；" + msg
+		}
+		writeJSON(w, http.StatusOK, envelope{Data: v, Warning: msg})
+	}
+}
+
+// validateSettings enforces the minimal invariants that keep the gateway
+// bootable: a parseable host:port listen address, well-formed session header
+// names, and non-negative trace knobs.
+func validateSettings(v settingsView) error {
+	if v.Gateway.Addr == "" {
+		return errStr("gateway.addr is required")
+	}
+	if _, port, err := net.SplitHostPort(v.Gateway.Addr); err != nil || port == "" {
+		return errStr("gateway.addr must be host:port (e.g. 127.0.0.1:8787)")
+	}
+	for _, h := range v.Gateway.SessionHeaders {
+		if h == "" || strings.ContainsAny(h, " \t\r\n:") {
+			return errStr("session header names must be non-empty and contain no whitespace or colon")
+		}
+	}
+	if v.Trace.MaxBodyKB < 0 {
+		return errStr("trace.max_body_kb must be >= 0")
+	}
+	if v.Trace.RetentionDays < 0 {
+		return errStr("trace.retention_days must be >= 0")
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ package observability
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"os"
 
@@ -59,18 +60,38 @@ type Provider struct {
 	Enabled     bool
 }
 
+// logOutputOverride, when set via SetLogOutput, replaces os.Stdout as the
+// Logger() destination. Nil (the default) means "current os.Stdout", resolved
+// at each Logger() call — tests that swap os.Stdout to capture output keep
+// working.
+var logOutputOverride io.Writer
+
+// SetLogOutput redirects Logger() output (access logs, upstream-error lines)
+// to w; nil resets to the stdout default. Callers must set it once at process
+// startup, before serving begins — it is a plain package variable with no
+// synchronization. Production binaries never call it and keep the stdout
+// default; the desktop gateway uses it to tee logs into its UI-visible ring
+// buffer + log file.
+func SetLogOutput(w io.Writer) {
+	logOutputOverride = w
+}
+
 // Logger returns the process-wide structured logger. Format and level are
 // controlled by GATEWAY_LOG_FORMAT (text/json) and GATEWAY_LOG_LEVEL
 // (debug/info/warn/error); defaults are json + info. Never logs
 // prompt/completion bodies (see design/observability.md).
 func Logger() *slog.Logger {
+	out := io.Writer(os.Stdout)
+	if logOutputOverride != nil {
+		out = logOutputOverride
+	}
 	cfg := LogConfigFromEnv()
 	opts := &slog.HandlerOptions{Level: cfg.Level}
 	var h slog.Handler
 	if cfg.Format == "text" {
-		h = slog.NewTextHandler(os.Stdout, opts)
+		h = slog.NewTextHandler(out, opts)
 	} else {
-		h = slog.NewJSONHandler(os.Stdout, opts)
+		h = slog.NewJSONHandler(out, opts)
 	}
 	return slog.New(h)
 }

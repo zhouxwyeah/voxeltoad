@@ -30,9 +30,12 @@ func runMain(d runMainDeps) {
 
 	desktopApp := &app.App{
 		HTTPServer: d.srv,
+		Listener:   d.listener,
+		ListenErr:  d.listenErr,
 		GatewayURL: fmt.Sprintf("http://%s", d.gatewayAddr),
 		OnReload:   d.onReload,
 		CfgPath:    d.cfgPath,
+		KeyState:   d.keyState,
 	}
 	if err := desktopApp.Run(); err != nil {
 		log.Fatalf("desktop app: %v", err)

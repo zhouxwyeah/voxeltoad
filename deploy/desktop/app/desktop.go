@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -17,6 +19,8 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+
+	"voxeltoad/internal/desktopapi"
 )
 
 // App is the Wails application context — the bridge between cmd/desktop/main.go's
@@ -31,9 +35,22 @@ import (
 // directly at http://127.0.0.1:<port>/v1 — they never touch the webview.
 type App struct {
 	HTTPServer *http.Server
+	// Listener is the gateway port pre-bound by desktopapp.Main (the bind
+	// doubles as the port-conflict probe). ListenErr carries the failure when
+	// the pre-bind failed; in that case no HTTP server is started and the user
+	// gets a native dialog with remediation steps instead of a silent crash.
+	Listener  net.Listener
+	ListenErr error
+
 	GatewayURL string // e.g. "http://127.0.0.1:8787" — for the AssetServer reverse proxy
 	OnReload   func() error
 	CfgPath    string // for the "Open config folder" menu item
+	// KeyState is shared with the read API: it holds the current plaintext
+	// key so the "复制 API key" menu item copies the REAL key (it previously
+	// copied a hardcoded constant that went stale on env override or
+	// rotation). known=false after a restart with a rotated key — the menu
+	// item then explains instead of copying something wrong.
+	KeyState *desktopapi.KeyState
 
 	ctx context.Context
 }
@@ -67,6 +84,18 @@ func (a *App) Run() error {
 		MinWidth:          900,
 		MinHeight:         600,
 		HideWindowOnClose: true, // dock close button → hide (keeps HTTP server alive for Agents)
+		// Single instance: double-clicking the .app while it is already running
+		// (possibly hidden to the dock) must not start a second gateway — the
+		// pre-bound port would fail anyway. Focus the existing window instead.
+		SingleInstanceLock: &options.SingleInstanceLock{
+			UniqueId: "dev.voxeltoad.desktop",
+			OnSecondInstanceLaunch: func(_ options.SecondInstanceData) {
+				if a.ctx != nil {
+					wailsruntime.WindowUnminimise(a.ctx)
+					wailsruntime.WindowShow(a.ctx)
+				}
+			},
+		},
 		AssetServer: &assetserver.Options{
 			Assets:  assetsFS,
 			Handler: http.HandlerFunc(proxyHandler(proxy)),
@@ -101,13 +130,31 @@ func proxyHandler(proxy *httputil.ReverseProxy) func(http.ResponseWriter, *http.
 
 func (a *App) onStartup(ctx context.Context) {
 	a.ctx = ctx
+	// Port pre-bind failed in Main (e.g. a leftover process or another app on
+	// the port). A GUI user would never see a stderr log.Fatalf, so surface
+	// the assembled remediation steps in a native dialog and quit cleanly.
+	if a.ListenErr != nil {
+		_, _ = wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
+			Type:    wailsruntime.ErrorDialog,
+			Title:   "无法启动桌面网关",
+			Message: a.ListenErr.Error(),
+		})
+		wailsruntime.Quit(ctx)
+		return
+	}
 	// Start the HTTP server in a goroutine. Wails owns the main thread (wails.Run
 	// blocks on it); the server handles Agent traffic + the webview's proxied
 	// /api/v1 + /v1 requests concurrently.
 	go func() {
 		log.Printf("desktop gateway listening on %s", a.HTTPServer.Addr)
-		if err := a.HTTPServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("serve: %v", err)
+		if err := a.HTTPServer.Serve(a.Listener); err != nil && err != http.ErrServerClosed {
+			log.Printf("serve failed: %v", err)
+			_, _ = wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
+				Type:    wailsruntime.ErrorDialog,
+				Title:   "桌面网关服务异常退出",
+				Message: fmt.Sprintf("HTTP 服务已停止：%v\n\n应用即将退出。", err),
+			})
+			wailsruntime.Quit(ctx)
 		}
 	}()
 }
@@ -158,9 +205,24 @@ func (a *App) nativeMenu() *menu.Menu {
 		a.openConfigFolder()
 	})
 	viewMenu.AddText("复制 API key", keys.CmdOrCtrl("shift+k"), func(_ *menu.CallbackData) {
-		if a.ctx != nil {
-			_ = wailsruntime.ClipboardSetText(a.ctx, "desktop-local-default-key")
+		if a.ctx == nil {
+			return
 		}
+		if a.KeyState == nil {
+			return
+		}
+		if plaintext, known := a.KeyState.Get(); known {
+			_ = wailsruntime.ClipboardSetText(a.ctx, plaintext)
+			return
+		}
+		// The key was rotated and the process restarted since — the plaintext
+		// is unrecoverable from the stored hash. Point the user at the rotate
+		// flow instead of copying a wrong/empty value.
+		_, _ = wailsruntime.MessageDialog(a.ctx, wailsruntime.MessageDialogOptions{
+			Type:    wailsruntime.InfoDialog,
+			Title:   "API key 未知",
+			Message: "当前密钥是轮换后重启的，明文已不可恢复。\n如需新密钥，请在 设置 → API 密钥 中再次轮换（旧密钥将失效）。",
+		})
 	})
 
 	customView := &menu.MenuItem{

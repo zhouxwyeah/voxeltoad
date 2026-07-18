@@ -152,7 +152,7 @@ func startDesktopGateway(t *testing.T) (gatewayURL, apiKey string, cleanup func(
 		proxy.WithAccessLog(),
 	)
 
-	apiHandler := desktopapi.New(db, "", nil).Handler()
+	apiHandler := desktopapi.New(db, "", nil, nil, nil).Handler()
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/", apiHandler)
 	mux.Handle("/v1/", proxyRouter)

@@ -24,8 +24,9 @@ type DB struct {
 }
 
 // Open opens (or creates) the SQLite database at the given file path and runs
-// schema migration for the three desktop tables. WAL is enabled for
-// reader/writer concurrency on a personal-scale workload.
+// schema migration for the desktop tables (api_keys, request_logs,
+// trace_payloads, prompt_templates). WAL is enabled for reader/writer
+// concurrency on a personal-scale workload.
 func Open(path string) (*DB, error) {
 	gdb, err := gorm.Open(sqlite.Open(path), &gorm.Config{
 		Logger:                 logger.Default.LogMode(logger.Silent),
@@ -51,7 +52,7 @@ func Open(path string) (*DB, error) {
 			return nil, err
 		}
 	}
-	if err := gdb.AutoMigrate(&APIKeyRow{}, &RequestLogRow{}, &TracePayloadRow{}); err != nil {
+	if err := gdb.AutoMigrate(&APIKeyRow{}, &RequestLogRow{}, &TracePayloadRow{}, &PromptTemplateRow{}); err != nil {
 		return nil, err
 	}
 	return &DB{gdb}, nil

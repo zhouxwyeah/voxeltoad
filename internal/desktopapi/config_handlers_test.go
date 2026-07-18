@@ -76,7 +76,7 @@ settings:
 		t.Fatalf("initial dispatcher build: %v", err)
 	}
 
-	srv := New(db, cfgPath, watcher)
+	srv := New(db, cfgPath, watcher, nil, nil)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, cfgPath
@@ -192,6 +192,33 @@ func TestProviders_DeleteReferenceCheck(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "referenced by model") {
 		t.Errorf("409 body should explain reference: %s", b)
+	}
+}
+
+// A config write via the HTTP API must preserve the bootstrap gateway:
+// section (listen addr + session headers) — config.Dynamic does not model it,
+// and dropping it would move the gateway back to :8080 on the next restart.
+func TestConfigWrite_PreservesGatewaySection(t *testing.T) {
+	ts, cfgPath := newConfigTestServer(t)
+
+	code, b := reqBody(t, "POST", ts.URL, "/api/v1/providers", map[string]any{
+		"name": "p2", "type": "openai", "adapter": "openai",
+		"base_url": "http://127.0.0.1:2", "api_key_ref": "plain://k2", "weight": 1,
+		"timeouts": map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
+	})
+	if code != 201 {
+		t.Fatalf("create p2: %d %s", code, b)
+	}
+
+	gw, err := desktopcfg.LoadGatewaySection(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadGatewaySection: %v", err)
+	}
+	if gw.Addr != "127.0.0.1:9999" {
+		t.Errorf("gateway.addr = %q, want 127.0.0.1:9999 (dropped by config write?)", gw.Addr)
+	}
+	if len(gw.SessionHeaders) != 1 || gw.SessionHeaders[0] != "X-Voxeltoad-Session" {
+		t.Errorf("session_headers = %v, want [X-Voxeltoad-Session]", gw.SessionHeaders)
 	}
 }
 
@@ -357,5 +384,80 @@ func TestConfig_HotReloadNewProviderUsable(t *testing.T) {
 	code, _ = reqBody(t, "POST", ts.URL, "/api/v1/config/reload", nil)
 	if code != 200 {
 		t.Errorf("post-CRUD reload: %d, want 200", code)
+	}
+}
+
+// --- settings ---
+
+func TestSettings_GetAndPut(t *testing.T) {
+	ts, cfgPath := newConfigTestServer(t)
+
+	// GET returns the seeded gateway section + trace settings.
+	code, b := getBody(t, ts, "/api/v1/settings")
+	if code != 200 {
+		t.Fatalf("GET settings: %d %s", code, b)
+	}
+	if !strings.Contains(string(b), `"addr":"127.0.0.1:9999"`) {
+		t.Errorf("GET settings missing seeded addr: %s", b)
+	}
+	if !strings.Contains(string(b), `"retention_days":7`) {
+		t.Errorf("GET settings missing seeded retention_days: %s", b)
+	}
+
+	// PUT swaps both sections; trace lands in settings, gateway in the
+	// bootstrap section.
+	code, b = reqBody(t, "PUT", ts.URL, "/api/v1/settings", map[string]any{
+		"gateway": map[string]any{"addr": "127.0.0.1:18888", "session_headers": []string{"X-New-Session"}},
+		"trace":   map[string]any{"capture_payload_enabled": false, "max_body_kb": 128, "retention_days": 14},
+	})
+	if code != 200 {
+		t.Fatalf("PUT settings: %d %s", code, b)
+	}
+	if !strings.Contains(string(b), "重启后生效") {
+		t.Errorf("PUT warning should mention restart-applied fields: %s", b)
+	}
+
+	// On disk: gateway section replaced, not dropped.
+	gw, err := desktopcfg.LoadGatewaySection(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadGatewaySection: %v", err)
+	}
+	if gw.Addr != "127.0.0.1:18888" || len(gw.SessionHeaders) != 1 || gw.SessionHeaders[0] != "X-New-Session" {
+		t.Errorf("gateway section = %+v, want addr 127.0.0.1:18888 headers [X-New-Session]", gw)
+	}
+	dyn, err := desktopcfg.LoadFromFile(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadFromFile: %v", err)
+	}
+	if dyn.Settings == nil || dyn.Settings.Trace.RetentionDays != 14 || dyn.Settings.Trace.MaxBodyKB != 128 {
+		t.Errorf("trace settings = %+v, want max_body_kb 128 retention 14", dyn.Settings)
+	}
+	// Providers survived the settings write.
+	if len(dyn.Providers) != 1 || dyn.Providers[0].Name != "p1" {
+		t.Errorf("providers clobbered by settings write: %+v", dyn.Providers)
+	}
+
+	// GET reflects the new values.
+	code, b = getBody(t, ts, "/api/v1/settings")
+	if code != 200 || !strings.Contains(string(b), `"addr":"127.0.0.1:18888"`) {
+		t.Errorf("GET after PUT: %d %s", code, b)
+	}
+}
+
+func TestSettings_PutValidation(t *testing.T) {
+	ts, _ := newConfigTestServer(t)
+
+	cases := []map[string]any{
+		{"gateway": map[string]any{"addr": ""}, "trace": map[string]any{}},
+		{"gateway": map[string]any{"addr": "not-a-hostport"}, "trace": map[string]any{}},
+		{"gateway": map[string]any{"addr": "127.0.0.1:1", "session_headers": []string{"bad header"}}, "trace": map[string]any{}},
+		{"gateway": map[string]any{"addr": "127.0.0.1:1"}, "trace": map[string]any{"max_body_kb": -1}},
+		{"gateway": map[string]any{"addr": "127.0.0.1:1"}, "trace": map[string]any{"retention_days": -5}},
+	}
+	for i, body := range cases {
+		code, b := reqBody(t, "PUT", ts.URL, "/api/v1/settings", body)
+		if code != 400 {
+			t.Errorf("case %d: code = %d %s, want 400", i, code, b)
+		}
 	}
 }

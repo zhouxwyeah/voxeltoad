@@ -161,14 +161,18 @@ APIKey (实体, KeyStore, 仅种子 1 个默认)
 | `TIMESTAMPTZ` | `DATETIME` / `INTEGER`(unix) |
 | `$1` 占位符 | `?` 占位符 |
 
-### 6.3 建表 SQL（桌面版，约 3 张表）
+### 6.3 建表 SQL（桌面版，4 张表）
 - `request_logs`：字段对齐 `RequestLog`（`internal/observability/requestlog.go:15`）—— tenant/group/api_key_id/provider/model_*/tokens/ttft/duration/error_type/blocked_by/fallback/cache_*/request_id/session_id/trace_id/upstream_request_id/session_source/agent_type/created_at。
 - `trace_payloads`：字段对齐 `TracePayload`（`tracepayload.go:22`）—— 关联 id 组 + summary(status_code/stop_reason/n_messages/n_tool_use) + messages/request_raw(JSON TEXT)/response_raw/error_raw(TEXT)。
 - `api_keys`：字段对齐 `migrations/00001_initial_schema.sql:77` —— key_id/hash(CHAR64)/tenant_id/group_id/expires_at/allowed_models(TEXT JSON)/revoked_at。桌面仅 1 行种子。
+- `prompt_templates`（§10.3-7 prompt 收藏，已落地）：title/content(TEXT)/tags(JSON TEXT)/session_id/source_trace_row_id/note/timestamps。
 - 索引：`(session_id, created_at)`、`(agent_type, created_at)`（对应企业版 `(tenant, created_at)` 索引语义）。
 
-### 6.4 留存
-个人量级，简单策略：配置保留天数（默认 30 天），定时 `DELETE` 或文件大小封顶。无需 partition-DROP。
+### 6.4 留存（已落地）
+个人量级，简单策略：保留天数（默认 30 天，读热加载 `settings.trace.retention_days`），定时 `DELETE`，无需 partition-DROP。实现：`internal/desktopstore/retention.go` 提供 `DeleteRequestLogsBefore`/`DeleteTracePayloadsBefore` + `wal_checkpoint(TRUNCATE)`；`internal/desktopapp/retention.go` 的 sweeper 启动即跑 + 每 24h，两表同一窗口（保证会话列表与 trace 一致），失败仅告警。
+
+### 6.5 文件位置（已落地）
+默认数据目录为 `~/.voxeltoad/`（`desktop.yaml` + `desktop.db`），日志在 `~/.voxeltoad/logs/desktop.log`（启动时 >10MB 单代轮转）。`-config`/`-db` flag 与 `DESKTOP_CONFIG`/`DESKTOP_DB` env 显式指定时优先（dev/冒烟脚本依赖）。首次以默认路径启动时自动把 cwd 时代的 `./desktop.yaml`、`./desktop.db{,-wal,-shm}` 迁移过去（目标已存在则不覆盖）。原 cwd 默认值对双击启动的 .app 不可靠（cwd 由 LaunchServices 决定）。
 
 ---
 
@@ -178,7 +182,7 @@ APIKey (实体, KeyStore, 仅种子 1 个默认)
 
 **写路径(CRUD + 热重载)**:`internal/desktopapi` 暴露 `/api/v1/{providers,models,routes}` 的 CRUD(形状对齐 admin,但操作 YAML 文件而非 PG):
 1. 读 YAML → 修改内存 `config.Dynamic`(校验:provider 名唯一、model/route 引用的 provider 存在)
-2. `config.Save(path, dyn)` —— 原子写(temp file + rename)
+2. `config.SaveFile(path, dyn, gateway)` —— 原子写(temp file + rename),**保留 `gateway:` 引导段**(addr/session_headers 不在 `config.Dynamic` 内;早期版本直接丢该段,重启后静默回退 :8080,已修复)
 3. bump `dyn.Version`(让 watcher 看到变化)
 4. `watcher.Build()` —— atomic swap dispatcher,**无需重启**
 5. rebuild 失败 → 配置已落盘,dispatcher 保留 last-good,API 返回 200 + warning
@@ -236,6 +240,13 @@ APIKey (实体, KeyStore, 仅种子 1 个默认)
 - `GET/POST /api/v1/models` + `GET/PUT/DELETE /api/v1/models/{alias}`
 - `GET/POST /api/v1/routes` + `GET/PUT/DELETE /api/v1/routes/{alias}`
 - `POST /api/v1/config/reload` —— 手动强制重读 + rebuild(兜底)
+- `GET/PUT /api/v1/settings` —— 网关级设置(gateway.addr/session_headers 重启生效;trace 三项保存即热生效)
+
+**运行与工具端点**:
+- `GET /api/v1/logs?tail=N` —— 进程日志环形缓冲(运行日志页;stdlib + access log 经 `observability.SetLogOutput` tee 进 ring + 文件)
+- `GET /api/v1/apikey` / `POST /api/v1/apikey/rotate` —— 默认密钥查看/轮换(明文仅内存态可知,轮换即返回一次)
+- `POST /api/v1/playground/chat` —— 进程内走完整数据面链路的小请求(连通性测试页;不计入请求日志)
+- `GET/POST /api/v1/prompts` + `GET/PUT/DELETE /api/v1/prompts/{id}` —— prompt 收藏(§10.3-7)
 
 ### 10.3 核心页面
 1. **概览**:各 Agent 调用量/token/成本/延迟汇总。
@@ -244,7 +255,11 @@ APIKey (实体, KeyStore, 仅种子 1 个默认)
 4. **供应商**:表格(名称/类型/适配器/基础 URL)+ Modal 表单 CRUD,字段与 admin 完全一致(name/type 品牌预设+自定义/adapter/base_url/凭证方式 ref 或明文 key)。weight/timeouts 不在 UI 暴露——创建时写默认值(100 / 2s·5s·30s),编辑时保留原值(零值超时会让数据面失去保护);明文 key 以 `plain://` 存本地 YAML(桌面无加密凭证库)。
 5. **模型**:表格展示 alias + upstreams 行内 pill(provider · 上游模型 · 输入/输出价格 · cache %);Modal 表单字段与 admin 一致(描述/context_length/capabilities/tags + 动态 upstream 行:provider 下拉、上游模型、默认 max tokens、输入/输出价格(显示美元、提交转 micro)、缓存命中 %);币种硬编码 USD。
 6. **路由**:表格展示 model_alias + strategy pill + providers pill;Modal 表单与 admin 一致(model_alias 从现有模型下拉选择,strategy 含 priority/weighted/round_robin/session_affinity,候选 provider 按所选模型的 upstream 过滤,动态行权重)。
-7. **(可选 MVP 后)收藏/打标签好 prompt**:在存储加 `prompt_templates` 表,手动收藏。
+7. **收藏/打标签好 prompt(已落地)**:`prompt_templates` 表 + `/prompts` 列表页(搜索/标签筛选/复制/编辑/删除),Trace 查看器详情头部有「收藏」按钮(messages JSON 预填 + 来源会话/trace 行关联)。
+8. **请求日志(已落地)**:`/request-logs`—— 多维过滤(Agent/provider/model/error_type/session_id/request_id/日期) + 分页表格,对齐 admin request-logs(无 tenant/cost 列),session 链接跳 Trace。
+9. **运行日志(已落地)**:`/logs`—— 进程日志查看(3s 轮询、tail 档位、客户端关键字过滤),数据来自 ring buffer(完整历史在 logs/desktop.log)。
+10. **设置(已落地)**:`/settings`—— 网关监听(addr/session_headers,重启生效)+ Trace 采集(开关/上限/留存天数,保存即生效)+ API 密钥卡片(查看/复制/轮换,新明文仅展示一次)。
+11. **连通性测试(已落地)**:`/playground`—— 选模型发小请求,展示响应/耗时/命中供应商/token 用量,上游错误原样展示。
 
 > **UI 对齐原则(2026-07)**:desktop-ui 的布局、表格、表单字段、按钮变体、Modal 结构全面镜像 admin web(`web/`),唯一事实来源是 `design/design-system.md` + `web/src`。有意的偏差仅四处:不显示 cost 列(桌面不跑计费)、provider 的 weight/timeouts 隐藏但随提交保留、明文凭证映射 `plain://`、品牌名「桌面网关助手」+ zh-CN 单语言。
 
@@ -336,6 +351,6 @@ APIKey (实体, KeyStore, 仅种子 1 个默认)
 
 **Phase 2 — 读 API + 基础 UI**：`server/server.go` 轻量读 API + Vite SPA 壳 + 概览页 / Session 浏览器 / Trace 查看器（复制 prompt）。这是"看 Agent 行为 + 学提示词"价值的首次闭环。
 
-**Phase 3 — 打磨**：各 Agent 过滤、SessionSource 标记、留存策略、凭证文件保护、可选 prompt 收藏。
+**Phase 3 — 打磨**：各 Agent 过滤、SessionSource 标记（UI 已做）；留存策略、可选 prompt 收藏（本轮已落地，见 §6.4 / §10.3-7）；凭证文件保护（待做）。本轮另落地：gateway 段保留修复、端口预绑定 + 冲突对话框 + Wails 单实例锁、数据目录迁 `~/.voxeltoad`、请求日志页、运行日志页、设置页、API key 管理、连通性测试页。
 
 > 范围封顶：粒度 3（ML 归纳范式）明确不做；企业特性（RBAC/operator/billing/节点注册/配置版本历史）明确不做。

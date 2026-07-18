@@ -50,3 +50,21 @@ func (k *KeyStore) LookupByHash(ctx context.Context, hash string) (auth.KeyRecor
 		AllowedModels: allowed,
 	}, true, nil
 }
+
+// RotateDefaultKey replaces the stored hash of the seeded "default" key (the
+// desktop has exactly one key, design/desktop.md §8). Only the hash changes —
+// tenant/group/permissions stay. An error is returned when the default row is
+// missing (a state the seed step normally guarantees cannot happen).
+func (k *KeyStore) RotateDefaultKey(ctx context.Context, newHash string) error {
+	res := k.db.WithContext(ctx).
+		Model(&APIKeyRow{}).
+		Where("key_id = ?", "default").
+		Update("hash", newHash)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return errors.New("default api key row not found")
+	}
+	return nil
+}

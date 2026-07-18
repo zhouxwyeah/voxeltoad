@@ -1,12 +1,17 @@
 import type {
+  APIKeyView,
   ConfigWriteResult,
   Model,
   OffsetEnvelope,
   OverviewResult,
+  PlaygroundResult,
+  PromptPayload,
+  PromptTemplate,
   Provider,
   RequestLogView,
   Route,
   SessionSummary,
+  SettingsView,
   TraceDetail,
   TraceSummary,
 } from "./types";
@@ -84,6 +89,10 @@ export function getTraceByRequestID(requestId: string): Promise<TraceDetail> {
   return getJSON<TraceDetail>(`/trace/requests/${encodeURIComponent(requestId)}`);
 }
 
+export function getLogs(tail = 500): Promise<{ lines: string[] }> {
+  return getJSON<{ lines: string[] }>("/logs", { tail });
+}
+
 // --- config CRUD (providers / models / routes) + reload ---
 
 async function sendJSON<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -143,4 +152,42 @@ export function deleteRoute(alias: string): Promise<ConfigWriteResult> {
 
 export function reloadConfig(): Promise<ConfigWriteResult<{ status: string }>> {
   return sendJSON<ConfigWriteResult<{ status: string }>>("POST", "/config/reload");
+}
+
+export function getSettings(): Promise<SettingsView> {
+  return getJSON<SettingsView>("/settings");
+}
+export function updateSettings(s: SettingsView): Promise<ConfigWriteResult<SettingsView>> {
+  return sendJSON<ConfigWriteResult<SettingsView>>("PUT", "/settings", s);
+}
+
+export function getAPIKey(): Promise<APIKeyView> {
+  return getJSON<APIKeyView>("/apikey");
+}
+export function rotateAPIKey(): Promise<APIKeyView & { warning?: string }> {
+  return sendJSON<APIKeyView & { warning?: string }>("POST", "/apikey/rotate");
+}
+
+export function playgroundChat(model: string, prompt: string): Promise<PlaygroundResult> {
+  return sendJSON<PlaygroundResult>("POST", "/playground/chat", { model, prompt });
+}
+
+// --- prompt favorites ---
+
+export function listPrompts(opts: {
+  q?: string;
+  tag?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<OffsetEnvelope<PromptTemplate>> {
+  return getJSON<OffsetEnvelope<PromptTemplate>>("/prompts", opts);
+}
+export function createPrompt(p: PromptPayload): Promise<ConfigWriteResult<PromptTemplate>> {
+  return sendJSON<ConfigWriteResult<PromptTemplate>>("POST", "/prompts", p);
+}
+export function updatePrompt(id: number, p: PromptPayload): Promise<ConfigWriteResult<PromptTemplate>> {
+  return sendJSON<ConfigWriteResult<PromptTemplate>>("PUT", `/prompts/${id}`, p);
+}
+export function deletePrompt(id: number): Promise<ConfigWriteResult> {
+  return sendJSON<ConfigWriteResult>("DELETE", `/prompts/${id}`);
 }

@@ -11,6 +11,8 @@ const configItems = [
   { to: "/providers", label: "供应商", match: sectionMatch("/providers") },
   { to: "/models", label: "模型", match: sectionMatch("/models") },
   { to: "/routes", label: "路由", match: sectionMatch("/routes") },
+  { to: "/playground", label: "连通性测试", match: sectionMatch("/playground") },
+  { to: "/settings", label: "设置", match: sectionMatch("/settings") },
 ];
 
 const observeItems = [
@@ -21,6 +23,9 @@ const observeItems = [
     label: "会话浏览器",
     match: (p: string) => sectionMatch("/sessions")(p) || sectionMatch("/trace")(p),
   },
+  { to: "/request-logs", label: "请求日志", match: sectionMatch("/request-logs") },
+  { to: "/prompts", label: "Prompt 收藏", match: sectionMatch("/prompts") },
+  { to: "/logs", label: "运行日志", match: sectionMatch("/logs") },
 ];
 
 /** Section-root match: /providers and /providers/:anything both highlight. */
