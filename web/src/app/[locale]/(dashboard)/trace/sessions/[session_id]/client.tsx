@@ -1,9 +1,11 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui";
 import { microToDisplay } from "@/lib/money";
+import { formatDateTime } from "@/lib/datetime";
 import type { MetaRow, SessionStats, TraceRow } from "./page";
 import type { TraceDetail } from "./[req]/detail-client";
 import { fetchTraceDetailPair } from "./[req]/actions";
@@ -38,6 +40,7 @@ export function SessionDetailClient({
   cost?: number;
 }) {
   const t = useTranslations("trace");
+  const locale = useLocale();
 
   // Build the request list from trace rows (unique id), merging token/duration
   // metadata from request_logs by chronological index (both are ASC by created_at).
@@ -70,10 +73,12 @@ export function SessionDetailClient({
     }
   }
 
-  // Initial load on mount only.
+  // Initial load on mount only. Deferred a tick so loadSelected's
+  // setPanel({status:"loading"}) is not a synchronous setState in the effect.
   useEffect(() => {
     if (requests.length === 0 || !requests[0].rowID) return;
-    loadSelected(requests[0].rowID, 0);
+    const id = setTimeout(() => loadSelected(requests[0].rowID, 0), 0);
+    return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -89,7 +94,8 @@ export function SessionDetailClient({
   return (
     <>
       <Button href="/trace" variant="outline" size="sm">
-        ← {t("back")}
+        <ArrowLeft className="h-3.5 w-3.5" />
+        {t("back")}
       </Button>
 
       {/* Top stats bar */}
@@ -107,7 +113,7 @@ export function SessionDetailClient({
         <div>
           <span className="text-muted-foreground">{t("detail.statsBar.startedAt")}: </span>
           <span className="text-foreground">
-            {stats.started_at ? new Date(stats.started_at).toLocaleString() : "—"}
+            {formatDateTime(stats.started_at, locale)}
           </span>
         </div>
         <div>
@@ -163,7 +169,7 @@ export function SessionDetailClient({
                   <span
                     className={
                       ok
-                        ? "text-emerald-600 dark:text-emerald-400"
+                        ? "text-success"
                         : r.status
                           ? "text-destructive"
                           : "text-muted-foreground"

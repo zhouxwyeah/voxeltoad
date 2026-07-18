@@ -12,13 +12,12 @@ import { ChevronDown, ChevronRight, Wrench } from "lucide-react";
  *
  *   section   (system / tools / messages / output)
  *     group     (carried-over / new — only under messages)
- *       role     (user / assistant / system / tool)
- *         msg     (one message: index + block chips)
- *           block   (text / img / tool_use / tool_result / thinking)
+ *       msg     (one message: index + block chips)
+ *         block   (text / img / tool_use / tool_result / thinking)
  *
  * Block chips are colored by type (text=blue, img=orange, thinking=purple,
  * tool_use=cyan, tool_result=green, unknown=gray). Tool names get distinct
- * colored labels (read_file/write_file/bash…). Roles get a colored left bar.
+ * colored labels (read_file/write_file/bash…).
  *
  * Data is always OpenAI-format (gateway only accepts OpenAI inbound; Claude
  * responses are re-encoded to OpenAI shape — ADR-0032).
@@ -32,11 +31,7 @@ export function TraceCategories({
   previous: TraceDetailLike | null;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const { systemMsgs, tools, carried, newUser, newAssistant, output } = analyze(
-    current,
-    previous,
-  );
-  const newMsgs = [...newUser, ...newAssistant];
+  const { systemMsgs, tools, carried, newMsgs, output } = analyze(current, previous);
   const totalMsgs = carried.length + newMsgs.length;
 
   if (systemMsgs.length === 0 && tools.length === 0 && totalMsgs === 0 && !output) {
@@ -67,15 +62,15 @@ export function TraceCategories({
         <Section label="messages" count={totalMsgs} t={t}>
           {carried.length > 0 && (
             <Group label="carried-over" count={carried.length} t={t}>
-              {groupMessagesByRole(carried).map((g) => (
-                <RoleGroup key={g.role} role={g.role} msgs={g.msgs} t={t} />
+              {carried.map((m, i) => (
+                <MessageNode key={i} index={i} msg={m} t={t} />
               ))}
             </Group>
           )}
           {newMsgs.length > 0 && (
             <Group label="new" count={newMsgs.length} t={t}>
-              {groupMessagesByRole(newMsgs).map((g) => (
-                <RoleGroup key={g.role} role={g.role} msgs={g.msgs} t={t} />
+              {newMsgs.map((m, i) => (
+                <MessageNode key={i} index={carried.length + i} msg={m} t={t} />
               ))}
             </Group>
           )}
@@ -122,47 +117,20 @@ function analyze(current: TraceDetailLike, previous: TraceDetailLike | null) {
   >[];
 
   const prefixLen = commonPrefixLength(curMsgs, prevMsgs);
-  const carried = curMsgs.slice(0, prefixLen);
   const turnMsgs = curMsgs.slice(prefixLen);
 
-  const systemMsgs: Record<string, unknown>[] = [];
-  const newUser: Record<string, unknown>[] = [];
-  const newAssistant: Record<string, unknown>[] = [];
-  for (const m of curMsgs) {
-    if (String(m.role ?? "") === "system") systemMsgs.push(m);
-  }
-  for (const m of turnMsgs) {
-    const role = String(m.role ?? "");
-    if (role === "system") continue;
-    if (role === "user") newUser.push(m);
-    else newAssistant.push(m);
-  }
+  // system messages are shown once in their own section at the top, so drop
+  // them from the carried/new groups to avoid duplication.
+  const carried = curMsgs
+    .slice(0, prefixLen)
+    .filter((m) => String(m.role ?? "") !== "system");
+  const newMsgs = turnMsgs.filter((m) => String(m.role ?? "") !== "system");
+  const systemMsgs = curMsgs.filter((m) => String(m.role ?? "") === "system");
 
   const tools = extractTools(current.request_raw);
   const output = parseOutput(current.response_raw);
 
-  return { systemMsgs, tools, carried, newUser, newAssistant, output };
-}
-
-function groupMessagesByRole(
-  msgs: Record<string, unknown>[],
-): { role: string; msgs: Record<string, unknown>[] }[] {
-  const order = ["user", "assistant", "system", "tool"];
-  const buckets = new Map<string, Record<string, unknown>[]>();
-  for (const m of msgs) {
-    const role = String(m.role ?? "assistant");
-    if (!buckets.has(role)) buckets.set(role, []);
-    buckets.get(role)!.push(m);
-  }
-  const result: { role: string; msgs: Record<string, unknown>[] }[] = [];
-  for (const role of order) {
-    const g = buckets.get(role);
-    if (g && g.length > 0) result.push({ role, msgs: g });
-  }
-  for (const [role, g] of buckets) {
-    if (!order.includes(role)) result.push({ role, msgs: g });
-  }
-  return result;
+  return { systemMsgs, tools, carried, newMsgs, output };
 }
 
 function signature(m: Record<string, unknown>): string {
@@ -377,42 +345,6 @@ function Group({
   );
 }
 
-function RoleGroup({
-  role,
-  msgs,
-  t,
-}: {
-  role: string;
-  msgs: Record<string, unknown>[];
-  t: ReturnType<typeof useTranslations>;
-}) {
-  const [open, setOpen] = useState(true);
-  return (
-    <div className={`ml-2 border-l pl-2 ${roleBarColor(role)}`}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 py-0.5 text-left text-xs font-semibold uppercase tracking-wide"
-      >
-        {open ? (
-          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-        )}
-        <span className={roleTextColor(role)}>{role}</span>
-        <span className="text-muted-foreground/70">· {msgs.length}</span>
-      </button>
-      {open && (
-        <div className="mt-0.5 flex flex-col gap-0.5">
-          {msgs.map((m, i) => (
-            <MessageNode key={i} index={i} msg={m} t={t} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function MessageNode({
   index,
   msg,
@@ -424,6 +356,7 @@ function MessageNode({
 }) {
   const [open, setOpen] = useState(false);
   const blocks = blocksOf(msg);
+  const role = String(msg.role ?? "");
 
   return (
     <div className="ml-2 border-l border-border/30 pl-2">
@@ -438,6 +371,11 @@ function MessageNode({
           <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
         )}
         <span className="text-muted-foreground/70">#{index + 1}</span>
+        {role && (
+          <span className={`font-semibold uppercase tracking-wide ${roleTextColor(role)}`}>
+            {role}
+          </span>
+        )}
         <span className="flex flex-wrap items-center gap-1">
           {blocks.map((b, i) => (
             <BlockChip key={i} block={b} />
@@ -813,21 +751,6 @@ function labelTitle(label: string, t: ReturnType<typeof useTranslations>): strin
       return t("messages.categories.output");
     default:
       return label;
-  }
-}
-
-function roleBarColor(role: string): string {
-  switch (role) {
-    case "user":
-      return "border-blue-300";
-    case "assistant":
-      return "border-emerald-300";
-    case "system":
-      return "border-amber-300";
-    case "tool":
-      return "border-purple-300";
-    default:
-      return "border-border";
   }
 }
 

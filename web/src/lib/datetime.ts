@@ -27,3 +27,26 @@ export function localDatetimeToRfc3339(value: string): string {
   if (Number.isNaN(d.getTime())) return "";
   return d.toISOString();
 }
+
+/**
+ * Format an RFC3339/ISO timestamp for DISPLAY, using an explicit locale so
+ * the SSR HTML and client hydration always match. Passing `locale` explicitly
+ * avoids the hydration mismatch caused by bare `new Date(x).toLocaleString()`,
+ * which falls back to the runtime default locale (Node vs browser differ).
+ *
+ * Mirrors `Intl.DateTimeFormat` defaults: date + time with seconds.
+ */
+export function formatDateTime(value: string, locale: string): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return new Intl.DateTimeFormat(locale, {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  }).format(d);
+}
