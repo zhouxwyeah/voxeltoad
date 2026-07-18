@@ -33,9 +33,14 @@ desktop-ui/src/wailsjs/
 desktop-ui/package.json.md5
 deploy/desktop/dist/
 deploy/desktop/build/bin/
+# wails build downloads the WebView2 bootstrapper into build/windows/installer/tmp/
+deploy/desktop/build/windows/installer/tmp/
 .codebuddy/
 
 # Desktop personal gateway runtime artifacts (root-level only)
 /desktop
 /desktop.yaml
+# wails build runs the binary in deploy/desktop/ as a side-effect of bindings
+# generation, which seeds this config file in the cwd. Never tracked.
+/deploy/desktop/desktop.yaml
 *.db

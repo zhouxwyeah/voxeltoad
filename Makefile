@@ -72,7 +72,13 @@ desktop-web-dev: ## Start Go gateway (:8787) + Vite dev server (:5173) for deskt
 	./scripts/desktop-web-dev.sh
 
 desktop-build: ## Build the macOS .app (requires Wails CLI: go install github.com/wailsapp/wails/v2/cmd/wails@latest)
-	./scripts/build-desktop.sh
+	./scripts/build-desktop.sh darwin
+
+desktop-build-windows: ## Build the Windows NSIS .exe (run on Windows; requires Wails CLI + NSIS: choco install nsis)
+	./scripts/build-desktop.sh windows
+
+desktop-build-windows-cross: ## Cross-compile Windows .exe from Linux/WSL2 (requires: sudo apt install mingw-w64 nsis)
+	./scripts/build-desktop.sh windows-cross
 
 # Guarded by the `adminstack` build tag so it stays out of the normal build/CI.
 # Serves the real admin.Router (login, config CRUD, tenants, api-keys, quotas,

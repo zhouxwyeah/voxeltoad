@@ -50,3 +50,4 @@ Produced and refined through `grill-with-docs` sessions.
 | [0040](0040-request-id-strategy.md) | Request ID strategy — client cooperation, non-uniqueness, upstream-id capture and isolation | Accepted |
 | [0041](0041-desktop-gateway-orthogonality.md) | Desktop personal gateway — same-repo, orthogonality argument, K1 seed-key auth | Accepted |
 | [0042](0042-windows-dev-environment-wsl2.md) | Windows 开发者官方环境 = WSL2（脚本保持 POSIX-only，CI 仅 Linux） | Accepted |
+| [0043](0043-windows-desktop-packaging.md) | Desktop Windows 打包 — Wails v2 NSIS + CI Windows runner（supersede ADR-0042 §3/§39 窄面） | Accepted |

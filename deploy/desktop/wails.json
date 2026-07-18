@@ -1,7 +1,7 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
   "name": "voxeltoad-desktop",
-  "outputfilename": "desktop-gateway",
+  "outputfilename": "voxeltoad-desktop",
   "frontend:dir": "../../desktop-ui",
   "frontend:install": "npm ci",
   "frontend:build": "npm run build",

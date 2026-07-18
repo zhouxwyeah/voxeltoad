@@ -65,3 +65,41 @@ jobs:
 
       - name: Run heavy CI (DB tests + Docker builds + vuln audit)
         run: make ci-heavy
+
+  # -------------------------------------------------------------------------
+  # Desktop Windows build: produces the NSIS .exe installer artifact. Runs
+  # only on push to main (same gate as ci-heavy) to avoid burning Windows
+  # minutes on every PR. Supersedes ADR-0042 §3 for the narrow surface of
+  # desktop packaging — `make ci` itself stays Linux-only (ADR-0043).
+  # -------------------------------------------------------------------------
+  desktop-windows-build:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: ci-light
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install NSIS
+        run: choco install nsis -y
+
+      - name: Build Windows installer
+        shell: bash
+        run: ./scripts/build-desktop.sh windows
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: voxeltoad-desktop-windows-amd64
+          path: deploy/desktop/build/bin/voxeltoad-desktop-amd64-installer.exe
+          if-no-files-found: error
