@@ -1,226 +1,482 @@
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
-import { Card, CardContent } from "../components/ui/card";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { Button } from "../components/ui/button";
 import { Field } from "../components/ui/field";
 import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
-import { Badge } from "../components/ui/badge";
+import { Textarea } from "../components/ui/textarea";
 import { Skeleton } from "../components/ui/skeleton";
-import { EmptyState } from "../components/ui/empty-state";
-import { Modal } from "../components/ui/modal";
-import { listModels, createModel, updateModel, deleteModel, listProviders } from "../lib/api";
-import type { Model, Provider, ModelUpstream } from "../lib/types";
+import { Modal, modalFormActionsClass } from "../components/ui/modal";
+import { ConfirmModal } from "../components/ui/confirm-modal";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../components/ui/table";
+import { createModel, deleteModel, listModels, listProviders, updateModel } from "../lib/api";
+import { displayToMicro, microToDisplay } from "../lib/format";
+import type { Model, ModelUpstream, Provider } from "../lib/types";
 
-const CURRENCIES = ["usd", "cny"] as const;
+// Mirrors the admin models page (web/.../(dashboard)/models): table with
+// inline upstream pills, create/edit Modal xl with the full metadata form
+// (description/context_length/capabilities/tags + per-upstream max tokens,
+// prices and cache-hit %). Prices display as major units and submit as
+// int64 micro-units; currency is hardcoded "USD" like the admin form.
+const CURRENCY = "USD";
 
-function emptyUpstream(provider?: string): ModelUpstream {
-  return { provider: provider ?? "", upstream_model: "", pricing: { prompt_per_1m: 0, completion_per_1m: 0, currency: "usd" } };
+type UpstreamDraft = {
+  key: string;
+  provider: string;
+  upstream_model: string;
+  max_tokens: string; // display: empty = no default
+  prompt_price: string; // display major units, e.g. "2.50"
+  completion_price: string;
+  cache_hit_pct: string; // display 0-100; empty = unconfigured (full price)
+};
+
+function newUpstream(provider = ""): UpstreamDraft {
+  return {
+    key: crypto.randomUUID(),
+    provider,
+    upstream_model: "",
+    max_tokens: "",
+    prompt_price: "",
+    completion_price: "",
+    cache_hit_pct: "",
+  };
 }
-const EMPTY: Model = { alias: "", upstreams: [emptyUpstream()] };
+
+function toDraft(u: ModelUpstream): UpstreamDraft {
+  return {
+    key: crypto.randomUUID(),
+    provider: u.provider,
+    upstream_model: u.upstream_model,
+    max_tokens: u.default_max_tokens ? String(u.default_max_tokens) : "",
+    prompt_price: u.pricing?.prompt_per_1m != null ? microToDisplay(u.pricing.prompt_per_1m) : "",
+    completion_price:
+      u.pricing?.completion_per_1m != null ? microToDisplay(u.pricing.completion_per_1m) : "",
+    cache_hit_pct:
+      u.pricing?.cache_hit_multiplier != null && u.pricing.cache_hit_multiplier > 0
+        ? String(u.pricing.cache_hit_multiplier / 10_000)
+        : "",
+  };
+}
 
 export function Models() {
   const [rows, setRows] = useState<Model[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<Model | null>(null);
-  const [viewing, setViewing] = useState<Model | null>(null);
-  const [isNew, setIsNew] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editRow, setEditRow] = useState<Model | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   const load = () => {
     setLoading(true);
     Promise.all([listModels(), listProviders()])
-      .then(([m, p]) => { setRows(m); setProviders(p); })
+      .then(([m, p]) => {
+        setRows(m);
+        setProviders(p);
+        setError(null);
+      })
       .catch((e) => setError(String(e?.message ?? e)))
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
 
-  const providerNames = providers.map((p) => p.name);
+  const hasProviders = providers.length > 0;
 
-  const onSave = async () => {
-    if (!editing) return;
-    try {
-      if (isNew) await createModel(editing);
-      else await updateModel(editing.alias, editing);
-      setEditing(null);
-      load();
-    } catch (e) { setError(String((e as Error)?.message ?? e)); }
-  };
-  const onDelete = async (alias: string) => {
-    if (!confirm(`删除模型 ${alias}?`)) return;
-    try { await deleteModel(alias); load(); }
-    catch (e) { setError(String((e as Error)?.message ?? e)); }
-  };
-
-  const setU = (i: number, patch: Partial<ModelUpstream>) => {
-    if (!editing) return;
-    const ups = editing.upstreams.map((u, idx) => (idx === i ? { ...u, ...patch } : u));
-    setEditing({ ...editing, upstreams: ups });
-  };
-  const addU = () => editing && setEditing({ ...editing, upstreams: [...editing.upstreams, emptyUpstream(providerNames[0])] });
-  const delU = (i: number) => editing && setEditing({ ...editing, upstreams: editing.upstreams.filter((_, idx) => idx !== i) });
-
-  if (loading) return <div className="p-6"><Skeleton className="h-8 w-40" /><div className="mt-4 space-y-2">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12" />)}</div></div>;
+  if (loading) {
+    return (
+      <div className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
+        <Skeleton className="h-7 w-40" />
+        <Skeleton className="h-4 w-64" />
+        <div className="space-y-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-11" />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="mx-auto max-w-6xl p-6">
+    <div className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">模型</h1>
-        <Button onClick={() => { setEditing({ ...EMPTY, upstreams: [emptyUpstream(providerNames[0])] }); setIsNew(true); }}>+ 新增</Button>
-      </div>
-      {error && <div className="mt-3 rounded border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</div>}
-
-      {rows.length === 0 && !editing && <EmptyState title="暂无模型" description="点击「新增」添加第一个模型别名" />}
-
-      <div className="mt-4 space-y-3">
-        {rows.map((m) => (
-          <Card key={m.alias}>
-            <CardContent className="flex items-start justify-between gap-3 pt-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold">{m.alias}</span>
-                  {m.description && <span className="text-xs text-muted-foreground">{m.description}</span>}
-                </div>
-                <div className="mt-2 space-y-1">
-                  {m.upstreams.map((u, i) => (
-                    <div key={i} className="text-xs text-muted-foreground">
-                      <Badge tone="muted">{u.provider}</Badge> <span className="font-mono">{u.upstream_model}</span>
-                      <span className="ml-2">${u.pricing.prompt_per_1m / 1_000_000}/${u.pricing.completion_per_1m / 1_000_000} per 1M ({u.pricing.currency})</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="flex gap-1">
-                <Button variant="ghost" size="sm" onClick={() => setViewing(JSON.parse(JSON.stringify(m)))}>详情</Button>
-                <Button variant="ghost" size="sm" onClick={() => { setEditing(JSON.parse(JSON.stringify(m))); setIsNew(false); }}>编辑</Button>
-                <Button variant="ghost" size="sm" onClick={() => onDelete(m.alias)}>删除</Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {/* Detail modal */}
-      <Modal open={!!viewing} onClose={() => setViewing(null)} title={viewing ? `模型 ${viewing.alias}` : ""} size="lg">
-        {viewing && (
-          <div className="space-y-3">
-            {viewing.description && <p className="text-sm text-muted-foreground">{viewing.description}</p>}
-            <div className="rounded-lg border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
-                  <tr><th className="p-2">provider</th><th className="p-2">upstream_model</th><th className="p-2">prompt/1M</th><th className="p-2">completion/1M</th><th className="p-2">币种</th></tr>
-                </thead>
-                <tbody>
-                  {viewing.upstreams.map((u, i) => (
-                    <tr key={i} className="border-t">
-                      <td className="p-2"><Badge tone="muted">{u.provider}</Badge></td>
-                      <td className="p-2 font-mono text-xs">{u.upstream_model}</td>
-                      <td className="p-2 font-mono text-xs">{(u.pricing.prompt_per_1m / 1_000_000).toFixed(2)}</td>
-                      <td className="p-2 font-mono text-xs">{(u.pricing.completion_per_1m / 1_000_000).toFixed(2)}</td>
-                      <td className="p-2 text-xs">{u.pricing.currency}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+        <div>
+          <h1 className="text-xl font-semibold text-foreground">模型</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            模型别名到上游供应商的映射，含每百万 token 定价。
+          </p>
+        </div>
+        {hasProviders && (
+          <Button variant="primary" onClick={() => setCreateOpen(true)}>
+            创建模型
+          </Button>
         )}
-      </Modal>
+      </div>
 
-      {/* Edit / create modal */}
-      <Modal
-        open={!!editing}
-        onClose={() => setEditing(null)}
-        title={isNew ? "新增模型" : editing ? `编辑 ${editing.alias}` : ""}
-        size="2xl"
-        footer={
-          <>
-            <Button onClick={onSave}>保存</Button>
-            <Button variant="ghost" onClick={() => setEditing(null)}>取消</Button>
-          </>
-        }
-      >
-        {editing && (
-          <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="别名" required>
-                <Input value={editing.alias} disabled={!isNew} onChange={(e) => setEditing({ ...editing, alias: e.target.value })} />
-              </Field>
-              <Field label="描述(可选)">
-                <Input value={editing.description ?? ""} onChange={(e) => setEditing({ ...editing, description: e.target.value })} />
-              </Field>
-            </div>
+      {!hasProviders && (
+        <div className="flex items-center justify-between rounded-md border border-border bg-muted px-4 py-3 text-sm text-muted-foreground">
+          <span>创建模型前需要先添加至少一个供应商。</span>
+          <Button variant="outline" size="sm" onClick={() => navigate("/providers")}>
+            前往供应商页面
+          </Button>
+        </div>
+      )}
 
-            <section>
-              <h3 className="mb-2 text-sm font-medium text-muted-foreground">上游 (upstreams)</h3>
-              <div className="space-y-2">
-                {editing.upstreams.map((u, i) => (
-                  <div key={i} className="relative rounded-lg border border-border p-3">
-                    {/* Delete button pinned to the card's top-right corner so it
-                        visually belongs to the whole upstream, not one row. */}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="absolute right-2 top-2 h-7 w-7 p-0"
-                      onClick={() => delU(i)}
-                      aria-label="删除上游"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                    {/* Row 1: provider + upstream_model. Provider list is short
-                        brand names; upstream_model is the long identifier — give
-                        it the wider column. */}
-                    <div className="grid gap-2 sm:grid-cols-[2fr_3fr]">
-                      <Field label="Provider" required>
-                        <Select value={u.provider} onChange={(e) => setU(i, { provider: e.target.value })}>
-                          {providerNames.map((n) => <option key={n} value={n}>{n}</option>)}
-                        </Select>
-                      </Field>
-                      <Field label="上游模型" required>
-                        <Input value={u.upstream_model} onChange={(e) => setU(i, { upstream_model: e.target.value })} />
-                      </Field>
-                    </div>
-                    {/* Row 2: pricing triple. Unit compressed into the label
-                        so both rows fit on one line; the "/ 1M" scope is
-                        identical for prompt/completion and stated once. */}
-                    <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                      <Field label="Prompt / 1M (micro)" required>
-                        <Input
-                          type="number"
-                          min="0"
-                          value={u.pricing.prompt_per_1m}
-                          onChange={(e) => setU(i, { pricing: { ...u.pricing, prompt_per_1m: Number(e.target.value) } })}
-                        />
-                      </Field>
-                      <Field label="Completion / 1M (micro)" required>
-                        <Input
-                          type="number"
-                          min="0"
-                          value={u.pricing.completion_per_1m}
-                          onChange={(e) => setU(i, { pricing: { ...u.pricing, completion_per_1m: Number(e.target.value) } })}
-                        />
-                      </Field>
-                      <Field label="币种" required>
-                        <Select
-                          value={u.pricing.currency}
-                          onChange={(e) => setU(i, { pricing: { ...u.pricing, currency: e.target.value } })}
+      {error && (
+        <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead>别名</TableHead>
+            <TableHead>上游</TableHead>
+            <TableHead className="w-0" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.length === 0 ? (
+            <TableRow className="hover:bg-transparent">
+              <TableCell colSpan={3} className="px-4 py-10 text-center text-muted-foreground">
+                暂无模型
+              </TableCell>
+            </TableRow>
+          ) : (
+            rows.map((m) => (
+              <TableRow key={m.alias}>
+                <TableCell className="align-top">{m.alias}</TableCell>
+                <TableCell className="align-top">
+                  {(m.upstreams ?? []).length === 0 ? (
+                    <span className="text-muted-foreground">无上游</span>
+                  ) : (
+                    <div className="flex flex-col gap-1">
+                      {m.upstreams.map((u, i) => (
+                        <span
+                          key={`${u.provider}-${u.upstream_model}-${i}`}
+                          className="inline-flex w-fit items-center rounded-full bg-muted px-2 py-0.5 text-xs text-foreground"
                         >
-                          {CURRENCIES.map((c) => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
-                        </Select>
-                      </Field>
+                          {u.provider} · {u.upstream_model}
+                          {u.pricing &&
+                            ` · ${microToDisplay(u.pricing.prompt_per_1m ?? 0)}/${microToDisplay(u.pricing.completion_per_1m ?? 0)} per 1M`}
+                          {u.pricing?.cache_hit_multiplier
+                            ? ` · cache ${(u.pricing.cache_hit_multiplier / 10_000).toString()}%`
+                            : ""}
+                        </span>
+                      ))}
                     </div>
+                  )}
+                </TableCell>
+                <TableCell className="align-top text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <Button variant="outline" size="sm" onClick={() => setEditRow(m)}>
+                      编辑
+                    </Button>
+                    <Button variant="destructive" size="sm" onClick={() => setDeleting(m.alias)}>
+                      删除
+                    </Button>
                   </div>
-                ))}
-              </div>
-              <Button variant="ghost" size="sm" className="mt-2" onClick={addU}>+ 添加上游</Button>
-            </section>
-          </div>
+                </TableCell>
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
+
+      {/* Create modal */}
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="创建模型" size="xl">
+        <ModelForm
+          providers={providers}
+          defaultValues={null}
+          onCancel={() => setCreateOpen(false)}
+          onSuccess={() => {
+            setCreateOpen(false);
+            load();
+          }}
+        />
+      </Modal>
+
+      {/* Edit modal */}
+      <Modal open={!!editRow} onClose={() => setEditRow(null)} title="编辑模型" size="xl">
+        {editRow && (
+          <ModelForm
+            providers={providers}
+            defaultValues={editRow}
+            onCancel={() => setEditRow(null)}
+            onSuccess={() => {
+              setEditRow(null);
+              load();
+            }}
+          />
         )}
       </Modal>
+
+      {/* Delete confirm — route references (409) render inline */}
+      <ConfirmModal
+        open={deleting !== null}
+        onCancel={() => setDeleting(null)}
+        onConfirm={async () => {
+          if (deleting === null) return;
+          await deleteModel(deleting);
+          load();
+        }}
+        title="确认删除"
+        message={deleting !== null ? `确定要删除模型「${deleting}」吗？需先移除引用它的路由。` : ""}
+      />
     </div>
+  );
+}
+
+/** Model create/edit form — mirrors the admin ModelForm field set. */
+function ModelForm({
+  providers,
+  defaultValues,
+  onSuccess,
+  onCancel,
+}: {
+  providers: Provider[];
+  defaultValues: Model | null;
+  onSuccess: () => void;
+  onCancel: () => void;
+}) {
+  const isEdit = !!defaultValues;
+  const [alias, setAlias] = useState(defaultValues?.alias ?? "");
+  const [description, setDescription] = useState(defaultValues?.description ?? "");
+  const [contextLength, setContextLength] = useState(
+    defaultValues?.context_length ? String(defaultValues.context_length) : "",
+  );
+  const [capabilities, setCapabilities] = useState((defaultValues?.capabilities ?? []).join(", "));
+  const [tags, setTags] = useState((defaultValues?.tags ?? []).join(", "));
+  const [upstreams, setUpstreams] = useState<UpstreamDraft[]>(() =>
+    (defaultValues?.upstreams ?? []).length > 0
+      ? (defaultValues?.upstreams ?? []).map(toDraft)
+      : [newUpstream(providers[0]?.name)],
+  );
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const patchUpstream = (key: string, patch: Partial<UpstreamDraft>) =>
+    setUpstreams((arr) => arr.map((u) => (u.key === key ? { ...u, ...patch } : u)));
+
+  /** display "12.5" → micro; empty → fallback. Throws on malformed input. */
+  const parsePrice = (v: string, fallback = 0) => (v.trim() === "" ? fallback : displayToMicro(v));
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!alias.trim()) {
+      setError("请填写模型别名。");
+      return;
+    }
+    if (upstreams.length === 0) {
+      setError("至少需要一个上游。");
+      return;
+    }
+    let parsed: ModelUpstream[];
+    try {
+      parsed = upstreams.map((u) => {
+        if (!u.provider || !u.upstream_model.trim()) {
+          throw new Error("每个上游都需要选择供应商并填写上游模型。");
+        }
+        const pct = u.cache_hit_pct.trim() === "" ? 0 : Number(u.cache_hit_pct);
+        if (Number.isNaN(pct) || pct < 0 || pct > 100) {
+          throw new Error("缓存命中 % 必须是 0-100 的数字。");
+        }
+        return {
+          provider: u.provider,
+          upstream_model: u.upstream_model.trim(),
+          ...(u.max_tokens.trim() !== "" ? { default_max_tokens: Number(u.max_tokens) } : {}),
+          pricing: {
+            prompt_per_1m: parsePrice(u.prompt_price),
+            completion_per_1m: parsePrice(u.completion_price),
+            currency: CURRENCY,
+            cache_hit_multiplier: Math.round(pct * 10_000),
+          },
+        };
+      });
+    } catch (err) {
+      setError(err instanceof RangeError ? "价格必须是合法数字（如 2.50）。" : String((err as Error)?.message ?? err));
+      return;
+    }
+
+    const body: Model = {
+      alias: alias.trim(),
+      ...(description.trim() !== "" ? { description: description.trim() } : {}),
+      ...(contextLength.trim() !== "" ? { context_length: Number(contextLength) } : {}),
+      ...(capabilities.trim() !== ""
+        ? { capabilities: capabilities.split(",").map((s) => s.trim()).filter(Boolean) }
+        : {}),
+      ...(tags.trim() !== "" ? { tags: tags.split(",").map((s) => s.trim()).filter(Boolean) } : {}),
+      upstreams: parsed,
+    };
+
+    setPending(true);
+    try {
+      const res = isEdit ? await updateModel(body.alias, body) : await createModel(body);
+      if (res.warning) toast.warning(res.warning);
+      onSuccess();
+    } catch (err) {
+      setError(String((err as Error)?.message ?? err));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-4">
+      <Field label="别名" required>
+        <Input
+          value={alias}
+          onChange={(e) => setAlias(e.target.value)}
+          placeholder="gpt-4o"
+          disabled={isEdit}
+          required
+        />
+      </Field>
+
+      <Field label="描述">
+        <Textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="模型的简介、适用场景等"
+          rows={3}
+        />
+      </Field>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field label="上下文长度">
+          <Input
+            type="number"
+            min={0}
+            value={contextLength}
+            onChange={(e) => setContextLength(e.target.value)}
+            placeholder="128000"
+          />
+        </Field>
+        <Field label="能力（逗号分隔）">
+          <Input
+            value={capabilities}
+            onChange={(e) => setCapabilities(e.target.value)}
+            placeholder="vision, function_calling, streaming"
+          />
+        </Field>
+      </div>
+
+      <Field label="标签（逗号分隔）">
+        <Input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="chat, reasoning" />
+      </Field>
+
+      <div className="flex flex-col gap-3">
+        <span className="text-sm font-medium text-foreground">上游</span>
+        {upstreams.map((u) => (
+          <div key={u.key} className="flex flex-col gap-3 rounded-md border border-border p-3">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="供应商" required>
+                <Select
+                  value={u.provider}
+                  onChange={(e) => patchUpstream(u.key, { provider: e.target.value })}
+                  required
+                >
+                  <option value="" disabled>
+                    选择供应商
+                  </option>
+                  {providers.map((p) => (
+                    <option key={p.name} value={p.name}>
+                      {p.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="上游模型" required>
+                <Input
+                  value={u.upstream_model}
+                  onChange={(e) => patchUpstream(u.key, { upstream_model: e.target.value })}
+                  placeholder="gpt-4o"
+                  required
+                />
+              </Field>
+            </div>
+            <Field label="默认最大 token 数" hint="留空表示无默认值">
+              <Input
+                type="number"
+                min={0}
+                value={u.max_tokens}
+                onChange={(e) => patchUpstream(u.key, { max_tokens: e.target.value })}
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <Field label="输入价格 / 百万 token">
+                <Input
+                  value={u.prompt_price}
+                  onChange={(e) => patchUpstream(u.key, { prompt_price: e.target.value })}
+                  placeholder="2.50"
+                />
+              </Field>
+              <Field label="输出价格 / 百万 token">
+                <Input
+                  value={u.completion_price}
+                  onChange={(e) => patchUpstream(u.key, { completion_price: e.target.value })}
+                  placeholder="10.00"
+                />
+              </Field>
+              <Field label="缓存命中 %" hint="50 = 缓存 token 半价">
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={u.cache_hit_pct}
+                  onChange={(e) => patchUpstream(u.key, { cache_hit_pct: e.target.value })}
+                />
+              </Field>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setUpstreams((arr) => arr.filter((x) => x.key !== u.key))}
+              >
+                移除
+              </Button>
+            </div>
+          </div>
+        ))}
+        <div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setUpstreams((arr) => [...arr, newUpstream(providers[0]?.name)])}
+          >
+            添加上游
+          </Button>
+        </div>
+      </div>
+
+      {error && (
+        <p role="alert" className="w-full rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+
+      <div className={modalFormActionsClass}>
+        <Button type="button" variant="outline" onClick={onCancel}>
+          取消
+        </Button>
+        <Button type="submit" disabled={pending}>
+          {pending ? "保存中…" : isEdit ? "保存" : "创建"}
+        </Button>
+      </div>
+    </form>
   );
 }

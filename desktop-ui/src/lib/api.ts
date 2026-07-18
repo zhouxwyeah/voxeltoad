@@ -1,5 +1,4 @@
 import type {
-  AgentUsage,
   ConfigWriteResult,
   Model,
   OffsetEnvelope,

@@ -8,6 +8,9 @@ import { getOverview } from "../lib/api";
 import type { AgentUsage } from "../lib/types";
 import { agentLabel, agentTone, formatDuration, formatNumber } from "../lib/format";
 
+// Data stays desktop-specific (per-agent usage from the local SQLite store);
+// visuals mirror the admin overview/usage pages: StatCard style, muted
+// breakdown bars, admin section-heading scale.
 function Bar({ value, max, tone }: { value: number; max: number; tone: string }) {
   const pct = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
   return (
@@ -36,11 +39,12 @@ export function Overview() {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-6xl p-6">
-        <Skeleton className="h-8 w-40" />
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
+        <Skeleton className="h-7 w-40" />
+        <Skeleton className="h-4 w-64" />
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-28" />
+            <Skeleton key={i} className="h-20" />
           ))}
         </div>
       </div>
@@ -49,7 +53,7 @@ export function Overview() {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-6xl p-6">
+      <div className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
         <EmptyState title="无法加载概览" description={error} />
       </div>
     );
@@ -60,72 +64,80 @@ export function Overview() {
   const maxErr = Math.max(1, ...agents.map((a) => a.error_count));
 
   return (
-    <div className="mx-auto max-w-6xl p-6">
-      <h1 className="text-xl font-semibold">概览</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        各 Agent 的调用量、Token 与延迟汇总（成本为顺手记录的 Token 量，桌面版不跑计费）。
-      </p>
+    <div className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
+      <div>
+        <h1 className="text-xl font-semibold text-foreground">概览</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          各 Agent 的调用量、Token 与延迟汇总（成本为顺手记录的 Token 量，桌面版不跑计费）。
+        </p>
+      </div>
 
       {totals && (
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="总调用" value={formatNumber(totals.request_count)} />
-          <Stat label="总 Token" value={formatNumber(totals.total_tokens)} />
-          <Stat label="总耗时" value={formatDuration(totals.duration_ms)} />
-          <Stat label="错误" value={formatNumber(totals.error_count)} tone="destructive" />
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          <StatCard label="总调用" value={formatNumber(totals.request_count)} />
+          <StatCard label="总 Token" value={formatNumber(totals.total_tokens)} />
+          <StatCard label="总耗时" value={formatDuration(totals.duration_ms)} />
+          <StatCard label="错误" value={formatNumber(totals.error_count)} warn={totals.error_count > 0} />
         </div>
       )}
 
-      <h2 className="mt-8 text-lg font-semibold">按 Agent</h2>
-      {agents.length === 0 ? (
-        <EmptyState className="mt-4" title="暂无数据" description="让任意 Agent 通过本网关发请求后即可看到统计。" />
-      ) : (
-        <div className="mt-3 grid gap-4 lg:grid-cols-2">
-          {agents.map((a) => (
-            <Card key={a.agent_type}>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">{agentLabel(a.agent_type)}</CardTitle>
-                  <Badge tone={agentTone(a.agent_type)}>{a.agent_type}</Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3">
-                <Metric label="调用" value={formatNumber(a.request_count)}>
-                  <Bar value={a.request_count} max={maxReq} tone="bg-primary" />
-                </Metric>
-                <Metric label="Token" value={formatNumber(a.total_tokens)}>
-                  <Bar value={a.total_tokens} max={maxTok} tone="bg-info" />
-                </Metric>
-                <Metric label="错误" value={formatNumber(a.error_count)}>
-                  <Bar value={a.error_count} max={maxErr} tone="bg-destructive" />
-                </Metric>
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>平均耗时 {formatDuration(a.request_count ? a.duration_ms / a.request_count : 0)}</span>
-                  <button
-                    className="font-medium text-primary hover:underline"
-                    onClick={() => navigate(`/sessions?agent=${encodeURIComponent(a.agent_type)}`)}
-                  >
-                    查看会话 →
-                  </button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      <div>
+        <h2 className="mb-2 text-sm font-semibold text-foreground">按 Agent</h2>
+        {agents.length === 0 ? (
+          <EmptyState
+            title="暂无数据"
+            description="让任意 Agent 通过本网关发请求后即可看到统计。"
+          />
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-2">
+            {agents.map((a) => (
+              <Card key={a.agent_type}>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base">{agentLabel(a.agent_type)}</CardTitle>
+                    <Badge tone={agentTone(a.agent_type)}>{a.agent_type}</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-3">
+                  <Metric label="调用" value={formatNumber(a.request_count)}>
+                    <Bar value={a.request_count} max={maxReq} tone="bg-primary/60" />
+                  </Metric>
+                  <Metric label="Token" value={formatNumber(a.total_tokens)}>
+                    <Bar value={a.total_tokens} max={maxTok} tone="bg-primary/60" />
+                  </Metric>
+                  <Metric label="错误" value={formatNumber(a.error_count)}>
+                    <Bar value={a.error_count} max={maxErr} tone="bg-destructive/60" />
+                  </Metric>
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>
+                      平均耗时 {formatDuration(a.request_count ? a.duration_ms / a.request_count : 0)}
+                    </span>
+                    <button
+                      className="font-medium text-primary hover:underline"
+                      onClick={() => navigate(`/sessions?agent=${encodeURIComponent(a.agent_type)}`)}
+                    >
+                      查看会话 →
+                    </button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: "destructive" }) {
+/** Mirrors the admin overview StatCard. */
+function StatCard({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
   return (
-    <Card>
-      <CardContent className="p-4">
-        <div className="text-sm text-muted-foreground">{label}</div>
-        <div className={`mt-1 text-2xl font-semibold ${tone === "destructive" ? "text-destructive" : ""}`}>
-          {value}
-        </div>
-      </CardContent>
-    </Card>
+    <div className="flex flex-col gap-1 rounded-lg border border-border bg-background p-4">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className={`text-2xl font-semibold tabular-nums ${warn ? "text-destructive" : "text-foreground"}`}>
+        {value}
+      </span>
+    </div>
   );
 }
 

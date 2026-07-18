@@ -45,7 +45,7 @@ export function ConfirmModal({
       size="sm"
       footer={
         <>
-          <Button variant="ghost" onClick={onCancel} disabled={pending}>
+          <Button variant="outline" onClick={onCancel} disabled={pending}>
             取消
           </Button>
           <Button variant="destructive" onClick={handleConfirm} disabled={pending}>

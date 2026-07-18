@@ -13,13 +13,23 @@ import { cn } from "../../lib/cn";
 // Layout contract: the panel is a fixed-height flex column (max-h-[85vh]);
 // title and footer never scroll, body scrolls (design-system.md §3 Modal).
 
+// Size tiers mirror web/src/components/modal.tsx exactly (xl = max-w-2xl).
 const sizeClasses = {
   sm: "max-w-sm",
   md: "max-w-md",
   lg: "max-w-lg",
-  xl: "max-w-xl",
-  "2xl": "max-w-2xl",
+  xl: "max-w-2xl",
 };
+
+/**
+ * Action row for forms rendered inside a Modal body (design-system.md §3):
+ * sticky footer bar pinned to the bottom of the visible area while fields
+ * scroll beneath. The negative margins are coupled to the Modal body padding
+ * (px-6 py-4) so the hairline and background span edge to edge — keep them
+ * in sync if the body padding changes. Mirrors web's modalFormActionsClass.
+ */
+export const modalFormActionsClass =
+  "sticky bottom-0 -mx-6 -mb-4 flex justify-end gap-3 border-t border-border bg-background px-6 pb-4 pt-4";
 
 export function Modal({
   open,
@@ -32,7 +42,7 @@ export function Modal({
   open: boolean;
   onClose: () => void;
   title: string;
-  size?: "sm" | "md" | "lg" | "xl" | "2xl";
+  size?: "sm" | "md" | "lg" | "xl";
   children: React.ReactNode;
   footer?: React.ReactNode;
 }) {

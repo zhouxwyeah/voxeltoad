@@ -132,7 +132,7 @@ title 栏与 footer 永不滚动（`shrink-0`），body 是唯一滚动区。禁
   `modalFormActionsClass`（modal.tsx 导出）套在表单末尾的操作行上——sticky 定位让按钮栏
   钉在 body 可视区底部，同时 pending/submit 状态与表单同组件（`useActionState` 不外泄）。
   正例：`providers/create-form.tsx`、`models/create-form.tsx`、`routes/route-form.tsx`。
-  desktop-ui 侧直接把按钮传进 Modal 的 `footer` slot（其表单不依赖 useActionState）；
+  desktop-ui 同样用 `modalFormActionsClass`（`desktop-ui/src/components/ui/modal.tsx` 导出）；
   desktop-ui 的删除确认走 `desktop-ui/src/components/ui/confirm-modal.tsx`。
 - `ConfirmModal`：基于 Modal 的薄封装，删除/危险操作确认的唯一入口。固定 `size="sm"`，
   `title` + `message` + destructive `onConfirm` + outline `onCancel`。`confirmLabel` 覆盖
@@ -147,7 +147,8 @@ title 栏与 footer 永不滚动（`shrink-0`），body 是唯一滚动区。禁
 只读详情展示的基元：label（`text-xs font-semibold uppercase tracking-wide
 text-muted-foreground`）在上、value（`text-sm text-foreground`）在下。组合方式：单列
 `flex flex-col gap-4` 或双列 `grid grid-cols-2 gap-x-6 gap-y-4`。正例：routes 详情
-Modal（`routes/client.tsx`）。desktop-ui 有同名基元（`<DetailField label value mono full />`）。
+Modal（`routes/client.tsx`）。desktop-ui 有同名基元（`desktop-ui/src/components/ui/detail-field.tsx`，
+API 一致：`<DetailField label>…</DetailField>`）。
 
 **已交付基元速查**（详见 §8 表）：Button/Input/Card/DetailField（ui.tsx）、Modal/ConfirmModal、
 NavLink、Badge、EmptyState、Toast（sonner）、Skeleton、Select、Textarea、MultiSelect。

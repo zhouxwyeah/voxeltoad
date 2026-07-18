@@ -1,294 +1,349 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "../components/ui/button";
 import { Field } from "../components/ui/field";
 import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
-import { Badge } from "../components/ui/badge";
 import { Skeleton } from "../components/ui/skeleton";
-import { EmptyState } from "../components/ui/empty-state";
-import { Modal } from "../components/ui/modal";
-import { listProviders, createProvider, updateProvider, deleteProvider } from "../lib/api";
+import { Modal, modalFormActionsClass } from "../components/ui/modal";
+import { ConfirmModal } from "../components/ui/confirm-modal";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../components/ui/table";
+import { createProvider, deleteProvider, listProviders, updateProvider } from "../lib/api";
 import type { Provider } from "../lib/types";
 
-// Common provider brands shown in the type Select. The backend treats
-// `type` as a free-form brand label (internal/config/schema.go); selecting
-// CUSTOM_TYPE falls back to an Input so users can enter anything.
-const PROVIDER_TYPES = ["openai", "tencent", "zhipu", "anthropic", "compatible"] as const;
-const CUSTOM_TYPE = "__custom__";
+// Mirrors the admin providers page (web/.../(dashboard)/providers) — same
+// columns, same form fields, same modal sizes. Fields the admin form does not
+// have (weight / timeouts) are hidden here but still required by the desktop
+// data plane (zero timeouts = unprotected upstream calls), so creates send
+// defaults and edits preserve the stored values.
+const PRESET_BRANDS = [
+  "openai",
+  "tencent",
+  "zhipu",
+  "anthropic",
+  "google",
+  "azure",
+  "deepseek",
+  "bedrock",
+];
+const CUSTOM_TYPE = "_custom_";
+const DEFAULT_TIMEOUTS = { connect: 2_000_000_000, first_byte: 5_000_000_000, overall: 30_000_000_000 };
+const DEFAULT_WEIGHT = 100;
 
-const EMPTY: Provider = {
-  name: "",
-  type: "openai",
-  adapter: "openai",
-  base_url: "",
-  api_key_ref: "plain://",
-  timeouts: { connect: 2_000_000_000, first_byte: 5_000_000_000, overall: 30_000_000_000 },
-  weight: 100,
-};
-
-// Backend stores timeouts as Go durations (nanoseconds); the form edits in seconds.
-const NS_PER_S = 1_000_000_000;
-const nsToS = (ns: number) => ns / NS_PER_S;
-const sToNs = (s: number) => Math.round(s * NS_PER_S);
+/** Prefix of a literal (plaintext) credential stored in the local YAML. */
+const PLAIN_REF_PREFIX = "plain://";
+type CredMode = "ref" | "key";
 
 export function Providers() {
   const [rows, setRows] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<Provider | null>(null); // non-null = edit/create modal open
-  const [viewing, setViewing] = useState<Provider | null>(null); // non-null = detail modal open
-  const [isNew, setIsNew] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editRow, setEditRow] = useState<Provider | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const load = () => {
     setLoading(true);
     listProviders()
-      .then(setRows)
+      .then((r) => {
+        setRows(r);
+        setError(null);
+      })
       .catch((e) => setError(String(e?.message ?? e)))
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
 
-  const onSave = async () => {
-    if (!editing) return;
-    try {
-      if (isNew) await createProvider(editing);
-      else await updateProvider(editing.name, editing);
-      setEditing(null);
-      load();
-    } catch (e) {
-      setError(String((e as Error)?.message ?? e));
-    }
-  };
-  const onDelete = async (name: string) => {
-    if (!confirm(`删除供应商 ${name}?`)) return;
-    try {
-      await deleteProvider(name);
-      load();
-    } catch (e) {
-      setError(String((e as Error)?.message ?? e));
-    }
-  };
-
   if (loading) {
-    return <div className="p-6"><Skeleton className="h-8 w-40" /><div className="mt-4 space-y-2">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12" />)}</div></div>;
+    return (
+      <div className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
+        <Skeleton className="h-7 w-40" />
+        <Skeleton className="h-4 w-64" />
+        <div className="space-y-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-11" />
+          ))}
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="mx-auto max-w-6xl p-6">
+    <div className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
+      {/* Page header (admin template: title + subtitle + primary action) */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">供应商</h1>
-        <Button onClick={() => { setEditing({ ...EMPTY }); setIsNew(true); }}>+ 新增</Button>
-      </div>
-      {error && <div className="mt-3 rounded border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</div>}
-
-      {rows.length === 0 && !editing && <EmptyState title="暂无供应商" description="点击「新增」添加第一个供应商" />}
-
-      <div className="mt-4 overflow-hidden rounded-lg border">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
-            <tr><th className="p-3">名称</th><th className="p-3">类型</th><th className="p-3">adapter</th><th className="p-3">base_url</th><th className="p-3">权重</th><th className="p-3"></th></tr>
-          </thead>
-          <tbody>
-            {rows.map((p) => (
-              <tr key={p.name} className="border-t">
-                <td className="p-3 font-medium">{p.name}</td>
-                <td className="p-3"><Badge>{p.type}</Badge></td>
-                <td className="p-3 font-mono text-xs">{p.adapter}</td>
-                <td className="p-3 font-mono text-xs text-muted-foreground truncate max-w-xs">{p.base_url}</td>
-                <td className="p-3">{p.weight}</td>
-                <td className="p-3 text-right whitespace-nowrap">
-                  <Button variant="ghost" size="sm" onClick={() => setViewing({ ...p })}>详情</Button>
-                  <Button variant="ghost" size="sm" onClick={() => { setEditing({ ...p }); setIsNew(false); }}>编辑</Button>
-                  <Button variant="ghost" size="sm" onClick={() => onDelete(p.name)}>删除</Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div>
+          <h1 className="text-xl font-semibold text-foreground">供应商</h1>
+          <p className="mt-1 text-sm text-muted-foreground">网关代理的上游 LLM 服务。</p>
+        </div>
+        <Button variant="primary" onClick={() => setCreateOpen(true)}>
+          创建供应商
+        </Button>
       </div>
 
-      {/* Detail modal (read-only) */}
-      <Modal open={!!viewing} onClose={() => setViewing(null)} title={viewing ? `供应商 ${viewing.name}` : ""} size="lg">
-        {viewing && (
-          <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
-            <DetailField label="名称" value={viewing.name} />
-            <DetailField label="类型" value={viewing.type} />
-            <DetailField label="adapter" value={viewing.adapter} mono />
-            <DetailField label="权重" value={String(viewing.weight)} />
-            <DetailField label="base_url" value={viewing.base_url} mono full />
-            <DetailField label="api_key_ref" value={viewing.api_key_ref} mono full />
-            <DetailField label="timeouts.connect" value={`${viewing.timeouts.connect / 1_000_000_000}s`} mono />
-            <DetailField label="timeouts.first_byte" value={`${viewing.timeouts.first_byte / 1_000_000_000}s`} mono />
-            <DetailField label="timeouts.overall" value={`${viewing.timeouts.overall / 1_000_000_000}s`} mono />
-          </dl>
-        )}
+      {error && (
+        <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead>名称</TableHead>
+            <TableHead>类型</TableHead>
+            <TableHead>适配器</TableHead>
+            <TableHead>基础 URL</TableHead>
+            <TableHead className="w-0" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.length === 0 ? (
+            <TableRow className="hover:bg-transparent">
+              <TableCell colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
+                暂无供应商。
+              </TableCell>
+            </TableRow>
+          ) : (
+            rows.map((p) => (
+              <TableRow key={p.name}>
+                <TableCell>{p.name}</TableCell>
+                <TableCell>{p.type}</TableCell>
+                <TableCell>{p.adapter}</TableCell>
+                <TableCell>{p.base_url}</TableCell>
+                <TableCell className="text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <Button variant="ghost" size="sm" onClick={() => setEditRow(p)}>
+                      编辑
+                    </Button>
+                    <Button variant="destructive" size="sm" onClick={() => setDeleting(p.name)}>
+                      删除
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
+
+      {/* Create modal */}
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="创建供应商" size="lg">
+        <ProviderForm
+          defaultValues={null}
+          onCancel={() => setCreateOpen(false)}
+          onSuccess={() => {
+            setCreateOpen(false);
+            load();
+          }}
+        />
       </Modal>
 
-      {/* Edit / create modal */}
-      <Modal
-        open={!!editing}
-        onClose={() => setEditing(null)}
-        title={isNew ? "新增供应商" : editing ? `编辑 ${editing.name}` : ""}
-        size="xl"
-        footer={
-          <>
-            <Button onClick={onSave}>保存</Button>
-            <Button variant="ghost" onClick={() => setEditing(null)}>取消</Button>
-          </>
-        }
-      >
-        {editing && (
-          <div className="space-y-5">
-            <FormSection title="基本信息">
-              <Field label="名称" required>
-                <Input value={editing.name} disabled={!isNew} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
-              </Field>
-              <TypeField
-                value={editing.type}
-                onChange={(t) => setEditing({ ...editing, type: t })}
-              />
-              <Field label="Adapter" required>
-                <Select value={editing.adapter} onChange={(e) => setEditing({ ...editing, adapter: e.target.value })}>
-                  <option value="openai">openai</option>
-                  <option value="claude">claude</option>
-                </Select>
-              </Field>
-              <Field label="权重" required>
-                <Input type="number" value={editing.weight} onChange={(e) => setEditing({ ...editing, weight: Number(e.target.value) })} />
-              </Field>
-            </FormSection>
-
-            <FormSection title="连接与超时">
-              <Field label="Base URL" required full>
-                <Input value={editing.base_url} onChange={(e) => setEditing({ ...editing, base_url: e.target.value })} />
-              </Field>
-              <div className="sm:col-span-2 grid gap-3 sm:grid-cols-3">
-                <Field label="连接超时" suffix="s">
-                  <Input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    value={nsToS(editing.timeouts.connect)}
-                    onChange={(e) =>
-                      setEditing({
-                        ...editing,
-                        timeouts: { ...editing.timeouts, connect: sToNs(Number(e.target.value)) },
-                      })
-                    }
-                  />
-                </Field>
-                <Field label="首字节超时" suffix="s">
-                  <Input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    value={nsToS(editing.timeouts.first_byte)}
-                    onChange={(e) =>
-                      setEditing({
-                        ...editing,
-                        timeouts: { ...editing.timeouts, first_byte: sToNs(Number(e.target.value)) },
-                      })
-                    }
-                  />
-                </Field>
-                <Field label="整体超时" suffix="s">
-                  <Input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    value={nsToS(editing.timeouts.overall)}
-                    onChange={(e) =>
-                      setEditing({
-                        ...editing,
-                        timeouts: { ...editing.timeouts, overall: sToNs(Number(e.target.value)) },
-                      })
-                    }
-                  />
-                </Field>
-              </div>
-            </FormSection>
-
-            <FormSection title="密钥">
-              <Field
-                label="API Key Ref"
-                required
-                full
-                hint="env://VAR · db://provider/<name> · plain://literal(仅开发)"
-              >
-                <Input value={editing.api_key_ref} onChange={(e) => setEditing({ ...editing, api_key_ref: e.target.value })} />
-              </Field>
-            </FormSection>
-          </div>
-        )}
-      </Modal>
-    </div>
-  );
-}
-
-function DetailField({ label, value, mono, full }: { label: string; value: string; mono?: boolean; full?: boolean }) {
-  return (
-    <div className={full ? "sm:col-span-2" : ""}>
-      <dt className="text-xs uppercase text-muted-foreground">{label}</dt>
-      <dd className={`mt-0.5 ${mono ? "font-mono text-xs" : ""}`}>{value || "—"}</dd>
-    </div>
-  );
-}
-
-function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section>
-      <h3 className="mb-2 text-sm font-medium text-muted-foreground">{title}</h3>
-      <div className="grid gap-3 sm:grid-cols-2">{children}</div>
-    </section>
-  );
-}
-
-function TypeField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const isPreset = (PROVIDER_TYPES as readonly string[]).includes(value);
-  return (
-    <>
-      <Field label="类型" required>
-        {isPreset ? (
-          <Select
-            value={value}
-            onChange={(e) => {
-              const v = e.target.value;
-              onChange(v === CUSTOM_TYPE ? "" : v);
+      {/* Edit modal */}
+      <Modal open={!!editRow} onClose={() => setEditRow(null)} title="编辑供应商" size="lg">
+        {editRow && (
+          <ProviderForm
+            defaultValues={editRow}
+            onCancel={() => setEditRow(null)}
+            onSuccess={() => {
+              setEditRow(null);
+              load();
             }}
-          >
-            {PROVIDER_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-            <option value={CUSTOM_TYPE}>自定义…</option>
-          </Select>
-        ) : (
-          <div className="flex gap-2">
-            <Input
-              className="flex-1"
-              value={value}
-              onChange={(e) => onChange(e.target.value)}
-              placeholder="例如 openai-compatible"
-            />
-            <Select
-              className="w-32 shrink-0"
-              value={CUSTOM_TYPE}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v !== CUSTOM_TYPE) onChange(v);
-              }}
-            >
-              <option value={CUSTOM_TYPE}>自定义</option>
-              {PROVIDER_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </Select>
-          </div>
+          />
         )}
+      </Modal>
+
+      {/* Delete confirm — reference conflicts (409) render inline */}
+      <ConfirmModal
+        open={deleting !== null}
+        onCancel={() => setDeleting(null)}
+        onConfirm={async () => {
+          if (deleting === null) return;
+          await deleteProvider(deleting);
+          load();
+        }}
+        title="确认删除"
+        message={deleting !== null ? `删除供应商 "${deleting}"?` : ""}
+      />
+    </div>
+  );
+}
+
+/**
+ * Provider create/edit form — field-for-field mirror of the admin
+ * ProviderForm: name, brand type (preset + custom), adapter, base_url, and a
+ * credential-mode select (reference vs plaintext key). On desktop a plaintext
+ * key is persisted as a `plain://` ref in the local YAML (there is no
+ * encrypted credential store); weight/timeouts are carried through unchanged.
+ */
+function ProviderForm({
+  defaultValues,
+  onSuccess,
+  onCancel,
+}: {
+  defaultValues: Provider | null;
+  onSuccess: () => void;
+  onCancel: () => void;
+}) {
+  const isEdit = !!defaultValues;
+
+  const [name, setName] = useState(defaultValues?.name ?? "");
+  const dvType = defaultValues?.type ?? "";
+  const dvIsPreset = PRESET_BRANDS.includes(dvType);
+  const [typeSelect, setTypeSelect] = useState(dvIsPreset ? dvType : dvType ? CUSTOM_TYPE : "");
+  const [customType, setCustomType] = useState(!dvIsPreset && dvType ? dvType : "");
+  const [adapter, setAdapter] = useState(defaultValues?.adapter ?? "");
+  const [baseURL, setBaseURL] = useState(defaultValues?.base_url ?? "");
+  const dvApiKeyRef = defaultValues?.api_key_ref ?? "";
+  const [credMode, setCredMode] = useState<CredMode>(
+    dvApiKeyRef.startsWith(PLAIN_REF_PREFIX) ? "key" : "ref",
+  );
+  const [apiKeyRef, setApiKeyRef] = useState(dvApiKeyRef.startsWith(PLAIN_REF_PREFIX) ? "" : dvApiKeyRef);
+  const [apiKey, setApiKey] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const typeValue = typeSelect === CUSTOM_TYPE ? customType.trim() : typeSelect;
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    const ref =
+      credMode === "ref"
+        ? apiKeyRef.trim()
+        : apiKey
+          ? `${PLAIN_REF_PREFIX}${apiKey}`
+          : dvApiKeyRef; // key mode + blank on edit = leave unchanged
+    if (!name.trim() || !typeValue || !adapter || !baseURL.trim() || !ref) {
+      setError("请完整填写名称、类型、适配器、基础 URL 与凭证。");
+      return;
+    }
+    setPending(true);
+    try {
+      // Hidden fields: creates get data-plane-safe defaults; edits preserve
+      // the stored weight/timeouts (the form never edits them).
+      const body: Provider = {
+        timeouts: defaultValues?.timeouts ?? { ...DEFAULT_TIMEOUTS },
+        weight: defaultValues?.weight ?? DEFAULT_WEIGHT,
+        name: name.trim(),
+        type: typeValue,
+        adapter,
+        base_url: baseURL.trim(),
+        api_key_ref: ref,
+      };
+      const res = isEdit ? await updateProvider(body.name, body) : await createProvider(body);
+      toast.success(isEdit ? "供应商已更新。" : "供应商已创建。");
+      if (res.warning) toast.warning(res.warning);
+      onSuccess();
+    } catch (err) {
+      setError(String((err as Error)?.message ?? err));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-4">
+      <Field label="名称" required>
+        <Input value={name} onChange={(e) => setName(e.target.value)} disabled={isEdit} required />
       </Field>
-    </>
+
+      {/* Type: brand dropdown + custom text */}
+      <Field label="类型" required>
+        <Select value={typeSelect} onChange={(e) => setTypeSelect(e.target.value)} required>
+          <option value="" disabled>
+            选择品牌
+          </option>
+          {PRESET_BRANDS.map((b) => (
+            <option key={b} value={b}>
+              {b}
+            </option>
+          ))}
+          <option value={CUSTOM_TYPE}>自定义…</option>
+        </Select>
+      </Field>
+      {typeSelect === CUSTOM_TYPE && (
+        <Input
+          value={customType}
+          onChange={(e) => setCustomType(e.target.value)}
+          placeholder="输入品牌名称"
+          required
+        />
+      )}
+
+      <Field label="适配器" required>
+        <Select value={adapter} onChange={(e) => setAdapter(e.target.value)} required>
+          <option value="" disabled>
+            选择适配器
+          </option>
+          <option value="openai">openai</option>
+          <option value="claude">claude</option>
+        </Select>
+      </Field>
+
+      <Field label="基础 URL" required>
+        <Input
+          type="url"
+          value={baseURL}
+          onChange={(e) => setBaseURL(e.target.value)}
+          placeholder="https://…"
+          required
+        />
+      </Field>
+
+      {/* Credential: one Select chooses between two mutually exclusive inputs. */}
+      <Field label="凭证方式" required>
+        <Select value={credMode} onChange={(e) => setCredMode(e.target.value as CredMode)}>
+          <option value="ref">引用模式（env://…）</option>
+          <option value="key">直接输入（本地存储）</option>
+        </Select>
+      </Field>
+      {credMode === "ref" ? (
+        <Field label="API 密钥引用" required>
+          <Input
+            value={apiKeyRef}
+            onChange={(e) => setApiKeyRef(e.target.value)}
+            placeholder="env://KEY"
+            required
+          />
+        </Field>
+      ) : (
+        <Field
+          label="API 密钥"
+          required={!isEdit}
+          hint="明文密钥将以 plain:// 形式保存在本地配置文件中；编辑时留空表示保持不变。"
+        >
+          <Input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="sk-…"
+            autoComplete="new-password"
+          />
+        </Field>
+      )}
+
+      {error && (
+        <p role="alert" className="w-full rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+
+      <div className={modalFormActionsClass}>
+        <Button type="button" variant="outline" onClick={onCancel}>
+          取消
+        </Button>
+        <Button type="submit" disabled={pending}>
+          {pending ? "保存中…" : isEdit ? "保存" : "创建"}
+        </Button>
+      </div>
+    </form>
   );
 }

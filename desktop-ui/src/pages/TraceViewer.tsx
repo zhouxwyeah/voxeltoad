@@ -74,16 +74,16 @@ export function TraceViewer() {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-6xl p-6">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="mt-4 h-96 w-full" />
+      <div className="mx-auto flex max-w-6xl flex-col gap-6 p-8">
+        <Skeleton className="h-7 w-64" />
+        <Skeleton className="h-96 w-full" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="mx-auto max-w-6xl p-6">
+      <div className="mx-auto flex max-w-6xl flex-col gap-6 p-8">
         <EmptyState title="加载失败" description={error} />
       </div>
     );
@@ -91,7 +91,7 @@ export function TraceViewer() {
 
   if (timeline.length === 0) {
     return (
-      <div className="mx-auto max-w-6xl p-6">
+      <div className="mx-auto flex max-w-6xl flex-col gap-6 p-8">
         <EmptyState
           title="该会话没有录制数据"
           description={`会话 ${shortId(sessionId, 16)} 暂无 trace 记录。`}
@@ -102,42 +102,53 @@ export function TraceViewer() {
 
   return (
     <div className="flex h-full">
-      {/* timeline */}
+      {/* timeline — list items mirror the admin session-detail request list
+          (border + primary active state); desktop keeps its richer per-item
+          content (time, agent badge, model). */}
       <div className="w-80 shrink-0 overflow-auto border-r border-border p-3">
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">请求时间线</h2>
-          <button className="inline-flex items-center gap-1 text-xs text-primary hover:underline" onClick={() => navigate("/sessions")}>
-            <ArrowLeft className="h-3 w-3" />
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            请求时间线
+          </h2>
+          <Button variant="outline" size="sm" onClick={() => navigate("/sessions")}>
+            <ArrowLeft className="h-3.5 w-3.5" />
             会话
-          </button>
+          </Button>
         </div>
-        <div className="flex flex-col gap-1.5">
-          {timeline.map((t, i) => (
-            <button
-              key={t.id}
-              onClick={() => setSelectedId(t.id)}
-              className={`rounded-md border p-2 text-left text-xs transition-colors ${
-                selectedId === t.id
-                  ? "border-primary bg-accent"
-                  : "border-border hover:bg-muted/50"
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-muted-foreground">#{i + 1}</span>
-                <Badge tone={statusTone(t.status_code)}>{t.status_code}</Badge>
-              </div>
-              <div className="mt-1 text-muted-foreground">{formatTime(t.created_at)}</div>
-              <div className="mt-1 flex items-center gap-1.5">
-                <Badge tone={agentTone(t.agent_type)}>{agentLabel(t.agent_type)}</Badge>
-                <span className="truncate text-muted-foreground">{t.model_requested}</span>
-              </div>
-            </button>
-          ))}
+        <div className="flex flex-col gap-1">
+          {timeline.map((t, i) => {
+            const active = selectedId === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setSelectedId(t.id)}
+                className={`rounded-md border px-2 py-1.5 text-left text-sm transition-colors ${
+                  active
+                    ? "border-primary bg-primary/10"
+                    : "border-transparent hover:bg-accent/40"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="w-6 shrink-0 text-right tabular-nums text-muted-foreground">
+                    #{i + 1}
+                  </span>
+                  <Badge tone={statusTone(t.status_code)}>{t.status_code}</Badge>
+                  <span className="flex-1 truncate text-muted-foreground">
+                    {t.model_requested || "—"}
+                  </span>
+                </div>
+                <div className="mt-1 flex items-center gap-1.5 pl-8 text-xs text-muted-foreground">
+                  <Badge tone={agentTone(t.agent_type)}>{agentLabel(t.agent_type)}</Badge>
+                  <span className="truncate">{formatTime(t.created_at)}</span>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* detail */}
-      <div className="flex-1 overflow-auto p-5">
+      <div className="flex-1 overflow-auto p-6">
         {loadingDetail || !detail ? (
           <Skeleton className="h-96 w-full" />
         ) : (
@@ -293,17 +304,19 @@ function MetricsBar({
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
+  // Mirrors the admin session SummaryCard: rounded-lg border p-3, muted
+  // label, large tabular value.
   return (
-    <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
-      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className="mt-0.5 font-mono text-sm">{value}</div>
+    <div className="rounded-lg border border-border p-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
     </div>
   );
 }
 
 function MetadataCard({ detail }: { detail: TraceDetail }) {
   return (
-    <dl className="grid gap-x-6 gap-y-2 rounded-md border border-border bg-muted/20 p-3 text-xs sm:grid-cols-2 lg:grid-cols-3">
+    <dl className="grid gap-x-6 gap-y-4 rounded-lg border border-border p-4 sm:grid-cols-2 lg:grid-cols-3">
       <MetaItem label="Provider" value={detail.provider} mono />
       <MetaItem label="Stream" value={detail.stream ? "是" : "否"} />
       <MetaItem label="Stop Reason" value={detail.stop_reason || "—"} mono />
@@ -317,10 +330,11 @@ function MetadataCard({ detail }: { detail: TraceDetail }) {
 }
 
 function MetaItem({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  // DetailField styling (design-system.md §3).
   return (
-    <div>
-      <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</dt>
-      <dd className={`mt-0.5 ${mono ? "font-mono" : ""}`}>{value}</dd>
+    <div className="flex flex-col gap-1">
+      <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className={`text-sm text-foreground ${mono ? "font-mono" : ""}`}>{value}</dd>
     </div>
   );
 }

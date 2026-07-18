@@ -44,7 +44,7 @@ export function Field({
 
   return (
     <div className={cn("flex flex-col gap-1", full && "sm:col-span-2", className)}>
-      <label htmlFor={id} className={cn("text-sm", error && "text-destructive")}>
+      <label htmlFor={id} className={cn("text-sm font-medium", error ? "text-destructive" : "text-foreground")}>
         {label}
         {required && <span className="ml-0.5 text-destructive">*</span>}
       </label>

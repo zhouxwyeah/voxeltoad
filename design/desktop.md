@@ -241,35 +241,36 @@ APIKey (实体, KeyStore, 仅种子 1 个默认)
 1. **概览**:各 Agent 调用量/token/成本/延迟汇总。
 2. **Session 浏览器**:按 Agent 过滤 → 列出 session(含 SessionSource 标记)→ 进入单 session。
 3. **Trace 查看器(重点)**:单 session 内请求时间线;点开看完整 messages(system/user/assistant/tool_use)、request_raw、response_raw、error_raw;支持**复制 prompt**。
-4. **供应商**:表格 + 内联表单 CRUD provider(name/type/adapter/base_url/api_key_ref/weight/timeouts)。
-5. **模型**:卡片展示 model alias + 其 upstreams(pricing);内联编辑器支持动态增删 upstream 行(provider 下拉 + pricing micro-units 输入)。
-6. **路由**:表格展示 route alias + strategy + providers;内联编辑器支持动态增删 provider 行(strategy 下拉 + weight)。
+4. **供应商**:表格(名称/类型/适配器/基础 URL)+ Modal 表单 CRUD,字段与 admin 完全一致(name/type 品牌预设+自定义/adapter/base_url/凭证方式 ref 或明文 key)。weight/timeouts 不在 UI 暴露——创建时写默认值(100 / 2s·5s·30s),编辑时保留原值(零值超时会让数据面失去保护);明文 key 以 `plain://` 存本地 YAML(桌面无加密凭证库)。
+5. **模型**:表格展示 alias + upstreams 行内 pill(provider · 上游模型 · 输入/输出价格 · cache %);Modal 表单字段与 admin 一致(描述/context_length/capabilities/tags + 动态 upstream 行:provider 下拉、上游模型、默认 max tokens、输入/输出价格(显示美元、提交转 micro)、缓存命中 %);币种硬编码 USD。
+6. **路由**:表格展示 model_alias + strategy pill + providers pill;Modal 表单与 admin 一致(model_alias 从现有模型下拉选择,strategy 含 priority/weighted/round_robin/session_affinity,候选 provider 按所选模型的 upstream 过滤,动态行权重)。
 7. **(可选 MVP 后)收藏/打标签好 prompt**:在存储加 `prompt_templates` 表,手动收藏。
+
+> **UI 对齐原则(2026-07)**:desktop-ui 的布局、表格、表单字段、按钮变体、Modal 结构全面镜像 admin web(`web/`),唯一事实来源是 `design/design-system.md` + `web/src`。有意的偏差仅四处:不显示 cost 列(桌面不跑计费)、provider 的 weight/timeouts 隐藏但随提交保留、明文凭证映射 `plain://`、品牌名「桌面网关助手」+ zh-CN 单语言。
 
 ### 10.4 Modal 内表单布局规范(desktop-ui)
 
-约束 desktop-ui 中所有编辑/新增 Modal 的表单排版。单一事实来源,后续新增表单或调整布局必须遵循本节;偏离需在 PR 描述中说明。
+约束 desktop-ui 中所有编辑/新增 Modal 的表单排版。与 admin web 的 Modal 契约保持一致(design-system.md §3);偏离需在 PR 描述中说明。
 
-**Modal 尺寸选用**(`components/ui/modal.tsx`):
-- `sm`(max-w-sm):纯确认、单行输入
-- `md`(max-w-md):简单表单 ≤ 4 字段,单列
-- `lg`(max-w-lg):两列表单,无动态行(默认)
-- `xl`(max-w-xl):带分区的两列表单(如供应商编辑:基本信息/连接与超时/密钥)
-- `2xl`(max-w-2xl):含动态行的表单(如模型编辑 upstreams)
+**Modal 尺寸选用**(`components/ui/modal.tsx`,与 admin 同四档):
+- `sm`(max-w-sm):纯确认
+- `md`(max-w-md):简单详情(如路由详情)
+- `lg`(max-w-lg):供应商表单
+- `xl`(max-w-2xl):含动态行的表单(模型 upstreams、路由 providers)
 
-**表单分区**:超过 6 个字段或跨越多个职责域时,按职责分区(如供应商编辑分「基本信息/连接与超时/密钥」)。每个分区用 `<section>` + 小标题(`text-sm font-medium text-muted-foreground`),分区间距 `space-y-5`,分区内字段 `grid gap-3 sm:grid-cols-2`。
+**表单操作条**:表单底部按钮不使用 Modal 的 `footer` slot,而用 `modalFormActionsClass`(sticky 底部操作条,与 admin 一致),保证长表单滚动时按钮始终可见。
 
 **Field 组件**(`components/ui/field.tsx`):所有表单控件必须包在 `<Field>` 中,由它统一渲染 label/required 星标/hint/error/suffix。禁止再用 `<label className="text-sm">…<Input/></label>` 这种把 label 当 wrapper 的写法。
 
-**动态行布局**:每行动态行最多放 4 个控件;超过则改为**两行卡片式**(如模型编辑 upstreams:行 1 = provider/upstream_model/删除按钮;行 2 = pricing 三字段)。禁止用 `grid-cols-[1fr_1fr_auto]` 强行塞超过列数的控件——会被挤到下一行造成视觉错位。
+**动态行布局**:与 admin 同形——模型 upstream 行是 `flex flex-col gap-3 rounded-md border p-3` 卡片(provider+上游模型两列 → 默认 max tokens → 价格三列 → 右下「移除」);路由 provider 行是 `grid grid-cols-[1fr_120px_auto] items-end gap-3`(供应商 + 权重 + 移除)。
 
-**单位表达**:禁止用 placeholder 承担单位说明(反模式,输入后单位消失)。带单位的字段必须用 Field 的 `suffix`(如 `suffix="s"`、`suffix="/ 1M tokens (micro)"`)。
+**单位表达**:禁止用 placeholder 承担单位说明(反模式,输入后单位消失)。带单位的字段必须用 Field 的 `suffix` 或 `hint`(如缓存命中 % 的「50 = 缓存 token 半价」)。
 
 **枚举字段**:固定少量选项(≤ 5 个)一律用 `Select`,禁止用 Input 自由文本。当前枚举清单:
 - `Provider.adapter`:`openai` / `claude`(后端 adapter registry)
-- `Provider.type`:常见品牌(openai/tencent/zhipu/anthropic/compatible)+ "自定义…" 兜底 Input(schema 是自由文本,见 internal/config/schema.go)
-- `Route.strategy`:见 Routes.tsx 常量
-- `Model.pricing.currency`:`usd` / `cny`
+- `Provider.type`:品牌预设(openai/tencent/zhipu/anthropic/google/azure/deepseek/bedrock)+ "自定义…" 兜底 Input(与 admin 一致)
+- `Provider` 凭证方式:`ref`(API 密钥引用)/ `key`(明文,存 `plain://`)
+- `Route.strategy`:`priority` / `weighted` / `round_robin` / `session_affinity`
 - 会话过滤器 `agent_type`:见 Sessions.tsx 常量
 
 **Markdown 渲染**:Trace 详情中仅 `role=assistant` 的 text block 用 `react-markdown` 渲染;`thinking`/`tool_result`/`user`/`system` 保持 `<pre>` 纯文本。

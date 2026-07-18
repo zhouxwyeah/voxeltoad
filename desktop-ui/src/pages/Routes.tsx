@@ -1,158 +1,431 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { Button } from "../components/ui/button";
+import { Field } from "../components/ui/field";
 import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
-import { Badge } from "../components/ui/badge";
+import { DetailField } from "../components/ui/detail-field";
 import { Skeleton } from "../components/ui/skeleton";
-import { EmptyState } from "../components/ui/empty-state";
-import { Modal } from "../components/ui/modal";
-import { listRoutes, createRoute, updateRoute, deleteRoute, listProviders } from "../lib/api";
-import type { Route, Provider, RouteProvider } from "../lib/types";
+import { Modal, modalFormActionsClass } from "../components/ui/modal";
+import { ConfirmModal } from "../components/ui/confirm-modal";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../components/ui/table";
+import { createRoute, deleteRoute, listModels, listProviders, listRoutes, updateRoute } from "../lib/api";
+import type { Model, Provider, Route, RouteProvider } from "../lib/types";
 
-const STRATEGIES = ["priority", "round_robin", "session_affinity"];
-const EMPTY: Route = { model_alias: "", strategy: "priority", providers: [{ name: "", weight: 1 }] };
+// Mirrors the admin routes page (web/.../(dashboard)/routes): strategy pill +
+// provider pills in the table, detail Modal md with DetailFields, create/edit
+// Modal xl where model_alias is a Select from existing models and candidate
+// providers are filtered to the selected model's upstream providers.
+const STRATEGIES = ["priority", "weighted", "round_robin", "session_affinity"] as const;
+type Strategy = (typeof STRATEGIES)[number];
+
+const STRATEGY_LABELS: Record<Strategy, string> = {
+  priority: "优先级",
+  weighted: "加权",
+  round_robin: "轮询",
+  session_affinity: "会话亲和",
+};
+
+function strategyLabel(s: string | undefined): string {
+  return (STRATEGY_LABELS as Record<string, string>)[s ?? ""] ?? s ?? "-";
+}
+
+type ProviderRowDraft = { key: string; name: string; weight: string };
 
 export function Routes() {
   const [rows, setRows] = useState<Route[]>([]);
+  const [models, setModels] = useState<Model[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<Route | null>(null);
-  const [viewing, setViewing] = useState<Route | null>(null);
-  const [isNew, setIsNew] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editRow, setEditRow] = useState<Route | null>(null);
+  const [detailRow, setDetailRow] = useState<Route | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   const load = () => {
     setLoading(true);
-    Promise.all([listRoutes(), listProviders()])
-      .then(([r, p]) => { setRows(r); setProviders(p); })
+    Promise.all([listRoutes(), listModels(), listProviders()])
+      .then(([r, m, p]) => {
+        setRows(r);
+        setModels(m);
+        setProviders(p);
+        setError(null);
+      })
       .catch((e) => setError(String(e?.message ?? e)))
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
 
-  const providerNames = providers.map((p) => p.name);
+  const hasModels = models.length > 0;
 
-  const onSave = async () => {
-    if (!editing) return;
-    try {
-      if (isNew) await createRoute(editing);
-      else await updateRoute(editing.model_alias, editing);
-      setEditing(null);
-      load();
-    } catch (e) { setError(String((e as Error)?.message ?? e)); }
-  };
-  const onDelete = async (alias: string) => {
-    if (!confirm(`删除路由 ${alias}?`)) return;
-    try { await deleteRoute(alias); load(); }
-    catch (e) { setError(String((e as Error)?.message ?? e)); }
-  };
-
-  const setRP = (i: number, patch: Partial<RouteProvider>) => {
-    if (!editing) return;
-    const ps = editing.providers.map((rp, idx) => (idx === i ? { ...rp, ...patch } : rp));
-    setEditing({ ...editing, providers: ps });
-  };
-  const addRP = () => editing && setEditing({ ...editing, providers: [...editing.providers, { name: providerNames[0] ?? "", weight: 1 }] });
-  const delRP = (i: number) => editing && setEditing({ ...editing, providers: editing.providers.filter((_, idx) => idx !== i) });
-
-  if (loading) return <div className="p-6"><Skeleton className="h-8 w-40" /><div className="mt-4 space-y-2">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12" />)}</div></div>;
+  if (loading) {
+    return (
+      <div className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
+        <Skeleton className="h-7 w-40" />
+        <Skeleton className="h-4 w-64" />
+        <div className="space-y-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-11" />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="mx-auto max-w-6xl p-6">
+    <div className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">路由</h1>
-        <Button onClick={() => { setEditing({ ...EMPTY, providers: [{ name: providerNames[0] ?? "", weight: 1 }] }); setIsNew(true); }}>+ 新增</Button>
+        <div>
+          <h1 className="text-xl font-semibold text-foreground">路由</h1>
+          <p className="mt-1 text-sm text-muted-foreground">将模型别名解析为候选供应商及选择策略。</p>
+        </div>
+        {hasModels && (
+          <Button variant="primary" onClick={() => setCreateOpen(true)}>
+            创建路由
+          </Button>
+        )}
       </div>
-      {error && <div className="mt-3 rounded border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</div>}
 
-      {rows.length === 0 && !editing && <EmptyState title="暂无路由" description="点击「新增」添加第一个路由" />}
+      {!hasModels && (
+        <div className="flex items-center justify-between rounded-md border border-border bg-muted px-4 py-3 text-sm text-muted-foreground">
+          <span>请先创建模型再添加路由。</span>
+          <Button variant="outline" size="sm" onClick={() => navigate("/models")}>
+            前往模型
+          </Button>
+        </div>
+      )}
 
-      <div className="mt-4 overflow-hidden rounded-lg border">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
-            <tr><th className="p-3">model_alias</th><th className="p-3">策略</th><th className="p-3">providers</th><th className="p-3"></th></tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.model_alias} className="border-t">
-                <td className="p-3 font-medium">{r.model_alias}</td>
-                <td className="p-3"><Badge>{r.strategy}</Badge></td>
-                <td className="p-3 text-xs text-muted-foreground">
-                  {r.providers.map((rp) => `${rp.name}(w=${rp.weight ?? 1})`).join(" → ")}
-                </td>
-                <td className="p-3 text-right whitespace-nowrap">
-                  <Button variant="ghost" size="sm" onClick={() => setViewing(JSON.parse(JSON.stringify(r)))}>详情</Button>
-                  <Button variant="ghost" size="sm" onClick={() => { setEditing(JSON.parse(JSON.stringify(r))); setIsNew(false); }}>编辑</Button>
-                  <Button variant="ghost" size="sm" onClick={() => onDelete(r.model_alias)}>删除</Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {error && (
+        <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead>模型别名</TableHead>
+            <TableHead>策略</TableHead>
+            <TableHead>供应商</TableHead>
+            <TableHead className="w-0" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.length === 0 ? (
+            <TableRow className="hover:bg-transparent">
+              <TableCell colSpan={4} className="px-4 py-10 text-center text-muted-foreground">
+                暂无路由。
+              </TableCell>
+            </TableRow>
+          ) : (
+            rows.map((r) => (
+              <TableRow key={r.model_alias}>
+                <TableCell className="align-top">{r.model_alias}</TableCell>
+                <TableCell className="align-top">
+                  {r.strategy ? (
+                    <span className="inline-flex rounded-full bg-muted px-2 py-0.5 text-xs text-foreground">
+                      {strategyLabel(r.strategy)}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">-</span>
+                  )}
+                </TableCell>
+                <TableCell className="align-top">
+                  {(r.providers ?? []).length === 0 ? (
+                    <span className="text-muted-foreground">暂无供应商</span>
+                  ) : (
+                    <div className="flex flex-col gap-1">
+                      {r.providers.map((p, i) => (
+                        <span
+                          key={`${p.name}-${i}`}
+                          className="inline-flex w-fit items-center rounded-full bg-muted px-2 py-0.5 text-xs text-foreground"
+                        >
+                          {p.name}
+                          {p.weight !== undefined && ` ·${p.weight}`}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </TableCell>
+                <TableCell className="align-top text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <Button variant="ghost" size="sm" onClick={() => setDetailRow(r)}>
+                      查看
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setEditRow(r)}>
+                      编辑
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => setDeleting(r.model_alias)}
+                    >
+                      删除
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
+
+      {/* Create modal */}
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="创建路由" size="xl">
+        <RouteForm
+          models={models}
+          providers={providers}
+          defaultValues={null}
+          onCancel={() => setCreateOpen(false)}
+          onSuccess={() => {
+            setCreateOpen(false);
+            load();
+          }}
+        />
+      </Modal>
+
+      {/* Edit modal */}
+      <Modal open={!!editRow} onClose={() => setEditRow(null)} title="编辑路由" size="xl">
+        {editRow && (
+          <RouteForm
+            models={models}
+            providers={providers}
+            defaultValues={editRow}
+            onCancel={() => setEditRow(null)}
+            onSuccess={() => {
+              setEditRow(null);
+              load();
+            }}
+          />
+        )}
+      </Modal>
 
       {/* Detail modal */}
-      <Modal open={!!viewing} onClose={() => setViewing(null)} title={viewing ? `路由 ${viewing.model_alias}` : ""} size="md">
-        {viewing && (
-          <div className="space-y-3 text-sm">
-            <div>
-              <span className="text-xs uppercase text-muted-foreground">策略</span>
-              <div className="mt-0.5"><Badge>{viewing.strategy}</Badge></div>
-            </div>
-            <div>
-              <span className="text-xs uppercase text-muted-foreground">候选 providers</span>
-              <div className="mt-1 space-y-1">
-                {viewing.providers.map((rp, i) => (
-                  <div key={i} className="flex items-center gap-2 rounded border px-3 py-1.5">
-                    <Badge tone="muted">{rp.name}</Badge>
-                    <span className="text-xs text-muted-foreground">权重 {rp.weight ?? 1}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+      <Modal open={!!detailRow} onClose={() => setDetailRow(null)} title="路由详情" size="md">
+        {detailRow && (
+          <div className="flex flex-col gap-4">
+            <DetailField label="模型别名">{detailRow.model_alias}</DetailField>
+            <DetailField label="策略">{strategyLabel(detailRow.strategy)}</DetailField>
+            <DetailField label="供应商">
+              {(detailRow.providers ?? []).length === 0 ? (
+                <span className="text-muted-foreground">暂无供应商</span>
+              ) : (
+                <span className="flex flex-col gap-1">
+                  {(detailRow.providers ?? []).map((p, i) => (
+                    <span key={i}>
+                      {p.name}
+                      {p.weight !== undefined && ` · weight: ${p.weight}`}
+                    </span>
+                  ))}
+                </span>
+              )}
+            </DetailField>
           </div>
         )}
       </Modal>
 
-      {/* Edit / create modal */}
-      <Modal
-        open={!!editing}
-        onClose={() => setEditing(null)}
-        title={isNew ? "新增路由" : editing ? `编辑 ${editing.model_alias}` : ""}
-        size="lg"
-        footer={
-          <>
-            <Button onClick={onSave}>保存</Button>
-            <Button variant="ghost" onClick={() => setEditing(null)}>取消</Button>
-          </>
-        }
-      >
-        {editing && (
-          <div className="space-y-3">
-            <label className="block text-sm">model_alias
-              <Input value={editing.model_alias} disabled={!isNew} onChange={(e) => setEditing({ ...editing, model_alias: e.target.value })} />
-            </label>
-            <label className="block text-sm">策略
-              <Select value={editing.strategy} onChange={(e) => setEditing({ ...editing, strategy: e.target.value })}>
-                {STRATEGIES.map((s) => <option key={s} value={s}>{s}</option>)}
-              </Select>
-            </label>
-            <div className="rounded-lg border p-3">
-              <div className="mb-2 text-sm font-medium">候选 providers(顺序对 priority/round_robin 有意义)</div>
-              {editing.providers.map((rp, i) => (
-                <div key={i} className="mb-2 grid gap-2 sm:grid-cols-[1fr_auto_auto]">
-                  <Select value={rp.name} onChange={(e) => setRP(i, { name: e.target.value })}>
-                    {providerNames.map((n) => <option key={n} value={n}>{n}</option>)}
-                  </Select>
-                  <Input type="number" placeholder="权重" value={rp.weight ?? 1} onChange={(e) => setRP(i, { weight: Number(e.target.value) })} className="w-24" />
-                  <Button variant="ghost" size="sm" onClick={() => delRP(i)}>×</Button>
-                </div>
-              ))}
-              <Button variant="ghost" size="sm" onClick={addRP}>+ 添加 provider</Button>
-            </div>
-          </div>
-        )}
-      </Modal>
+      {/* Delete confirm */}
+      <ConfirmModal
+        open={deleting !== null}
+        onCancel={() => setDeleting(null)}
+        onConfirm={async () => {
+          if (deleting === null) return;
+          await deleteRoute(deleting);
+          load();
+        }}
+        title="确认删除"
+        message={deleting !== null ? `确认删除路由 "${deleting}"？` : ""}
+      />
     </div>
+  );
+}
+
+/** Route create/edit form — mirrors the admin RouteForm field set. */
+function RouteForm({
+  models,
+  providers,
+  defaultValues,
+  onSuccess,
+  onCancel,
+}: {
+  models: Model[];
+  providers: Provider[];
+  defaultValues: Route | null;
+  onSuccess: () => void;
+  onCancel: () => void;
+}) {
+  const isEdit = !!defaultValues;
+  const [selectedModel, setSelectedModel] = useState(defaultValues?.model_alias ?? "");
+  const [strategy, setStrategy] = useState(defaultValues?.strategy ?? "");
+  const [rows, setRows] = useState<ProviderRowDraft[]>(() =>
+    (defaultValues?.providers ?? []).map((p) => ({
+      key: crypto.randomUUID(),
+      name: p.name,
+      weight: p.weight !== undefined ? String(p.weight) : "",
+    })),
+  );
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Candidate providers are limited to the selected model's upstream
+  // providers (a route pointing anywhere else could never serve the model).
+  const allowedProviders = useMemo(() => {
+    if (!selectedModel) return providers;
+    const model = models.find((m) => m.alias === selectedModel);
+    if (!model?.upstreams) return providers;
+    const upstreamNames = new Set(model.upstreams.map((u) => u.provider));
+    return providers.filter((p) => upstreamNames.has(p.name));
+  }, [selectedModel, models, providers]);
+
+  const patchRow = (key: string, patch: Partial<ProviderRowDraft>) =>
+    setRows((arr) => arr.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!selectedModel) {
+      setError("请选择模型别名。");
+      return;
+    }
+    if (!strategy) {
+      setError("请选择策略。");
+      return;
+    }
+    if (rows.length === 0 || rows.some((r) => !r.name)) {
+      setError("至少需要一个候选供应商，且每行都要选择供应商。");
+      return;
+    }
+    const parsedProviders: RouteProvider[] = rows.map((r) => ({
+      name: r.name,
+      ...(r.weight.trim() !== "" ? { weight: Number(r.weight) } : {}),
+    }));
+    const body: Route = { model_alias: selectedModel, strategy, providers: parsedProviders };
+
+    setPending(true);
+    try {
+      const res = isEdit ? await updateRoute(body.model_alias, body) : await createRoute(body);
+      if (res.warning) toast.warning(res.warning);
+      onSuccess();
+    } catch (err) {
+      setError(String((err as Error)?.message ?? err));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-4">
+      {/* Model alias: Select on create, locked input on edit */}
+      {isEdit ? (
+        <Field label="模型别名" required>
+          <Input value={defaultValues.model_alias} disabled />
+        </Field>
+      ) : (
+        <Field label="模型别名" required>
+          <Select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} required>
+            <option value="" disabled>
+              选择模型
+            </option>
+            {models.map((m) => (
+              <option key={m.alias} value={m.alias}>
+                {m.alias}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      )}
+
+      <Field label="策略" required>
+        <Select value={strategy} onChange={(e) => setStrategy(e.target.value)} required>
+          <option value="" disabled>
+            选择策略
+          </option>
+          {STRATEGIES.map((s) => (
+            <option key={s} value={s}>
+              {STRATEGY_LABELS[s]}
+            </option>
+          ))}
+        </Select>
+      </Field>
+
+      <div className="flex flex-col gap-3">
+        <span className="text-sm font-medium text-foreground">供应商</span>
+        {rows.map((row) => (
+          <div
+            key={row.key}
+            className="grid grid-cols-[1fr_120px_auto] items-end gap-3 rounded-md border border-border p-3"
+          >
+            <Field label="供应商" required>
+              <Select
+                value={row.name}
+                onChange={(e) => patchRow(row.key, { name: e.target.value })}
+                required
+              >
+                <option value="" disabled>
+                  选择供应商
+                </option>
+                {allowedProviders.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="权重">
+              <Input
+                type="number"
+                min={0}
+                value={row.weight}
+                onChange={(e) => patchRow(row.key, { weight: e.target.value })}
+                placeholder="1"
+              />
+            </Field>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setRows((arr) => arr.filter((x) => x.key !== row.key))}
+            >
+              移除
+            </Button>
+          </div>
+        ))}
+        <div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setRows((arr) => [...arr, { key: crypto.randomUUID(), name: "", weight: "" }])}
+          >
+            添加供应商
+          </Button>
+        </div>
+      </div>
+
+      {error && (
+        <p role="alert" className="w-full rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+
+      <div className={modalFormActionsClass}>
+        <Button type="button" variant="outline" onClick={onCancel}>
+          取消
+        </Button>
+        <Button type="submit" disabled={pending}>
+          {pending ? "保存中…" : isEdit ? "编辑" : "创建"}
+        </Button>
+      </div>
+    </form>
   );
 }
