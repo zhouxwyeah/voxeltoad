@@ -2,6 +2,7 @@
 /bin/
 *.exe
 *.out
+adminstack
 
 # Test artifacts
 *.test
