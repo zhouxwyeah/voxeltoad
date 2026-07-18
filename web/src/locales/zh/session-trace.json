@@ -1,0 +1,27 @@
+{
+  "heading": "会话链路",
+  "subtitle": "该会话的请求时间线和费用汇总。",
+  "back": "返回请求日志",
+  "summary": {
+    "requestCount": "请求数",
+    "totalTokens": "总 Token",
+    "cost": "总费用",
+    "errors": "错误数",
+    "fallbacks": "故障转移数",
+    "timeSpan": "时间跨度"
+  },
+  "timeline": {
+    "title": "请求时间线",
+    "time": "时间",
+    "provider": "供应商",
+    "model": "模型",
+    "tokens": "Token",
+    "ttft": "首字延迟 (ms)",
+    "duration": "耗时 (ms)",
+    "status": "状态",
+    "fallback": "故障转移",
+    "success": "正常",
+    "error": "错误"
+  },
+  "notFound": "未找到该会话的请求。未携带 X-Voxeltoad-Session 头的请求无法追踪。"
+}

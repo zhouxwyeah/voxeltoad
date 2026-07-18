@@ -1,0 +1,324 @@
+import { useEffect, useMemo, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Skeleton } from "../components/ui/skeleton";
+import { EmptyState } from "../components/ui/empty-state";
+import { Tabs } from "../components/ui/tabs";
+import { TraceCategories } from "../components/trace/trace-categories";
+import { JsonTree } from "../components/trace/json-tree";
+import { getTraceByRowID, listRequestLogs, listTraceBySession } from "../lib/api";
+import type { RequestLogView, TraceDetail, TraceSummary } from "../lib/types";
+import {
+  agentLabel,
+  agentTone,
+  formatDuration,
+  formatNumber,
+  formatTime,
+  shortId,
+  statusTone,
+} from "../lib/format";
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function TraceViewer() {
+  const { sessionId = "" } = useParams();
+  const navigate = useNavigate();
+  const [timeline, setTimeline] = useState<TraceSummary[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<TraceDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<string>("messages");
+
+  useEffect(() => {
+    setLoading(true);
+    listTraceBySession(sessionId)
+      .then((r) => {
+        setTimeline(r.requests);
+        setSelectedId(r.requests.length ? r.requests[0].id : null);
+      })
+      .catch((e) => setError(String(e?.message ?? e)))
+      .finally(() => setLoading(false));
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (selectedId == null) {
+      setDetail(null);
+      return;
+    }
+    setLoadingDetail(true);
+    setActiveTab("messages");
+    getTraceByRowID(selectedId)
+      .then(setDetail)
+      .catch((e) => setError(String(e?.message ?? e)))
+      .finally(() => setLoadingDetail(false));
+  }, [selectedId]);
+
+  async function onCopy(key: string, text: string) {
+    if (await copyText(text)) {
+      setCopied(key);
+      setTimeout(() => setCopied(null), 1500);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-6xl p-6">
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="mt-4 h-96 w-full" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="mx-auto max-w-6xl p-6">
+        <EmptyState title="加载失败" description={error} />
+      </div>
+    );
+  }
+
+  if (timeline.length === 0) {
+    return (
+      <div className="mx-auto max-w-6xl p-6">
+        <EmptyState
+          title="该会话没有录制数据"
+          description={`会话 ${shortId(sessionId, 16)} 暂无 trace 记录。`}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full">
+      {/* timeline */}
+      <div className="w-80 shrink-0 overflow-auto border-r border-border p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-semibold">请求时间线</h2>
+          <button className="text-xs text-primary hover:underline" onClick={() => navigate("/sessions")}>
+            ← 会话
+          </button>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          {timeline.map((t, i) => (
+            <button
+              key={t.id}
+              onClick={() => setSelectedId(t.id)}
+              className={`rounded-md border p-2 text-left text-xs transition-colors ${
+                selectedId === t.id
+                  ? "border-primary bg-accent"
+                  : "border-border hover:bg-muted/50"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-muted-foreground">#{i + 1}</span>
+                <Badge tone={statusTone(t.status_code)}>{t.status_code}</Badge>
+              </div>
+              <div className="mt-1 text-muted-foreground">{formatTime(t.created_at)}</div>
+              <div className="mt-1 flex items-center gap-1.5">
+                <Badge tone={agentTone(t.agent_type)}>{agentLabel(t.agent_type)}</Badge>
+                <span className="truncate text-muted-foreground">{t.model_requested}</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* detail */}
+      <div className="flex-1 overflow-auto p-5">
+        {loadingDetail || !detail ? (
+          <Skeleton className="h-96 w-full" />
+        ) : (
+          <DetailView
+            detail={detail}
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            onCopy={onCopy}
+            copied={copied}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DetailView({
+  detail,
+  activeTab,
+  onTabChange,
+  onCopy,
+  copied,
+}: {
+  detail: TraceDetail;
+  activeTab: string;
+  onTabChange: (v: string) => void;
+  onCopy: (key: string, text: string) => void;
+  copied: string | null;
+}) {
+  // request_logs is asynchronously sinked; a trace row may exist before its
+  // matching request_logs row. We accept a brief "—" state rather than
+  // retrying (see design decision in plan).
+  const [metrics, setMetrics] = useState<RequestLogView | null>(null);
+  const [metricsLoading, setMetricsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setMetricsLoading(true);
+    setMetrics(null);
+    listRequestLogs({ request_id: detail.request_id, page_size: 1 })
+      .then((r) => {
+        if (cancelled) return;
+        setMetrics(r.data[0] ?? null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMetrics(null);
+      })
+      .finally(() => {
+        if (!cancelled) setMetricsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.request_id]);
+
+  const tabs = useMemo(() => {
+    const list = [{ value: "messages", label: "消息" }, { value: "request", label: "请求体" }];
+    if (detail.response_raw) list.push({ value: "response", label: "响应体" });
+    if (detail.error_raw) list.push({ value: "error", label: "错误" });
+    return list;
+  }, [detail.response_raw, detail.error_raw]);
+
+  // If response/error disappeared for this detail, snap back to messages.
+  useEffect(() => {
+    if (!tabs.some((t) => t.value === activeTab)) onTabChange("messages");
+  }, [tabs, activeTab, onTabChange]);
+
+  // 5xx/4xx is a failure path: tokens/TTFT/duration are usually 0/undefined
+  // and "cache miss" is meaningless. Surface that as a visual anchor on the
+  // header and "—" in the metrics bar instead of misleading zeros.
+  const isError = detail.status_code >= 400;
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Header: status + agent + model + request_id + copy buttons */}
+      <div
+        className={`flex flex-wrap items-center gap-2 rounded-md py-1 pl-3 ${
+          isError ? "border-l-4 border-destructive bg-destructive/5" : ""
+        }`}
+      >
+        <Badge tone={statusTone(detail.status_code)}>HTTP {detail.status_code}</Badge>
+        <Badge tone={agentTone(detail.agent_type)}>{agentLabel(detail.agent_type)}</Badge>
+        <span className="text-sm text-muted-foreground">{detail.model_requested}</span>
+        <span className="font-mono text-xs text-muted-foreground">{shortId(detail.request_id, 18)}</span>
+        <div className="ml-auto flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onCopy("prompt", JSON.stringify(detail.request_raw, null, 2))}
+          >
+            {copied === "prompt" ? "已复制" : "复制 prompt"}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onCopy("raw", JSON.stringify(detail.messages, null, 2))}
+          >
+            {copied === "raw" ? "已复制" : "复制 messages"}
+          </Button>
+        </div>
+      </div>
+
+      {/* Metrics bar — from request_logs */}
+      <MetricsBar metrics={metrics} loading={metricsLoading} isError={isError} />
+
+      {/* Metadata card — fields the backend already returns but the UI previously hid */}
+      <MetadataCard detail={detail} />
+
+      {/* Tabs: messages / request / response / error */}
+      <Tabs items={tabs} value={activeTab} onValueChange={onTabChange} />
+
+      <div>
+        {activeTab === "messages" && <TraceCategories current={detail} previous={null} />}
+        {activeTab === "request" && <JsonTree value={detail.request_raw} />}
+        {activeTab === "response" && detail.response_raw && <JsonTree value={detail.response_raw} />}
+        {activeTab === "error" && detail.error_raw && (
+          <pre className="max-h-96 overflow-auto rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+            {detail.error_raw}
+          </pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MetricsBar({
+  metrics,
+  loading,
+  isError,
+}: {
+  metrics: RequestLogView | null;
+  loading: boolean;
+  isError: boolean;
+}) {
+  // On error responses the numeric values are all zero / absent — render
+  // them as "—" so the user reads "no data" rather than "0 tokens used".
+  const m = isError ? null : metrics;
+  const showLoading = loading && !isError;
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      <Stat label="Prompt Tokens" value={showLoading ? "…" : m ? formatNumber(m.prompt_tokens) : "—"} />
+      <Stat label="Completion Tokens" value={showLoading ? "…" : m ? formatNumber(m.completion_tokens) : "—"} />
+      <Stat label="Total Tokens" value={showLoading ? "…" : m ? formatNumber(m.total_tokens) : "—"} />
+      <Stat label="TTFT" value={showLoading ? "…" : m ? formatDuration(m.ttft_ms) : "—"} />
+      <Stat label="Duration" value={showLoading ? "…" : m ? formatDuration(m.duration_ms) : "—"} />
+      <Stat
+        label="Cache"
+        value={showLoading ? "…" : m ? (m.cache_hit ? m.cache_tier || "hit" : "miss") : "—"}
+      />
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
+      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="mt-0.5 font-mono text-sm">{value}</div>
+    </div>
+  );
+}
+
+function MetadataCard({ detail }: { detail: TraceDetail }) {
+  return (
+    <dl className="grid gap-x-6 gap-y-2 rounded-md border border-border bg-muted/20 p-3 text-xs sm:grid-cols-2 lg:grid-cols-3">
+      <MetaItem label="Provider" value={detail.provider} mono />
+      <MetaItem label="Stream" value={detail.stream ? "是" : "否"} />
+      <MetaItem label="Stop Reason" value={detail.stop_reason || "—"} mono />
+      <MetaItem label="Messages" value={String(detail.n_messages)} />
+      <MetaItem label="Tool Uses" value={String(detail.n_tool_use)} />
+      <MetaItem label="Tenant" value={detail.tenant || "—"} mono />
+      <MetaItem label="Trace ID" value={shortId(detail.trace_id, 18)} mono />
+      <MetaItem label="Created At" value={formatTime(detail.created_at)} />
+    </dl>
+  );
+}
+
+function MetaItem({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div>
+      <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className={`mt-0.5 ${mono ? "font-mono" : ""}`}>{value}</dd>
+    </div>
+  );
+}

@@ -1,0 +1,24 @@
+{
+  "id": "chatcmpl-extra",
+  "object": "chat.completion",
+  "created": 1700000000,
+  "model": "gpt-4o",
+  "system_fingerprint": "fp_abc123",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Hello!",
+        "refusal": null
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 5,
+    "total_tokens": 15
+  }
+}

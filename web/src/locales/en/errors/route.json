@@ -1,0 +1,9 @@
+{
+  "routeAliasRequired": "model alias is required",
+  "invalidStrategy": "Strategy must be one of priority, weighted, round_robin, session_affinity",
+  "invalidPhase": "Phase must be one of pre, post",
+  "createFailed": "route create failed",
+  "deleteFailed": "route delete failed",
+  "updateFailed": "route update failed",
+  "notFound": "route not found"
+}

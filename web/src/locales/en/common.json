@@ -1,0 +1,61 @@
+{
+  "appName": "Control Panel",
+  "appSubtitle": "voxeltoad",
+  "nav": {
+    "overview": "Overview",
+    "providers": "Providers",
+    "tenants": "Tenants",
+    "operators": "Operators",
+    "models": "Models",
+    "modelCatalog": "Model Catalog",
+    "apiKeys": "API Keys",
+    "groups": "Groups",
+    "quotas": "Quota",
+    "routes": "Routes",
+    "plugins": "Plugins",
+    "usage": "Usage",
+    "audit": "Audit Logs",
+    "requestLogs": "Request Logs",
+    "trace": "Trace",
+    "dataPlaneNodes": "Nodes",
+    "configHistory": "Config History",
+    "settings": "Settings",
+    "roles": "Roles"
+  },
+  "actions": {
+    "signOut": "Sign out",
+    "delete": "Delete",
+    "edit": "Edit",
+    "save": "Save",
+    "cancel": "Cancel",
+    "create": "Create",
+    "nextPage": "Next page",
+    "creating": "Creating…",
+    "saving": "Saving…",
+    "deleting": "Deleting…",
+    "signingIn": "Signing in…"
+  },
+  "pagination": {
+    "firstPage": "First",
+    "prevPage": "Previous",
+    "nextPage": "Next",
+    "lastPage": "Last",
+    "pageSize": "per page",
+    "total": "{count} records",
+    "page": "Page {page} / {totalPages}"
+  },
+  "modal": {
+    "confirmDelete": "Confirm Delete",
+    "close": "Close"
+  },
+  "language": {
+    "zh": "中",
+    "en": "EN"
+  },
+  "changePassword": {
+    "button": "Change Password",
+    "title": "Change Password",
+    "newPassword": "New Password",
+    "success": "Password changed successfully."
+  }
+}

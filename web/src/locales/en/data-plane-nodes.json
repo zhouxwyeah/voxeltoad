@@ -1,0 +1,22 @@
+{
+  "heading": "Data Plane Nodes",
+  "subtitle": "Gateway instances — online status, version, heartbeat, and config propagation health.",
+  "columns": {
+    "instanceId": "Instance ID",
+    "hostname": "Hostname",
+    "addr": "Address",
+    "version": "Version",
+    "configGeneration": "Config Gen",
+    "status": "Status",
+    "startedAt": "Started",
+    "lastHeartbeat": "Last Heartbeat"
+  },
+  "status": {
+    "online": "Online",
+    "offline": "Offline",
+    "draining": "Draining"
+  },
+  "actions": {
+    "emptyState": "No data plane instances found. Start a gateway instance with PG access to see it here."
+  }
+}

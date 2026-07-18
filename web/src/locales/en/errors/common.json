@@ -1,0 +1,5 @@
+{
+  "nameRequired": "name is required",
+  "unexpected": "unexpected error",
+  "invalidBody": "invalid request body"
+}

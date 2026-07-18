@@ -1,0 +1,9 @@
+{
+  "invalidInternalToken": "invalid internal token",
+  "snapshotFailed": "snapshot failed",
+  "invalidRequestBody": "invalid request body",
+  "modelNotPermitted": "api key not permitted to use this model",
+  "upstreamUnreachable": "upstream unreachable",
+  "streamingUnsupported": "streaming unsupported by server",
+  "requestBlocked": "request blocked"
+}

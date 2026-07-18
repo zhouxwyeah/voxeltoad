@@ -1,0 +1,58 @@
+{
+  "heading": "供应商",
+  "subtitle": "网关代理的上游 LLM 服务。",
+  "columns": {
+    "name": "名称",
+    "type": "类型",
+    "adapter": "适配器",
+    "baseUrl": "基础 URL"
+  },
+  "form": {
+    "name": {
+      "label": "名称 *"
+    },
+    "type": {
+      "label": "类型",
+      "placeholder": "选择品牌",
+      "custom": "自定义…",
+      "customPlaceholder": "输入品牌名称"
+    },
+    "adapter": {
+      "label": "适配器",
+      "placeholder": "选择适配器"
+    },
+    "baseUrl": {
+      "label": "基础 URL",
+      "placeholder": "https://…"
+    },
+    "apiKeyRef": {
+      "label": "API 密钥引用",
+      "placeholder": "env://KEY"
+    },
+    "credMode": {
+      "label": "凭证方式",
+      "ref": "引用模式(env://…)",
+      "key": "直接输入(加密存储)"
+    },
+    "apiKey": {
+      "label": "API 密钥",
+      "placeholder": "sk-…(加密存储)",
+      "hint": "粘贴明文密钥将由网关加密保存。"
+    },
+    "successCreated": "供应商已创建。",
+    "successUpdated": "供应商已更新。"
+  },
+  "modal": {
+    "createTitle": "创建供应商",
+    "editTitle": "编辑供应商"
+  },
+  "actions": {
+    "create": "创建供应商",
+    "edit": "编辑",
+    "save": "保存",
+    "creating": "创建中…",
+    "saving": "保存中…",
+    "deleteConfirm": "删除供应商 \"{name}\"?",
+    "emptyState": "暂无供应商。"
+  }
+}

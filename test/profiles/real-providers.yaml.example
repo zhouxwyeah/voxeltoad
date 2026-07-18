@@ -1,0 +1,29 @@
+# Real-providers E2E profile EXAMPLE.
+#
+# Copy to real-providers.yaml (gitignored) and fill in real credentials to run
+# tests against actual upstream providers:
+#
+#   E2E_PROFILE_PATH=./test/profiles/real-providers.yaml make test-e2e
+#
+# Any provider left with a placeholder/empty key will have its real-provider
+# tests skipped automatically.
+
+gateway:
+  base_url: "http://localhost:8080/v1"
+  admin_api_key: "REPLACE_ME"
+
+testrail_run_id: ""
+
+providers:
+  openai:
+    base_url: "https://api.openai.com/v1"
+    api_key: "sk-REPLACE_ME"
+  claude:
+    base_url: "https://api.anthropic.com"
+    api_key: "REPLACE_ME"
+  tencent:
+    base_url: "https://api.hunyuan.cloud.tencent.com/v1"
+    api_key: "REPLACE_ME"
+  zhipu:
+    base_url: "https://open.bigmodel.cn/api/paas/v4"
+    api_key: "REPLACE_ME"

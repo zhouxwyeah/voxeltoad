@@ -1,0 +1,19 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "voxeltoad-desktop",
+  "outputfilename": "desktop-gateway",
+  "frontend:dir": "../../desktop-ui",
+  "frontend:install": "npm ci",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcherUrl": "http://127.0.0.1:5173",
+  "assetdir": "../../desktop-ui/dist",
+  "wailsjsdir": "../../desktop-ui/src/wailsjs",
+  "version": "../package.json",
+  "info": {
+    "companyName": "voxeltoad",
+    "productName": "voxeltoad 桌面",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright © 2026 voxeltoad",
+    "comments": "Desktop personal LLM gateway — local recording + trace viewer"
+  }
+}

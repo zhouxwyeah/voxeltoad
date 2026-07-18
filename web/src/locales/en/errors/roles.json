@@ -1,0 +1,6 @@
+{
+  "roleNotFound": "role not found",
+  "roleInUse": "role is referenced by operators and cannot be deleted",
+  "builtinRoleImmutable": "built-in role name and scope cannot be changed",
+  "invalidPermission": "unknown permission key"
+}

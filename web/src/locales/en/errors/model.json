@@ -1,0 +1,8 @@
+{
+  "aliasRequired": "model alias is required",
+  "invalidPricingAmount": "Invalid pricing amount",
+  "createFailed": "model create failed",
+  "deleteFailed": "model delete failed",
+  "updateFailed": "model update failed",
+  "notFound": "model not found"
+}

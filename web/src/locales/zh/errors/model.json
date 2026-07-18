@@ -1,0 +1,8 @@
+{
+  "aliasRequired": "模型别名为必填项",
+  "invalidPricingAmount": "定价金额无效",
+  "createFailed": "模型创建失败",
+  "deleteFailed": "模型删除失败",
+  "updateFailed": "模型更新失败",
+  "notFound": "模型不存在"
+}

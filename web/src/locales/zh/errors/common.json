@@ -1,0 +1,5 @@
+{
+  "nameRequired": "名称为必填项",
+  "unexpected": "未知错误",
+  "invalidBody": "请求体无效"
+}

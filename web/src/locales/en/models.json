@@ -1,0 +1,52 @@
+{
+  "heading": "Models",
+  "subtitle": "Alias to upstream provider mappings with per-million-token pricing.",
+  "columns": {
+    "alias": "Alias",
+    "upstreams": "Upstreams"
+  },
+  "form": {
+    "alias": { "label": "Alias *", "placeholder": "gpt-4o" },
+    "description": {
+      "label": "Description",
+      "placeholder": "Summary, use cases, etc."
+    },
+    "contextLength": {
+      "label": "Context length",
+      "placeholder": "128000"
+    },
+    "capabilities": {
+      "label": "Capabilities (comma-separated)",
+      "placeholder": "vision, function_calling, streaming"
+    },
+    "tags": {
+      "label": "Tags (comma-separated)",
+      "placeholder": "chat, reasoning"
+    },
+    "upstreams": {
+      "add": "Add upstream",
+      "remove": "Remove",
+      "provider": { "label": "Provider *", "placeholder": "Select provider" },
+      "upstreamModel": { "label": "Upstream model *", "placeholder": "gpt-4o" },
+      "maxTokens": { "label": "Default max tokens", "placeholder": "Leave empty for no default" },
+      "promptPrice": { "label": "Prompt price / 1M", "placeholder": "2.50" },
+      "completionPrice": { "label": "Completion price / 1M", "placeholder": "10.00" },
+      "cacheHitMultiplier": { "label": "Cache hit %", "placeholder": "50 = half off cached tokens" }
+    }
+  },
+  "modal": {
+    "createTitle": "Create model",
+    "editTitle": "Edit model"
+  },
+  "actions": {
+    "create": "Create model",
+    "save": "Save",
+    "saving": "Saving…",
+    "deleteConfirm": "Delete model \"{alias}\"? Routes referencing it must be removed first.",
+    "delete": "Delete",
+    "emptyState": "No models yet.",
+    "noProviders": "You need at least one provider before creating a model.",
+    "goToProviders": "Go to Providers",
+    "noUpstreams": "No upstreams"
+  }
+}

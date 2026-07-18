@@ -1,0 +1,86 @@
+{
+  "heading": "LLM Trace",
+  "subtitle": "Session → Request → Messages → Raw. Full prompt/completion + raw bodies for debugging. Capture is opt-in on the gateway (ADR-0039).",
+  "nav": "Trace",
+  "back": "Back",
+  "notFound": "No trace payloads found. Either capture is disabled on the gateway, or this session has no payloads within the retention window.",
+  "captureDisabled": "Capture is disabled on the data plane. Enable trace.capture_payload.enabled in the gateway config to record message + raw bodies.",
+  "agent": {
+    "type": "Agent",
+    "all": "All"
+  },
+  "sessions": {
+    "title": "Sessions",
+    "subtitle": "Sessions with trace payloads (aggregated from request_logs).",
+    "session": "Session",
+    "requests": "Requests",
+    "lastSeen": "Last Seen",
+    "tokenTotal": "Tokens (in/out/total)",
+    "duration": "Duration",
+    "cost": "Cost",
+    "startedAt": "Started",
+    "hasErrors": "Has Errors"
+  },
+  "requests": {
+    "title": "Request List",
+    "subtitle": "Trace events for this session. Click a request to view its messages and raw bodies.",
+    "seq": "#",
+    "time": "Time",
+    "provider": "Provider",
+    "model": "Model",
+    "status": "Status",
+    "stopReason": "Stop Reason",
+    "messages": "Msgs",
+    "tools": "Tools",
+    "viewMessages": "Messages",
+    "viewRaw": "Raw",
+    "agent": "Agent"
+  },
+  "messages": {
+    "title": "Messages",
+    "subtitle": "Normalized message array (the conversation the gateway routed on).",
+    "role": "Role",
+    "content": "Content",
+    "toolCalls": "Tool Calls",
+    "toolCallsInline": "Tool Calls",
+    "empty": "No messages captured for this request.",
+    "expand": "Expand",
+    "collapse": "Collapse",
+    "categories": {
+      "system": "System Prompt",
+      "tools": "Tools",
+      "toolsParameters": "Parameters",
+      "messages": "Messages",
+      "user": "User Input",
+      "assistant": "Assistant",
+      "carriedOver": "Carried-over (History)",
+      "new": "New (this turn)",
+      "output": "Output (This Turn)"
+    }
+  },
+  "raw": {
+    "title": "Raw",
+    "subtitle": "Original client request + upstream response bodies (verbatim).",
+    "request": "Request",
+    "response": "Response",
+    "error": "Error",
+    "copy": "Copy",
+    "copied": "Copied",
+    "empty": "Empty"
+  },
+  "detail": {
+    "backToSession": "Back to session",
+    "requestId": "Request ID",
+    "loading": "Loading trace detail…",
+    "notFound": "No payload captured for this request (capture disabled, or the row expired).",
+    "statsBar": {
+      "startedAt": "Started",
+      "requestCount": "Requests",
+      "inputTokens": "Input Tokens",
+      "outputTokens": "Output Tokens",
+      "totalTokens": "Total Tokens",
+      "agent": "Agent"
+    },
+    "requestList": "Request List"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "heading": "Plugins",
+  "subtitle": "Governance plugin instances (pre/post phase) with arbitrary params.",
+  "columns": {
+    "name": "Name",
+    "phase": "Phase",
+    "enabled": "Enabled",
+    "scope": "Scope"
+  },
+  "form": {
+    "name": { "label": "Name *", "placeholder": "ratelimit" },
+    "phase": { "label": "Phase *", "placeholder": "Select phase" },
+    "enabled": { "label": "Enabled" },
+    "scope": { "label": "Scope", "placeholder": "Leave empty for global" },
+    "params": { "label": "Params (JSON)", "placeholder": "'{\"rpm\": 100}'", "invalidJson": "Invalid JSON: {error}" }
+  },
+  "modal": {
+    "createTitle": "Create plugin",
+    "editTitle": "Edit plugin",
+    "detailTitle": "Plugin detail"
+  },
+  "actions": {
+    "create": "Create plugin",
+    "saving": "Saving…",
+    "deleteConfirm": "Delete plugin \"{name}\"?",
+    "delete": "Delete",
+    "view": "View",
+    "edit": "Edit",
+    "emptyState": "No plugins yet."
+  },
+  "phase": {
+    "pre": "Pre",
+    "post": "Post"
+  }
+}

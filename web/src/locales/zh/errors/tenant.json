@@ -1,0 +1,12 @@
+{
+  "tenantNotFound": "租户未找到",
+  "groupNotFound": "用户组未找到",
+  "groupReferenced": "用户组被 API Key 引用",
+  "scopeOutsideTenant": "作用域超出您的租户范围",
+  "tenantInvalidForSuperAdmin": "超级管理员不能关联租户",
+  "tenantRequired": "租户管理员必须关联租户",
+  "lastSuperAdmin": "不能删除最后一个超级管理员",
+  "apiKeyNotFoundInTenant": "该租户下未找到此 API Key",
+  "tenantAdminHasNoTenant": "租户管理员没有关联租户",
+  "notAuthorizedToReadUsage": "无权读取用量"
+}

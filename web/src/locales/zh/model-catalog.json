@@ -1,0 +1,40 @@
+{
+  "heading": "模型广场",
+  "subtitle": "浏览可用模型的能力与定价。",
+  "search": {
+    "placeholder": "按别名、描述或标签搜索…"
+  },
+  "filters": {
+    "capability": "能力",
+    "allCapabilities": "全部能力"
+  },
+  "card": {
+    "contextLength": "上下文",
+    "startingPrice": "起价",
+    "perMillion": "/ 百万 token",
+    "providers": "{count} 个供应商",
+    "noPricing": "未配置定价",
+    "noDescription": "暂无描述。"
+  },
+  "capabilities": {
+    "vision": "视觉",
+    "function_calling": "函数调用",
+    "streaming": "流式输出",
+    "code": "代码"
+  },
+  "detail": {
+    "back": "返回广场",
+    "description": "描述",
+    "capabilities": "能力",
+    "tags": "标签",
+    "contextLength": "上下文长度",
+    "upstreams": "上游供应商",
+    "provider": "供应商",
+    "upstreamModel": "上游模型",
+    "promptPrice": "输入价格",
+    "completionPrice": "输出价格",
+    "maxTokens": "默认最大 Token 数"
+  },
+  "notFound": "未找到该模型。",
+  "empty": "暂无可用模型。"
+}

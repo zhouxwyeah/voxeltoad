@@ -1,0 +1,42 @@
+{
+  "heading": "路由",
+  "subtitle": "将模型别名解析为候选供应商及选择策略。",
+  "columns": {
+    "modelAlias": "模型别名",
+    "strategy": "策略",
+    "providers": "供应商"
+  },
+  "form": {
+    "modelAlias": { "label": "模型别名 *", "placeholder": "选择模型" },
+    "strategy": { "label": "策略 *", "placeholder": "选择策略" },
+    "providers": {
+      "add": "添加供应商",
+      "remove": "移除",
+      "name": { "label": "供应商 *", "placeholder": "选择供应商" },
+      "weight": { "label": "权重", "placeholder": "1" }
+    }
+  },
+  "modal": {
+    "createTitle": "创建路由",
+    "editTitle": "编辑路由",
+    "detailTitle": "路由详情"
+  },
+  "actions": {
+    "create": "创建路由",
+    "saving": "保存中…",
+    "deleteConfirm": "确认删除路由 \"{modelAlias}\"？",
+    "delete": "删除",
+    "view": "查看",
+    "edit": "编辑",
+    "emptyState": "暂无路由。",
+    "noModels": "请先创建模型再添加路由。",
+    "goToModels": "前往模型",
+    "noProviders": "暂无供应商"
+  },
+  "strategy": {
+    "priority": "优先级",
+    "weighted": "加权",
+    "round_robin": "轮询",
+    "session_affinity": "会话亲和"
+  }
+}

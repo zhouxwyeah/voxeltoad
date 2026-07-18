@@ -1,0 +1,28 @@
+{
+  "heading": "网关设置",
+  "subtitle": "可热更新的网关行为参数。修改后在一个配置轮询周期（约 5s）内生效，热字段无需重启。",
+  "nav": "设置",
+  "save": "保存",
+  "saving": "保存中…",
+  "saved": "已保存",
+  "trace": {
+    "title": "Trace 捕获",
+    "description": "LLM trace payload 捕获 (ADR-0039)。将 prompt/completion 明文与原始报文存入 trace_payloads 账本，用于 session→request→message→raw 调试。",
+    "captureEnabled": {
+      "label": "启用捕获",
+      "help": "切换完整消息 + 原始报文捕获。按请求热生效。",
+      "hot": "热更新"
+    },
+    "maxBodyKB": {
+      "label": "正文上限 (KB)",
+      "help": "单请求捕获正文上限（0 = 不限）。按请求热生效。",
+      "hot": "热更新"
+    },
+    "retentionDays": {
+      "label": "留存 (天)",
+      "help": "Trace payload 留存窗口（≤0 = 默认 7）。由 admin TTL 任务读取。",
+      "hot": "热更新"
+    }
+  },
+  "error": "保存设置失败"
+}

@@ -1,0 +1,58 @@
+{
+  "heading": "Providers",
+  "subtitle": "Upstream LLM suppliers proxied by the gateway.",
+  "columns": {
+    "name": "Name",
+    "type": "Type",
+    "adapter": "Adapter",
+    "baseUrl": "Base URL"
+  },
+  "form": {
+    "name": {
+      "label": "Name *"
+    },
+    "type": {
+      "label": "Type",
+      "placeholder": "Select brand",
+      "custom": "Custom\u2026",
+      "customPlaceholder": "Enter brand name"
+    },
+    "adapter": {
+      "label": "Adapter",
+      "placeholder": "Select adapter"
+    },
+    "baseUrl": {
+      "label": "Base URL",
+      "placeholder": "https://…"
+    },
+    "apiKeyRef": {
+      "label": "API key ref",
+      "placeholder": "env://KEY"
+    },
+    "credMode": {
+      "label": "Credential",
+      "ref": "Reference (env://…)",
+      "key": "Plaintext (encrypted at rest)"
+    },
+    "apiKey": {
+      "label": "API key",
+      "placeholder": "sk-… (stored encrypted)",
+      "hint": "Paste a plaintext key to have the gateway encrypt and store it."
+    },
+    "successCreated": "Provider created.",
+    "successUpdated": "Provider updated."
+  },
+  "modal": {
+    "createTitle": "Create provider",
+    "editTitle": "Edit provider"
+  },
+  "actions": {
+    "create": "Create provider",
+    "edit": "Edit",
+    "save": "Save",
+    "creating": "Creating…",
+    "saving": "Saving…",
+    "deleteConfirm": "Delete provider \"{name}\"?",
+    "emptyState": "No providers yet."
+  }
+}

@@ -1,0 +1,31 @@
+# Keep the Docker build context small. The Go binaries are built inside the
+# image from source (see deploy/Dockerfile.*), so most of the repo is noise.
+
+# Build outputs
+bin/
+coverage.out
+coverage.html
+
+# VCS / CI
+.git/
+.github/
+
+# Node / SDK / web (not needed for the Go image build)
+**/node_modules/
+sdk/typescript/dist/
+web/dist/
+
+# Local config & test artifacts
+config.yaml
+test/profiles/real-providers.yaml
+*.log
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Docs and design (not needed at build time)
+docs/
+design/
+*.md

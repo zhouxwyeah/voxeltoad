@@ -1,0 +1,26 @@
+# Default E2E profile — all upstreams are mocked, all keys are fake.
+# This profile lets CI run the full suite WITHOUT any real provider credentials.
+# Feature flags are derived from these values (see test/profile.go): any key that
+# looks like a placeholder marks the corresponding provider as "not real", and
+# tests requiring a real provider are skipped.
+
+gateway:
+  base_url: "http://localhost:8080/v1"
+  admin_api_key: "test-admin-key"
+
+# TestRail run id (optional). Empty disables TestRail reporting.
+testrail_run_id: ""
+
+providers:
+  openai:
+    base_url: "http://localhost:9101"
+    api_key: "sk-fake-openai"
+  claude:
+    base_url: "http://localhost:9102"
+    api_key: "fake-claude-key"
+  tencent:
+    base_url: "http://localhost:9103"
+    api_key: "fake-tencent-key"
+  zhipu:
+    base_url: "http://localhost:9104"
+    api_key: "fake-zhipu-key"

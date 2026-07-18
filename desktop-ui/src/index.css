@@ -1,0 +1,119 @@
+@import "tailwindcss";
+
+/*
+ * Control Panel design tokens — ported from the admin UI (web/src/app/globals.css,
+ * design/frontend.md §2). 科技蓝白 (tech blue + white), light-first developer
+ * console aesthetic. Colors are CSS variables on :root, re-exported into
+ * Tailwind v4's theme via @theme inline so bg-primary / text-muted-foreground /
+ * border-border resolve to these tokens. Components use tokens, never raw hex.
+ */
+:root {
+  --background: #ffffff;
+  --foreground: #0f172a;
+  --muted: #f7f9fc;
+  --muted-foreground: #64748b;
+
+  --border: #e6eaf2;
+  --input: #e6eaf2;
+
+  --primary: #2456f6;
+  --primary-foreground: #ffffff;
+  --accent: #eef3ff;
+  --accent-foreground: #2456f6;
+
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --success: #16a34a;
+  --success-foreground: #ffffff;
+  --warning: #d97706;
+  --warning-foreground: #ffffff;
+  --info: #0891b2;
+  --info-foreground: #ffffff;
+  --ring: #2456f6;
+
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #1e293b;
+  --sidebar: #f7f9fc;
+  --sidebar-foreground: #0f172a;
+  --sidebar-primary: #2456f6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eef3ff;
+  --sidebar-accent-foreground: #2456f6;
+  --sidebar-border: #e6eaf2;
+  --sidebar-ring: #2456f6;
+  --chart-1: #2456f6;
+  --chart-2: #64748b;
+  --chart-3: #dc2626;
+  --chart-4: #1e293b;
+  --chart-5: #e6eaf2;
+
+  --radius: 0.5rem;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-ring: var(--ring);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+* {
+  border-color: var(--border);
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}

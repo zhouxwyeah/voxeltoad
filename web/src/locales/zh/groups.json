@@ -1,0 +1,30 @@
+{
+  "heading": "分组",
+  "subtitle": "租户内的组织细分。每个分组可拥有独立的 API 密钥与用量视图。",
+  "columns": {
+    "id": "ID",
+    "name": "名称",
+    "status": "状态"
+  },
+  "status": {
+    "enabled": "已启用",
+    "disabled": "已停用"
+  },
+  "form": {
+    "name": { "label": "名称 *" }
+  },
+  "modal": {
+    "createTitle": "创建分组",
+    "disableTitle": "停用分组"
+  },
+  "actions": {
+    "create": "创建分组",
+    "save": "保存",
+    "emptyState": "暂无分组。",
+    "disable": "停用",
+    "enable": "启用",
+    "delete": "删除",
+    "disableConfirm": "停用分组「{name}」？",
+    "deleteConfirm": "删除分组「{name}」？若无 API 密钥引用，此操作不可撤销。"
+  }
+}

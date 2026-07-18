@@ -1,0 +1,16 @@
+{
+  "id": "msg_cache01",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-4-5",
+  "content": [
+    { "type": "text", "text": "Served from cache!" }
+  ],
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 20,
+    "output_tokens": 10,
+    "cache_creation_input_tokens": 30,
+    "cache_read_input_tokens": 50
+  }
+}

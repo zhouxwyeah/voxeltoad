@@ -1,0 +1,61 @@
+{
+  "appName": "控制面板",
+  "appSubtitle": "voxeltoad",
+  "nav": {
+    "overview": "概览",
+    "providers": "供应商",
+    "tenants": "租户",
+    "operators": "操作员管理",
+    "models": "模型",
+    "modelCatalog": "模型广场",
+    "apiKeys": "API 密钥",
+    "groups": "分组",
+    "quotas": "配额",
+    "routes": "路由",
+    "plugins": "插件",
+    "usage": "用量",
+    "audit": "审计日志",
+    "requestLogs": "请求日志",
+    "trace": "追踪",
+    "dataPlaneNodes": "节点",
+    "configHistory": "配置历史",
+    "settings": "设置",
+    "roles": "角色管理"
+  },
+  "actions": {
+    "signOut": "登出",
+    "delete": "删除",
+    "edit": "编辑",
+    "save": "保存",
+    "cancel": "取消",
+    "create": "创建",
+    "nextPage": "下一页",
+    "creating": "创建中…",
+    "saving": "保存中…",
+    "deleting": "删除中…",
+    "signingIn": "登录中…"
+  },
+  "pagination": {
+    "firstPage": "首页",
+    "prevPage": "上一页",
+    "nextPage": "下一页",
+    "lastPage": "末页",
+    "pageSize": "条 / 页",
+    "total": "共 {count} 条",
+    "page": "第 {page} / {totalPages} 页"
+  },
+  "modal": {
+    "confirmDelete": "确认删除",
+    "close": "关闭"
+  },
+  "language": {
+    "zh": "中",
+    "en": "EN"
+  },
+  "changePassword": {
+    "button": "修改密码",
+    "title": "修改密码",
+    "newPassword": "新密码",
+    "success": "密码修改成功。"
+  }
+}

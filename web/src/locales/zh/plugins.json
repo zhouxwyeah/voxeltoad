@@ -1,0 +1,35 @@
+{
+  "heading": "插件",
+  "subtitle": "治理插件实例（前置/后置阶段），支持任意参数。",
+  "columns": {
+    "name": "名称",
+    "phase": "阶段",
+    "enabled": "启用",
+    "scope": "作用域"
+  },
+  "form": {
+    "name": { "label": "名称 *", "placeholder": "ratelimit" },
+    "phase": { "label": "阶段 *", "placeholder": "选择阶段" },
+    "enabled": { "label": "启用" },
+    "scope": { "label": "作用域", "placeholder": "留空表示全局" },
+    "params": { "label": "参数 (JSON)", "placeholder": "'{\"rpm\": 100}'", "invalidJson": "JSON 无效: {error}" }
+  },
+  "modal": {
+    "createTitle": "创建插件",
+    "editTitle": "编辑插件",
+    "detailTitle": "插件详情"
+  },
+  "actions": {
+    "create": "创建插件",
+    "saving": "保存中…",
+    "deleteConfirm": "确认删除插件 \"{name}\"？",
+    "delete": "删除",
+    "view": "查看",
+    "edit": "编辑",
+    "emptyState": "暂无插件。"
+  },
+  "phase": {
+    "pre": "前置",
+    "post": "后置"
+  }
+}

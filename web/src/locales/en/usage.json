@@ -1,0 +1,50 @@
+{
+  "heading": "Usage",
+  "subtitle": "Track token consumption and cost across tenants and models.",
+  "columns": {
+    "time": "Time",
+    "tenant": "Tenant",
+    "model": "Model",
+    "provider": "Provider",
+    "promptTokens": "Prompt Tokens",
+    "completionTokens": "Completion Tokens",
+    "cost": "Cost"
+  },
+  "summary": {
+    "title": "Summary",
+    "totalRequests": "Total Requests",
+    "totalPromptTokens": "Prompt Tokens",
+    "totalCompletionTokens": "Completion Tokens",
+    "totalCost": "Total Cost",
+    "groupedBy": "Grouped by",
+    "topN": "Top {count} by cost ({dimension})",
+    "requests": "reqs"
+  },
+  "chart": {
+    "costTrend": "Cost Trend",
+    "cost": "Cost",
+    "tokens": "Tokens",
+    "noData": "No usage data in the selected range."
+  },
+  "filters": {
+    "from": "From",
+    "to": "To",
+    "tenant": "Tenant",
+    "provider": "Provider",
+    "model": "Model",
+    "groupBy": "Group by",
+    "groupByOptions": {
+      "tenant": "Tenant",
+      "group_name": "Group",
+      "api_key_id": "API Key",
+      "provider": "Provider",
+      "model": "Model"
+    },
+    "selectPlaceholder": "Select…",
+    "apply": "Apply",
+    "reset": "Reset"
+  },
+  "actions": {
+    "emptyState": "No usage data yet. Send a request through the gateway to see records here."
+  }
+}

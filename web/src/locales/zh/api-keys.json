@@ -1,0 +1,39 @@
+{
+  "heading": "API 密钥",
+  "subtitle": "管理本租户的客户端 API 密钥。明文密钥仅在创建时展示一次，之后无法找回。",
+  "columns": {
+    "keyId": "密钥 ID",
+    "revoked": "状态"
+  },
+  "status": {
+    "active": "有效",
+    "revoked": "已撤销"
+  },
+  "form": {
+    "keyId": { "label": "密钥 ID *", "placeholder": "如 prod-app-1" },
+    "allowedModels": {
+      "label": "允许的模型（可选）",
+      "placeholder": "选择模型…",
+      "selectAll": "全选",
+      "empty": "暂无可用模型。留空表示允许全部模型。"
+    }
+  },
+  "modal": {
+    "createTitle": "创建 API 密钥",
+    "editTitle": "编辑 API 密钥",
+    "keyCreated": "API 密钥已创建",
+    "revokeConfirm": "撤销 API 密钥「{keyId}」？此操作不可撤销。"
+  },
+  "plaintext": {
+    "warning": "这是唯一一次显示完整 API 密钥。请立即复制——之后无法找回。",
+    "copy": "复制",
+    "copied": "已复制！",
+    "saved": "我已保存"
+  },
+  "actions": {
+    "create": "创建密钥",
+    "save": "保存",
+    "revoke": "撤销",
+    "emptyState": "暂无 API 密钥。点击「创建密钥」以签发。"
+  }
+}

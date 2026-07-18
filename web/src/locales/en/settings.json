@@ -1,0 +1,28 @@
+{
+  "heading": "Gateway Settings",
+  "subtitle": "Hot-reloadable gateway behavior parameters. Changes apply within one config poll (~5s), no restart needed for hot fields.",
+  "nav": "Settings",
+  "save": "Save",
+  "saving": "Saving…",
+  "saved": "Saved",
+  "trace": {
+    "title": "Trace Capture",
+    "description": "LLM trace-payload capture (ADR-0039). Stores prompt/completion plaintext + raw bodies in the trace_payloads ledger for session→request→message→raw debugging.",
+    "captureEnabled": {
+      "label": "Enable Capture",
+      "help": "Toggle full message + raw body capture. Hot-applied per request.",
+      "hot": "Hot"
+    },
+    "maxBodyKB": {
+      "label": "Max Body (KB)",
+      "help": "Per-request captured body cap (0 = uncapped). Hot-applied.",
+      "hot": "Hot"
+    },
+    "retentionDays": {
+      "label": "Retention (days)",
+      "help": "Trace-payload retention window (≤0 = default 7). Read by the admin TTL job.",
+      "hot": "Hot"
+    }
+  },
+  "error": "Failed to save settings"
+}

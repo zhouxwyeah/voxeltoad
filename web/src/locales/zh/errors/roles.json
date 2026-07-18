@@ -1,0 +1,6 @@
+{
+  "roleNotFound": "角色不存在",
+  "roleInUse": "该角色被操作员引用，无法删除",
+  "builtinRoleImmutable": "内置角色的名称和作用域不可更改",
+  "invalidPermission": "未知的权限 Key"
+}

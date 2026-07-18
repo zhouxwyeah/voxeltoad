@@ -1,0 +1,19 @@
+{
+  "heading": "Overview",
+  "subtitle": "Business dashboard — node health, recent traffic, and top tenants.",
+  "cards": {
+    "nodesOnline": "Nodes Online",
+    "totalRequests": "Recent Requests",
+    "errors": "Recent Errors",
+    "blocked": "Blocked Requests",
+    "tokensIn": "Prompt Tokens (5m)",
+    "tokensOut": "Completion Tokens (5m)"
+  },
+  "topTenants": "Top Tenants (24h)",
+  "columns": {
+    "tenant": "Tenant",
+    "requests": "Requests",
+    "tokens": "Tokens",
+    "cost": "Cost"
+  }
+}

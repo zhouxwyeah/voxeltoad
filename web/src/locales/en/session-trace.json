@@ -1,0 +1,27 @@
+{
+  "heading": "Session Trace",
+  "subtitle": "Chronological request timeline and cost summary for this session.",
+  "back": "Back to request logs",
+  "summary": {
+    "requestCount": "Requests",
+    "totalTokens": "Total Tokens",
+    "cost": "Total Cost",
+    "errors": "Errors",
+    "fallbacks": "Fallbacks",
+    "timeSpan": "Time Span"
+  },
+  "timeline": {
+    "title": "Request Timeline",
+    "time": "Time",
+    "provider": "Provider",
+    "model": "Model",
+    "tokens": "Tokens",
+    "ttft": "TTFT (ms)",
+    "duration": "Duration (ms)",
+    "status": "Status",
+    "fallback": "Fallback",
+    "success": "OK",
+    "error": "Error"
+  },
+  "notFound": "No requests found for this session. Sessions without an X-Voxeltoad-Session header are not traceable."
+}

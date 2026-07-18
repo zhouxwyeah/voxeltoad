@@ -1,0 +1,38 @@
+{
+  "heading": "Operators",
+  "subtitle": "Manage platform operator accounts and permissions",
+  "columns": {
+    "id": "ID",
+    "email": "Email",
+    "role": "Role",
+    "tenantId": "Tenant ID"
+  },
+  "roles": {
+    "super-admin": "Super Admin",
+    "tenant-admin": "Tenant Admin"
+  },
+  "form": {
+    "email": { "label": "Email", "placeholder": "Enter email" },
+    "password": {
+      "label": "Password",
+      "placeholder": "Enter password",
+      "editLabel": "New Password (leave empty to keep current)",
+      "editPlaceholder": "Leave empty to keep current"
+    },
+    "role": { "label": "Role", "placeholder": "Select role" },
+    "tenantId": { "label": "Tenant", "placeholder": "Select tenant" }
+  },
+  "modal": {
+    "createTitle": "Create Operator",
+    "editTitle": "Edit Operator"
+  },
+  "actions": {
+    "create": "Create operator",
+    "save": "Save",
+    "creating": "Creating…",
+    "saving": "Saving…",
+    "deleteConfirm": "Delete operator {email}? This cannot be undone.",
+    "delete": "Delete",
+    "emptyState": "No operators"
+  }
+}

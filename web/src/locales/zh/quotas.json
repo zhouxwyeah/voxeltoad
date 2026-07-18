@@ -1,0 +1,18 @@
+{
+  "heading": "配额",
+  "subtitle": "查看本租户的配额余额。配额充值由平台管理员操作。",
+  "scope": "范围",
+  "balance": "余额",
+  "currency": "币种",
+  "emptyState": "当前范围尚未配置配额。请联系平台管理员。",
+  "actions": {
+    "refresh": "刷新"
+  },
+  "topup": {
+    "button": "充值",
+    "title": "充值配额",
+    "scope": { "label": "范围" },
+    "amount": { "label": "金额（显示单位）", "placeholder": "输入金额" },
+    "currency": { "label": "币种" }
+  }
+}

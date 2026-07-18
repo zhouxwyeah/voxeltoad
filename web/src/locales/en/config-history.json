@@ -1,0 +1,39 @@
+{
+  "heading": "Config History",
+  "subtitle": "Versioned snapshots of providers, models, routes, and plugins. Roll back the live config to a prior version.",
+  "table": {
+    "version": "Version",
+    "createdAt": "Created",
+    "actions": "Actions",
+    "empty": "No snapshots yet. A snapshot is saved after the first config mutation."
+  },
+  "actions": {
+    "diff": "Diff",
+    "preview": "Preview",
+    "rollback": "Roll back",
+    "nextPage": "Load more"
+  },
+  "labels": {
+    "current": "current"
+  },
+  "diff": {
+    "loading": "Loading diff…",
+    "added": "added",
+    "removed": "removed",
+    "noChanges": "No changes between these versions."
+  },
+  "preview": {
+    "loading": "Loading preview…",
+    "valid": "Valid",
+    "invalid": "Invalid",
+    "impact": "+{new} new, −{deleted} deleted"
+  },
+  "confirm": {
+    "title": "Roll back config",
+    "body": "Roll back the live config to version {version}?",
+    "warning": "This replaces all current providers, models, routes, and plugins. The rollback itself produces a new snapshot version, so it is reversible from this page.",
+    "cancel": "Cancel",
+    "confirm": "Roll back",
+    "rollingBack": "Rolling back…"
+  }
+}

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_CN</string>
+	<key>CFBundleExecutable</key>
+	<string>${EXECUTABLE_NAME}</string>
+	<key>CFBundleIconFile</key>
+	<string>iconfile</string>
+	<key>CFBundleIdentifier</key>
+	<string>dev.voxeltoad.desktop</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>voxeltoad 桌面</string>
+	<key>CFBundleDisplayName</key>
+	<string>voxeltoad 桌面</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>11.0</string>
+	<!-- The gateway binds 127.0.0.1:<port> to receive Agent requests. macOS Sonoma
+	     and later prompt for local-network usage on first bind even for loopback;
+	     declaring the purpose here avoids a silent failure / opaque prompt. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>桌面网关需要绑定本地端口接收第三方 Agent (CodeBuddy/Codex/Claude Code 等) 的转发请求。</string>
+	<!-- Single-window app, no dock badge thrash; we also keep running from the
+	     menu bar / tray after the main window closes. -->
+	<key>LSUIElement</key>
+	<false/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 voxeltoad</string>
+</dict>
+</plist>

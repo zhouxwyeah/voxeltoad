@@ -1,0 +1,14 @@
+apiVersion: v2
+name: voxeltoad
+description: voxeltoad data plane — OpenAI-compatible LLM gateway with quota/billing, rate limiting, and audit.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - llm
+  - gateway
+  - openai
+  - proxy
+home: https://cnb.cool/codebuddy/codebuddy-code
+maintainers:
+  - name: voxeltoad Team

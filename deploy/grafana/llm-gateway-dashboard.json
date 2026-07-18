@@ -1,0 +1,151 @@
+{
+  "title": "voxeltoad",
+  "uid": "emg",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Request Rate",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(llm_requests_total{status='ok'}[5m])) by (provider)",
+          "legendFormat": "{{provider}}",
+          "refId": "A"
+        }
+      ],
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Token Consumption Rate",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(llm_tokens_total{type='prompt'}[5m])) by (provider)",
+          "legendFormat": "prompt {{provider}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(llm_tokens_total{type='completion'}[5m])) by (provider)",
+          "legendFormat": "completion {{provider}}",
+          "refId": "B"
+        }
+      ],
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": { "unit": "tokens/s" }
+      }
+    },
+    {
+      "id": 3,
+      "title": "TTFT (p50/p95/p99)",
+      "gridPos": { "x": 0, "y": 8, "w": 8, "h": 8 },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(llm_ttft_seconds_bucket[5m])) by (le, provider))", "legendFormat": "p50 {{provider}}", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum(rate(llm_ttft_seconds_bucket[5m])) by (le, provider))", "legendFormat": "p95 {{provider}}", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, sum(rate(llm_ttft_seconds_bucket[5m])) by (le, provider))", "legendFormat": "p99 {{provider}}", "refId": "C" }
+      ],
+      "type": "timeseries",
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 4,
+      "title": "Request Duration (p50/p95/p99)",
+      "gridPos": { "x": 8, "y": 8, "w": 8, "h": 8 },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(llm_request_duration_seconds_bucket[5m])) by (le, provider))", "legendFormat": "p50 {{provider}}", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum(rate(llm_request_duration_seconds_bucket[5m])) by (le, provider))", "legendFormat": "p95 {{provider}}", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, sum(rate(llm_request_duration_seconds_bucket[5m])) by (le, provider))", "legendFormat": "p99 {{provider}}", "refId": "C" }
+      ],
+      "type": "timeseries",
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 5,
+      "title": "Upstream Error Rate",
+      "gridPos": { "x": 16, "y": 8, "w": 8, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(llm_upstream_errors_total[5m])) by (provider, error_type)",
+          "legendFormat": "{{provider}}/{{error_type}}",
+          "refId": "A"
+        }
+      ],
+      "type": "timeseries",
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "id": 6,
+      "title": "Cache Hit Rate",
+      "gridPos": { "x": 0, "y": 16, "w": 8, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(llm_cache_hits_total[5m])) / sum(rate(llm_requests_total[5m]))",
+          "legendFormat": "hit rate",
+          "refId": "A"
+        }
+      ],
+      "type": "stat",
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } }
+    },
+    {
+      "id": 7,
+      "title": "Rate Limit Rejections",
+      "gridPos": { "x": 8, "y": 16, "w": 8, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(llm_ratelimit_rejected_total[5m])) by (tenant)",
+          "legendFormat": "{{tenant}}",
+          "refId": "A"
+        }
+      ],
+      "type": "timeseries",
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "id": 8,
+      "title": "Request Log Drop Rate",
+      "gridPos": { "x": 16, "y": 16, "w": 8, "h": 8 },
+      "targets": [
+        {
+          "expr": "rate(request_logs_dropped_total[5m])",
+          "legendFormat": "dropped/s",
+          "refId": "A"
+        }
+      ],
+      "type": "stat",
+      "thresholds": {
+        "steps": [
+          { "color": "green", "value": 0 },
+          { "color": "red", "value": 1 }
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "title": "Trace Payload Drop Rate",
+      "description": "trace_payloads rows dropped (buffer full / sink error) — ADR-0039. Non-zero means the async trace recorder is shedding payloads under load.",
+      "gridPos": { "x": 0, "y": 24, "w": 8, "h": 8 },
+      "targets": [
+        {
+          "expr": "rate(trace_payloads_dropped_total[5m])",
+          "legendFormat": "dropped/s",
+          "refId": "A"
+        }
+      ],
+      "type": "stat",
+      "thresholds": {
+        "steps": [
+          { "color": "green", "value": 0 },
+          { "color": "red", "value": 1 }
+        ]
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["llm", "gateway", "ai"]
+}

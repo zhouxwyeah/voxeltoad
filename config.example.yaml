@@ -1,0 +1,57 @@
+# Bootstrap configuration example for voxeltoad.
+#
+# Both processes load this file via the --config flag (or GATEWAY_CONFIG /
+# ADMIN_CONFIG env vars):
+#   ./bin/gateway --config config.yaml
+#   ./bin/admin   --config config.yaml
+#
+# Every field is optional; unset fields fall back to the built-in defaults shown
+# below (see internal/config.Default). Copy to config.yaml and adjust.
+#
+# This is STATIC bootstrap config only. Dynamic config (providers, models,
+# routes, plugins) is owned by the admin plane and pulled by the data plane via
+# the config-snapshot endpoint — see design/architecture.md.
+
+# Data-plane (gateway) HTTP listen address.
+gateway:
+  addr: ":8080"
+
+# Management-plane (admin) HTTP listen address.
+admin:
+  addr: ":8090"
+
+# How the data plane pulls dynamic config from the admin plane.
+snapshot:
+  # Base URL of the admin plane (data plane polls <admin_url>/internal/config/snapshot).
+  admin_url: "http://localhost:8090"
+  # Poll period. Accepts Go duration strings (e.g. 5s, 2s, 1m).
+  poll_interval: 5s
+  # Shared secret authenticating the data↔management snapshot channel (ADR-0007).
+  # Resolved via ResolveSecret (e.g. "env://GATEWAY_INTERNAL_TOKEN"). BOTH planes
+  # must resolve to the same value. REQUIRED in production — an empty value is
+  # rejected at startup unless GATEWAY_ALLOW_INSECURE_DEV=1 (dev/test only).
+  internal_token_ref: "env://GATEWAY_INTERNAL_TOKEN"
+
+# PostgreSQL connection (admin plane only).
+db:
+  dsn: "postgres://postgres:postgres@localhost:5432/voxeltoad?sslmode=disable"
+
+# OpenTelemetry export. Disabled by default; when enabled, set the OTLP endpoint.
+otel:
+  enabled: false
+  service_name: "voxeltoad"
+  endpoint: ""
+
+# LLM trace-payload capture (ADR-0039). The hot-reloadable knobs (capture
+# on/off, max body KB, retention days) are managed via the admin UI Settings
+# page (PUT /api/v1/gateway-settings) and stored in the gateway_settings table —
+# they are NOT read from this file. Only the non-hot-reloadable recorder buffer
+# size and a retention fallback default belong here.
+trace:
+  capture_payload:
+    # Fallback retention window (days) used by the admin TTL job when
+    # GatewaySettings.Trace.RetentionDays is unset (<=0). <= 0 here = default 7.
+    retention_days: 7
+    # Async recorder buffer size; 0 = default (1024). Not hot-reloadable.
+    buffer: 0
+

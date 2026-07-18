@@ -1,0 +1,9 @@
+{
+  "invalidInternalToken": "内部令牌无效",
+  "snapshotFailed": "快照失败",
+  "invalidRequestBody": "请求体无效",
+  "modelNotPermitted": "API Key 无权使用此模型",
+  "upstreamUnreachable": "上游不可达",
+  "streamingUnsupported": "服务器不支持流式",
+  "requestBlocked": "请求被拦截"
+}

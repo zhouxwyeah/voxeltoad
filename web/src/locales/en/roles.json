@@ -1,0 +1,41 @@
+{
+  "heading": "Roles",
+  "subtitle": "Manage RBAC roles and permission sets",
+  "builtin": "built-in",
+  "wildcard": "all",
+  "empty": "No roles found",
+  "cols": {
+    "name": "Name",
+    "scope": "Scope",
+    "permissions_count": "Permissions",
+    "description": "Description",
+    "actions": "Actions"
+  },
+  "scope": {
+    "global": "Global",
+    "tenant": "Tenant"
+  },
+  "actions": {
+    "create": "Create Role",
+    "edit": "Edit",
+    "delete": "Delete",
+    "confirm": "Confirm",
+    "cancel": "Cancel"
+  },
+  "modal": {
+    "createTitle": "Create Role",
+    "editTitle": "Edit Role"
+  },
+  "form": {
+    "name": "Name",
+    "namePlaceholder": "e.g. billing-viewer",
+    "scope": "Scope Kind",
+    "description": "Description",
+    "descriptionPlaceholder": "Optional description",
+    "permissions": "Permissions",
+    "builtinNameLocked": "Built-in role name cannot be changed.",
+    "builtinScopeLocked": "locked",
+    "wildcard": "All permissions (*)",
+    "wildcardHint": "Grants every current and future permission"
+  }
+}

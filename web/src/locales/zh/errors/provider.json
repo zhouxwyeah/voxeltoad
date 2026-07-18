@@ -1,0 +1,8 @@
+{
+  "nameRequired": "供应商名称为必填项",
+  "createFailed": "供应商创建失败",
+  "notFound": "供应商不存在",
+  "deleteFailed": "供应商删除失败",
+  "updateFailed": "供应商更新失败",
+  "notFound": "供应商不存在"
+}

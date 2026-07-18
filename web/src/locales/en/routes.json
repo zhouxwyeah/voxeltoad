@@ -1,0 +1,42 @@
+{
+  "heading": "Routes",
+  "subtitle": "Resolve a model alias to candidate providers with a selection strategy.",
+  "columns": {
+    "modelAlias": "Model alias",
+    "strategy": "Strategy",
+    "providers": "Providers"
+  },
+  "form": {
+    "modelAlias": { "label": "Model alias *", "placeholder": "Select a model" },
+    "strategy": { "label": "Strategy *", "placeholder": "Select strategy" },
+    "providers": {
+      "add": "Add provider",
+      "remove": "Remove",
+      "name": { "label": "Provider *", "placeholder": "Select provider" },
+      "weight": { "label": "Weight", "placeholder": "1" }
+    }
+  },
+  "modal": {
+    "createTitle": "Create route",
+    "editTitle": "Edit route",
+    "detailTitle": "Route detail"
+  },
+  "actions": {
+    "create": "Create route",
+    "saving": "Saving…",
+    "deleteConfirm": "Delete route \"{modelAlias}\"?",
+    "delete": "Delete",
+    "view": "View",
+    "edit": "Edit",
+    "emptyState": "No routes yet.",
+    "noModels": "Create a model before adding a route.",
+    "goToModels": "Go to Models",
+    "noProviders": "No providers"
+  },
+  "strategy": {
+    "priority": "Priority",
+    "weighted": "Weighted",
+    "round_robin": "Round robin",
+    "session_affinity": "Session affinity"
+  }
+}

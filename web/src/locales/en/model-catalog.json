@@ -1,0 +1,40 @@
+{
+  "heading": "Model Catalog",
+  "subtitle": "Browse available models, their capabilities, and pricing.",
+  "search": {
+    "placeholder": "Search by alias, description, or tag…"
+  },
+  "filters": {
+    "capability": "Capability",
+    "allCapabilities": "All capabilities"
+  },
+  "card": {
+    "contextLength": "Context",
+    "startingPrice": "From",
+    "perMillion": "/ 1M tokens",
+    "providers": "{count} provider(s)",
+    "noPricing": "Pricing not configured",
+    "noDescription": "No description provided."
+  },
+  "capabilities": {
+    "vision": "Vision",
+    "function_calling": "Function Calling",
+    "streaming": "Streaming",
+    "code": "Code"
+  },
+  "detail": {
+    "back": "Back to catalog",
+    "description": "Description",
+    "capabilities": "Capabilities",
+    "tags": "Tags",
+    "contextLength": "Context Length",
+    "upstreams": "Upstream Providers",
+    "provider": "Provider",
+    "upstreamModel": "Upstream Model",
+    "promptPrice": "Prompt Price",
+    "completionPrice": "Completion Price",
+    "maxTokens": "Default Max Tokens"
+  },
+  "notFound": "Model not found.",
+  "empty": "No models available."
+}

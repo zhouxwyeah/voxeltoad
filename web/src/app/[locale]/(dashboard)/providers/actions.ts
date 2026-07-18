@@ -1,0 +1,140 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { serverAdminClient } from "@/lib/admin";
+import { type FormResult, toFormError } from "@/lib/errors";
+import { mapBackendError } from "@/lib/i18n-errors";
+
+/**
+ * Provider write actions (design/frontend.md §5). Value validation is the admin
+ * API's job (400 typed error); we don't re-check rules here. On success we
+ * revalidate the list path so the RSC re-fetches.
+ *
+ * Create uses POST upsert; edit uses PATCH partial update (ADR-0030).
+ */
+export async function createProvider(
+  _prev: FormResult | null,
+  formData: FormData,
+): Promise<FormResult> {
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) {
+    const mapped = mapBackendError("name is required");
+    return { ok: false, error: mapped.fallback, errorKey: mapped.key };
+  }
+  const body: Record<string, unknown> = { name };
+  for (const key of ["type", "adapter", "base_url", "api_key_ref"] as const) {
+    const v = String(formData.get(key) ?? "").trim();
+    if (v) body[key] = v;
+  }
+  // api_key is write-only plaintext; when supplied the gateway encrypts and
+  // stores it, and api_key_ref is rewritten to db://provider/<name> (ADR-0030).
+  const apiKey = String(formData.get("api_key") ?? "").trim();
+  if (apiKey) body.api_key = apiKey;
+  const weight = String(formData.get("weight") ?? "").trim();
+  if (weight) body.weight = Number(weight);
+
+  try {
+    const client = await serverAdminClient();
+    const { error, response } = await client.POST("/api/v1/providers", {
+      // body is a superset-shaped Provider; the required field is name.
+      body: body as { name: string },
+    });
+    if (error || !response.ok) {
+      const message = error?.error?.message ?? "create failed";
+      const mapped = mapBackendError(message);
+      return { ok: false, error: mapped.fallback, errorKey: mapped.key };
+    }
+  } catch (err) {
+    return toFormError(err);
+  }
+  revalidatePath("/providers");
+  return { ok: true };
+}
+
+export async function updateProvider(
+  _prev: FormResult | null,
+  formData: FormData,
+): Promise<FormResult> {
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) {
+    const mapped = mapBackendError("name is required");
+    return { ok: false, error: mapped.fallback, errorKey: mapped.key };
+  }
+  // A plaintext api_key rotates the credential. The generic PATCH endpoint
+  // (/providers/{name}) does not accept api_key (ADR-0030 keeps credential
+  // writes on a dedicated endpoint), so when a key is supplied we: (a) PATCH
+  // the non-secret fields on the generic endpoint, then (b) rotate the
+  // credential via /providers/{name}/credential. We deliberately do not send
+  // api_key_ref in this branch — the credential endpoint sets it to
+  // db://provider/<name>, and the form's api_key_ref field may hold a masked
+  // value we must not persist.
+  const apiKey = String(formData.get("api_key") ?? "").trim();
+  const refKeys = apiKey
+    ? (["type", "adapter", "base_url"] as const)
+    : (["type", "adapter", "base_url", "api_key_ref"] as const);
+  const body: Record<string, unknown> = {};
+  for (const key of refKeys) {
+    const v = String(formData.get(key) ?? "").trim();
+    if (v) body[key] = v;
+  }
+  const weight = String(formData.get("weight") ?? "").trim();
+  if (weight) body.weight = Number(weight);
+
+  try {
+    const client = await serverAdminClient();
+    // Step (a): generic partial update for non-secret fields, if any.
+    if (Object.keys(body).length > 0) {
+      const { error, response } = await client.PATCH(
+        "/api/v1/providers/{name}",
+        {
+          params: { path: { name } },
+          // All fields optional per ProviderPatch; only send what's present.
+          body: body as Record<string, never>,
+        },
+      );
+      if (error || !response.ok) {
+        const message = error?.error?.message ?? "update failed";
+        const mapped = mapBackendError(message);
+        return { ok: false, error: mapped.fallback, errorKey: mapped.key };
+      }
+    }
+    // Step (b): rotate the credential when a plaintext key was supplied.
+    if (apiKey) {
+      const { error, response } = await client.PATCH(
+        "/api/v1/providers/{name}/credential",
+        {
+          params: { path: { name } },
+          body: { api_key: apiKey },
+        },
+      );
+      if (error || !response.ok) {
+        const message = error?.error?.message ?? "credential update failed";
+        const mapped = mapBackendError(message);
+        return { ok: false, error: mapped.fallback, errorKey: mapped.key };
+      }
+    }
+  } catch (err) {
+    return toFormError(err);
+  }
+  revalidatePath("/providers");
+  return { ok: true };
+}
+
+export async function deleteProvider(name: string): Promise<FormResult> {
+  try {
+    const client = await serverAdminClient();
+    const { error, response } = await client.DELETE(
+      "/api/v1/providers/{name}",
+      { params: { path: { name } } },
+    );
+    if (error || !response.ok) {
+      const message = error?.error?.message ?? "delete failed";
+      const mapped = mapBackendError(message);
+      return { ok: false, error: mapped.fallback, errorKey: mapped.key };
+    }
+  } catch (err) {
+    return toFormError(err);
+  }
+  revalidatePath("/providers");
+  return { ok: true };
+}

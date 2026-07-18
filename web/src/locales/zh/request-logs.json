@@ -1,0 +1,52 @@
+{
+  "heading": "请求日志",
+  "subtitle": "LLM 请求记录 — 查看 token 用量、延迟、错误和被拦截的请求。",
+  "columns": {
+    "time": "时间",
+    "tenant": "租户",
+    "provider": "供应商",
+    "modelRequested": "请求模型",
+    "modelResolved": "实际模型",
+    "promptTokens": "提示 Token",
+    "completionTokens": "生成 Token",
+    "totalTokens": "总 Token",
+    "ttftMs": "首字延迟 (ms)",
+    "durationMs": "耗时 (ms)",
+    "stream": "流式",
+    "errorType": "错误",
+    "blockedBy": "拦截来源",
+    "fallback": "故障转移",
+    "session": "会话"
+  },
+  "filters": {
+    "from": "开始时间",
+    "to": "结束时间",
+    "tenant": "租户",
+    "groupName": "分组",
+    "apiKeyId": "API Key ID",
+    "provider": "供应商",
+    "model": "模型",
+    "modelRequested": "请求模型",
+    "errorType": "错误类型",
+    "blockedBy": "拦截来源",
+    "stream": "流式",
+    "fallback": "故障转移",
+    "sessionId": "会话 ID",
+    "any": "全部",
+    "streamTrue": "流式",
+    "streamFalse": "非流式",
+    "fallbackTrue": "已转移",
+    "fallbackFalse": "未转移",
+    "apply": "筛选",
+    "reset": "重置",
+    "selectPlaceholder": "全部"
+  },
+  "status": {
+    "success": "正常",
+    "yes": "是",
+    "no": "否"
+  },
+  "actions": {
+    "emptyState": "暂无请求日志，尝试调整时间范围或筛选条件。"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "pluginNameRequired": "Plugin name is required",
+  "pluginNotFound": "Plugin not found",
+  "invalidParams": "Invalid JSON params",
+  "createFailed": "plugin create failed",
+  "deleteFailed": "plugin delete failed",
+  "updateFailed": "plugin update failed"
+}

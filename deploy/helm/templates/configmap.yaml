@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  labels:
+    app.kubernetes.io/name: voxeltoad
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  config.yaml: |
+    {{- with .Values.config }}
+    gateway:
+      addr: {{ .gateway.addr | quote }}
+    snapshot:
+      admin_url: {{ .snapshot.admin_url | quote }}
+      poll_interval: {{ .snapshot.poll_interval }}
+      internal_token_ref: {{ .snapshot.internal_token_ref | quote }}
+      allow_insecure_dev: {{ .snapshot.allow_insecure_dev }}
+    otel:
+      enabled: {{ .otel.enabled }}
+      {{- with .otel.endpoint }}
+      endpoint: {{ . | quote }}
+      {{- end }}
+      service_name: {{ .otel.service_name | quote }}
+    {{- end }}

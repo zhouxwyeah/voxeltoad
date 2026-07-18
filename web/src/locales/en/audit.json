@@ -1,0 +1,28 @@
+{
+  "heading": "Audit Logs",
+  "subtitle": "Management-plane mutations attributed by affected tenant.",
+  "columns": {
+    "time": "Time",
+    "operator": "Operator",
+    "tenant": "Tenant",
+    "resourceType": "Resource Type",
+    "resourceId": "Resource ID",
+    "action": "Action"
+  },
+  "filters": {
+    "from": "From",
+    "to": "To",
+    "resourceType": "Resource Type",
+    "action": "Action",
+    "all": "All",
+    "apply": "Apply",
+    "reset": "Reset"
+  },
+  "actions": {
+    "create": "Create",
+    "update": "Update",
+    "delete": "Delete",
+    "read": "Read",
+    "emptyState": "No audit logs yet."
+  }
+}

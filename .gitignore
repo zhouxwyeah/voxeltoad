@@ -1,0 +1,40 @@
+# Binaries
+/bin/
+*.exe
+*.out
+
+# Test artifacts
+*.test
+coverage.out
+coverage.html
+
+# Local env & secrets
+.env
+.env.*
+test/profiles/real-providers.yaml
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Agent session plans (ephemeral)
+.zcode/plans/
+
+# Node (SDK / web / desktop-ui)
+node_modules/
+sdk/typescript/dist/
+web/dist/
+desktop-ui/dist/
+# Wails build intermediates — populated by `wails build` / `wails dev`. Never
+# hand-edit; regenerated from desktop-ui/dist via scripts/build-desktop.sh.
+desktop-ui/src/wailsjs/
+desktop-ui/package.json.md5
+deploy/desktop/dist/
+deploy/desktop/build/bin/
+.codebuddy/
+
+# Desktop personal gateway runtime artifacts (root-level only)
+/desktop
+/desktop.yaml
+*.db

@@ -1,0 +1,39 @@
+{
+  "heading": "配置历史",
+  "subtitle": "供应商、模型、路由与插件的版本快照。可将当前配置回滚到历史版本。",
+  "table": {
+    "version": "版本",
+    "createdAt": "创建时间",
+    "actions": "操作",
+    "empty": "暂无快照。首次配置变更后会自动保存快照。"
+  },
+  "actions": {
+    "diff": "对比",
+    "preview": "预览",
+    "rollback": "回滚",
+    "nextPage": "加载更多"
+  },
+  "labels": {
+    "current": "当前"
+  },
+  "diff": {
+    "loading": "正在加载差异…",
+    "added": "新增",
+    "removed": "删除",
+    "noChanges": "两个版本之间无差异。"
+  },
+  "preview": {
+    "loading": "正在加载预览…",
+    "valid": "有效",
+    "invalid": "无效",
+    "impact": "+{new} 新增, −{deleted} 删除"
+  },
+  "confirm": {
+    "title": "回滚配置",
+    "body": "将当前配置回滚到版本 {version}？",
+    "warning": "此操作将替换所有当前的供应商、模型、路由和插件。回滚本身会产生新的快照版本，因此可在本页面再次回滚。",
+    "cancel": "取消",
+    "confirm": "回滚",
+    "rollingBack": "正在回滚…"
+  }
+}

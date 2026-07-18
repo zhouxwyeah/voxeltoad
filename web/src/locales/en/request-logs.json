@@ -1,0 +1,52 @@
+{
+  "heading": "Request Logs",
+  "subtitle": "LLM request records — view token usage, latency, errors, and blocked requests per tenant.",
+  "columns": {
+    "time": "Time",
+    "tenant": "Tenant",
+    "provider": "Provider",
+    "modelRequested": "Model (Requested)",
+    "modelResolved": "Model (Resolved)",
+    "promptTokens": "Prompt Tokens",
+    "completionTokens": "Completion Tokens",
+    "totalTokens": "Total Tokens",
+    "ttftMs": "TTFT (ms)",
+    "durationMs": "Duration (ms)",
+    "stream": "Stream",
+    "errorType": "Error",
+    "blockedBy": "Blocked By",
+    "fallback": "Fallback",
+    "session": "Session"
+  },
+  "filters": {
+    "from": "From",
+    "to": "To",
+    "tenant": "Tenant",
+    "groupName": "Group",
+    "apiKeyId": "API Key ID",
+    "provider": "Provider",
+    "model": "Model",
+    "modelRequested": "Model (Requested)",
+    "errorType": "Error Type",
+    "blockedBy": "Blocked By",
+    "stream": "Stream",
+    "fallback": "Fallback",
+    "sessionId": "Session ID",
+    "any": "Any",
+    "streamTrue": "Stream",
+    "streamFalse": "Non-stream",
+    "fallbackTrue": "Failover",
+    "fallbackFalse": "No failover",
+    "apply": "Apply",
+    "reset": "Reset",
+    "selectPlaceholder": "All"
+  },
+  "status": {
+    "success": "OK",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "actions": {
+    "emptyState": "No request logs found. Try adjusting the time range or filters."
+  }
+}

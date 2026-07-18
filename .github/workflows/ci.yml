@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Light gate: runs on every PR and every push. Kept fast (target < 5 min).
+  # Covers Go fmt/vet/lint/arch/unit-tests, SDK codegen/typecheck/lint/test,
+  # devstack smoke, and web typecheck/lint.
+  # -------------------------------------------------------------------------
+  ci-light:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install SDK + web dependencies
+        run: |
+          make sdk-install
+          make sdk-build
+          npm ci --prefix web
+
+      - name: Run light CI (Go + SDK + devstack smoke)
+        run: make ci
+
+      - name: Web quality gates (typecheck + lint)
+        run: make ci-web
+
+  # -------------------------------------------------------------------------
+  # Heavy gate: runs only on push to main. Includes DB-backed tests (embedded
+  # PG), Docker image builds, and vulnerability audit. Runs after ci-light so
+  # failures in the light gate don't waste heavy CI minutes.
+  # -------------------------------------------------------------------------
+  ci-heavy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: ci-light
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install SDK + web dependencies
+        run: |
+          make sdk-install
+          make sdk-build
+          npm ci --prefix web
+
+      - name: Run heavy CI (DB tests + Docker builds + vuln audit)
+        run: make ci-heavy

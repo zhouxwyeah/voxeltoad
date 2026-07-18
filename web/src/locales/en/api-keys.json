@@ -1,0 +1,39 @@
+{
+  "heading": "API Keys",
+  "subtitle": "Manage client API keys for this tenant. The plaintext key is shown once on creation and cannot be retrieved afterwards.",
+  "columns": {
+    "keyId": "Key ID",
+    "revoked": "Status"
+  },
+  "status": {
+    "active": "Active",
+    "revoked": "Revoked"
+  },
+  "form": {
+    "keyId": { "label": "Key ID *", "placeholder": "e.g. prod-app-1" },
+    "allowedModels": {
+      "label": "Allowed Models (optional)",
+      "placeholder": "Select models…",
+      "selectAll": "Select all",
+      "empty": "No models available. Leave empty to allow all models."
+    }
+  },
+  "modal": {
+    "createTitle": "Create API Key",
+    "editTitle": "Edit API Key",
+    "keyCreated": "API Key Created",
+    "revokeConfirm": "Revoke API key \"{keyId}\"? This cannot be undone."
+  },
+  "plaintext": {
+    "warning": "This is the only time the full API key is shown. Copy it now — it cannot be retrieved later.",
+    "copy": "Copy",
+    "copied": "Copied!",
+    "saved": "I've Saved It"
+  },
+  "actions": {
+    "create": "Create Key",
+    "save": "Save",
+    "revoke": "Revoke",
+    "emptyState": "No API keys yet. Click \"Create Key\" to issue one."
+  }
+}

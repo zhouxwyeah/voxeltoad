@@ -1,0 +1,2339 @@
+openapi: 3.0.3
+
+# voxeltoad — Management-plane (Control Panel) API.
+#
+# This spec is the SINGLE SOURCE OF TRUTH for the admin REST surface
+# (ADR-0019, decision: OpenAPI-first). It is written FULLY UP FRONT and
+# implementation is aligned against it; the TS admin client is code-generated
+# from it, and Go handler tests assert response shapes against it.
+#
+# Conventions:
+#   - Most list endpoints return the uniform envelope {data, next_cursor} with
+#     keyset (opaque cursor) pagination; next_cursor="" means no more pages.
+#   - EXCEPTION: /audit and /request-logs use offset pagination with the
+#     {data, total, page, page_size} envelope (page-jump UI); page is 1-based.
+#   - Money is int64 micro-units of a named currency (ADR-0013) — never floats.
+#   - Errors use the uniform envelope {error:{message,type}} (OpenAI-compatible).
+#   - Authz (ADR-0017): super-admin owns global config + tenancy + topups;
+#     tenant-admin is structurally scoped to its own tenant.
+#   - Reads are never audited; mutations are (ADR-0017 §5).
+#   - The data-plane snapshot channel (/internal/config/snapshot) is a separate
+#     contract and is intentionally NOT part of this admin API surface.
+info:
+  title: voxeltoad — Admin API
+  version: 0.1.0
+  description: >
+    Management-plane REST API for providers, models, routes, plugins, tenants,
+    API keys, quotas, usage, and audit. Consumed by the Control Panel UI and the
+    generated TypeScript admin SDK.
+
+servers:
+  - url: /
+    description: Same-origin (admin plane root)
+
+tags:
+  - name: auth
+    description: Operator authentication
+  - name: config
+    description: Global config CRUD (super-admin)
+  - name: tenancy
+    description: Tenant management (super-admin)
+  - name: api-keys
+    description: Tenant-scoped API keys (tenant-admin)
+  - name: quotas
+    description: Quota balances and top-ups
+  - name: usage
+    description: Usage records and aggregates
+  - name: audit
+    description: Audit log (mutations)
+
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Operator login → session token
+      description: >
+        Authenticates email+password and issues an opaque bearer session token
+        (TTL 12h). Enforces a per-email failed-attempt lockout (429).
+        Unauthenticated endpoint.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Session issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  # ---------------------------------------------------------------------------
+  # Global config CRUD (super-admin). Cross-references validated at write time
+  # (ADR-0014). Every mutation is audited.
+  # ---------------------------------------------------------------------------
+  /api/v1/providers:
+    get:
+      tags: [config]
+      summary: List providers
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Provider list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderList'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [config]
+      summary: Create or upsert a provider
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Provider' }
+      responses:
+        '201':
+          description: Provider upserted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Provider' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/providers/{name}:
+    patch:
+      tags: [config]
+      summary: Partially update a provider
+      description: >
+        Patch a subset of provider fields. Unspecified fields are left unchanged
+        (nil = keep, not nil = overwrite). The patch is applied inside a
+        SELECT ... FOR UPDATE transaction so concurrent patches to the same
+        provider serialize rather than lost-update. See ADR-0030.
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProviderPatch' }
+      responses:
+        '200':
+          description: Provider patched; returns the full updated provider
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Provider' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [config]
+      summary: Delete a provider
+      description: >
+        Refused (409) when the provider is referenced by one or more models
+        or routes. Delete or repoint those references first.
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Provider is referenced by models/routes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/v1/providers/{name}/credential:
+    patch:
+      tags: [config]
+      summary: Update a provider's upstream credential (encrypted at rest, ADR-0031)
+      description: >
+        Accepts either a plaintext api_key (encrypted server-side and stored in
+        provider_credentials) or an external api_key_ref (env://VAR). The
+        plaintext key is never returned. The provider's api_key_ref pointer is
+        updated to match the stored credential.
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                api_key: { type: string, description: Plaintext upstream key — encrypted and stored. Never returned. }
+                api_key_ref: { type: string, description: 'External ref (env://VAR) — no credential-table write.' }
+      responses:
+        '200':
+          description: Credential updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_key_ref: { type: string, description: Masked ref (db://provider/<name> or env://***). }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # Config snapshot history, diff, rollback, preview (ADR-0025).
+  # Super-admin only. The data plane polls the snapshot by version; rollback
+  # replaces the live config tables and bumps config_generation.
+  # ---------------------------------------------------------------------------
+  /api/v1/config/history:
+    get:
+      tags: [config-history]
+      summary: List config snapshots (keyset paginated, newest first)
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Snapshot list (excludes full payload)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SnapshotList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/config/history/diff:
+    get:
+      tags: [config-history]
+      summary: Structured diff between two snapshot versions
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: integer, format: int64 } }
+        - { name: to,   in: query, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: Diff summary (added/deleted resource names)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigDiff' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/config/history/{version}:
+    get:
+      tags: [config-history]
+      summary: Get the full snapshot at a version
+      parameters:
+        - { name: version, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: Full config snapshot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigSnapshot' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/config/rollback:
+    post:
+      tags: [config-history]
+      summary: Rollback the live config to a specific snapshot version
+      description: >
+        Replaces all config tables (providers/models/routes/plugins) with the
+        snapshot content, then bumps config_generation. The data plane picks
+        up the new generation via the normal poll cycle. Each rollback produces
+        a new snapshot version, so the rollback itself is auditable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RollbackRequest' }
+      responses:
+        '200': { description: Rolled back }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/config/preview:
+    post:
+      tags: [config-history]
+      summary: "Dry-run: validate a candidate config and diff against current"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfigSnapshot' }
+      responses:
+        '200':
+          description: Validation result + diff + impact summary
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PreviewResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/models:
+    get:
+      tags: [config]
+      summary: List models (accessible by super-admin and tenant-admin)
+      description: >
+        Returns all model aliases. Accessible by any authenticated operator
+        (super-admin or tenant-admin). Models are global shared config;
+        writes (POST/PATCH/DELETE) remain super-admin only.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Model list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [config]
+      summary: Create or upsert a model (upstream providers must exist)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Model' }
+      responses:
+        '201':
+          description: Model upserted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Model' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/models/{alias}:
+    patch:
+      tags: [config]
+      summary: Partially update a model
+      description: >
+        Patch a model's upstreams. Unspecified fields are left unchanged.
+        Validated the same as POST (upstream providers must exist; updating
+        upstreams must not orphan an existing route). See ADR-0030.
+      parameters:
+        - { name: alias, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModelPatch' }
+      responses:
+        '200':
+          description: Model patched; returns the full updated model
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Model' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [config]
+      summary: Delete a model
+      parameters:
+        - { name: alias, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Model is referenced by routes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/routes:
+    get:
+      tags: [config]
+      summary: List routes
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Route list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RouteList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [config]
+      summary: Create or upsert a route (candidate providers must exist and each must be an upstream of the referenced model)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Route' }
+      responses:
+        '201':
+          description: Route upserted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Route' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/routes/{alias}:
+    patch:
+      tags: [config]
+      summary: Partially update a route
+      description: >
+        Patch a route's strategy and/or providers. Unspecified fields are left
+        unchanged. Validated the same as POST (strategy enum, providers must
+        exist and be upstreams of the model). See ADR-0030.
+      parameters:
+        - { name: alias, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoutePatch' }
+      responses:
+        '200':
+          description: Route patched; returns the full updated route
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Route' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [config]
+      summary: Delete a route
+      parameters:
+        - { name: alias, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/plugins:
+    get:
+      tags: [config]
+      summary: List plugins
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Plugin list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PluginList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [config]
+      summary: Create or upsert a plugin config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PluginConfig' }
+      responses:
+        '201':
+          description: Plugin upserted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PluginConfig' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/plugins/{name}:
+    get:
+      tags: [config]
+      summary: Get a single plugin config by name (optionally scoped)
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - name: scope
+          in: query
+          required: false
+          schema: { type: string }
+          description: Optional scope to disambiguate when multiple plugins share a name.
+      responses:
+        '200':
+          description: Plugin config
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PluginConfig' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [config]
+      summary: Partially update a plugin config (optionally scoped)
+      description: >
+        Patch a plugin's phase/params/enabled. Unspecified fields are left
+        unchanged. Scope is NOT patchable (it is identity). See ADR-0030.
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - name: scope
+          in: query
+          required: false
+          schema: { type: string }
+          description: Optional scope (tenant/model) to disambiguate.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PluginPatch' }
+      responses:
+        '200':
+          description: Plugin patched; returns the full updated plugin config
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PluginConfig' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [config]
+      summary: Delete a plugin config (optionally scoped)
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - name: scope
+          in: query
+          required: false
+          schema: { type: string }
+          description: Optional scope (tenant/model) to disambiguate.
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------------------
+  # Tenancy (super-admin).
+  # ---------------------------------------------------------------------------
+  /api/v1/tenants:
+    get:
+      tags: [tenancy]
+      summary: List tenants
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Tenant list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [tenancy]
+      summary: Create a tenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTenantRequest' }
+      responses:
+        '201':
+          description: Tenant created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/tenants/{name}:
+    patch:
+      tags: [tenancy]
+      summary: Enable or disable a tenant
+      description: >
+        Reversible, unlike api-key revocation: a disabled tenant can be
+        re-enabled. Disabling rejects every API key under the tenant at the
+        data-plane authentication boundary, without touching the keys
+        themselves.
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTenantRequest' }
+      responses:
+        '200':
+          description: Tenant updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # Tenant-scoped API keys (tenant-admin). Structurally isolated to the
+  # operator's own tenant (ADR-0017 §3). Plaintext key returned once, on create.
+  # ---------------------------------------------------------------------------
+  /api/v1/api-keys:
+    get:
+      tags: [api-keys]
+      summary: List the caller tenant's active API keys
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: API key list (non-secret)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/APIKeyList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [api-keys]
+      summary: Create an API key (plaintext returned once)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateAPIKeyRequest' }
+      responses:
+        '201':
+          description: Key created; plaintext returned exactly once
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreateAPIKeyResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/api-keys/{key_id}:
+    delete:
+      tags: [api-keys]
+      summary: Revoke an API key (soft-delete) within the caller's tenant
+      parameters:
+        - { name: key_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Revoked }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [api-keys]
+      summary: Update an API key's allowed_models within the caller's tenant
+      parameters:
+        - { name: key_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateAPIKeyRequest' }
+      responses:
+        '204': { description: Updated }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # Quotas. Balance read (super-admin any scope; tenant-admin own-tenant scope).
+  # Top-up is an ATOMIC INCREMENT (ADR-0019), super-admin only, audited.
+  # ---------------------------------------------------------------------------
+  /api/v1/quotas:
+    get:
+      tags: [quotas]
+      summary: Read a quota balance by scope
+      parameters:
+        - name: scope
+          in: query
+          required: true
+          schema: { type: string }
+          description: >
+            Quota scope key, e.g. "tenant:acme", "group:acme/team-a",
+            "key:sk-abc". tenant-admin may only query scopes within its tenant.
+      responses:
+        '200':
+          description: Quota balance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuotaBalance' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/quotas/topup:
+    post:
+      tags: [quotas]
+      summary: Atomically increment a quota balance (super-admin)
+      description: >
+        Adds delta micro-units to the scope's balance in a single SQL statement
+        (balance += delta), never clobbering concurrent hot-path debits.
+        Audited as resource_type=quota.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TopUpRequest' }
+      responses:
+        '200':
+          description: New balance after top-up
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuotaBalance' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------------------
+  # Overview dashboard. super-admin only.
+  # ---------------------------------------------------------------------------
+  /api/v1/overview:
+    get:
+      tags: [overview]
+      summary: Dashboard overview
+      parameters:
+        - name: window
+          in: query
+          required: false
+          schema: { type: string, enum: [5m, 1h, 24h], default: 5m }
+          description: Look-back window for recent_stats (default 5m).
+      responses:
+        '200':
+          description: Dashboard overview
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OverviewPayload' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------------------
+  # Usage. super-admin sees all tenants; tenant-admin is scoped to its own.
+  # Keyset pagination + time range. Reads not audited.
+  # ---------------------------------------------------------------------------
+  /api/v1/usage:
+    get:
+      tags: [usage]
+      summary: List usage records (keyset paginated, time-bounded)
+      parameters:
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: tenant
+          in: query
+          required: false
+          schema: { type: string }
+          description: super-admin only; filter to a single tenant. Ignored for tenant-admin (implicitly own tenant).
+        - name: provider
+          in: query
+          required: false
+          schema: { type: string }
+          description: Filter to a single upstream provider.
+        - name: model
+          in: query
+          required: false
+          schema: { type: string }
+          description: Filter to a single model alias.
+        - name: format
+          in: query
+          required: false
+          schema: { type: string, enum: [csv] }
+          description: Set to "csv" to export as CSV instead of JSON (2000-row cap, per ADR-0028).
+      responses:
+        '200':
+          description: Usage record page (JSON) or CSV export (when format=csv)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UsageList' }
+            text/csv:
+              schema: { type: string, description: "CSV with headers: id,tenant,group_name,api_key_id,provider,model,prompt_tokens,completion_tokens,cost,created_at" }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/usage/summary:
+    get:
+      tags: [usage]
+      summary: Aggregate usage (grouped, summed), by currency
+      parameters:
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - name: group_by
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [tenant, model, provider, api_key_id, group_name]
+          description: Dimension to group aggregates by.
+      responses:
+        '200':
+          description: Usage aggregates
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UsageSummaryList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/usage/timeseries:
+    get:
+      tags: [usage]
+      summary: Time-bucketed usage trends (cost/tokens/requests per hour/day/week)
+      parameters:
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - name: bucket
+          in: query
+          required: false
+          schema: { type: string, enum: [hour, day, week], default: day }
+          description: Time granularity for the buckets.
+        - name: provider
+          in: query
+          required: false
+          schema: { type: string }
+        - name: model
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Time-bucketed usage series (sparse — empty buckets omitted).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UsageTimeseriesList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------------------
+  # Audit. Attributed by AFFECTED tenant (ADR-0019): tenant-admin sees ops
+  # against its tenant — including super-admin actions on it. Reads not audited.
+  # ---------------------------------------------------------------------------
+  /api/v1/audit:
+    get:
+      tags: [audit]
+      summary: List audit log entries (offset paginated, time-bounded)
+      parameters:
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: tenant
+          in: query
+          required: false
+          schema: { type: string }
+          description: super-admin only; filter to a single tenant. Ignored for tenant-admin (implicitly own tenant).
+        - name: resource_type
+          in: query
+          required: false
+          schema: { type: string }
+        - name: action
+          in: query
+          required: false
+          schema: { type: string, enum: [create, update, delete] }
+      responses:
+        '200':
+          description: Audit entry page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------------------
+  # Request logs (data-plane per-request audit ledger, ADR-0021). Distinct from
+  # /api/v1/audit (management-plane mutation audit): this is the data plane's
+  # per-request business/compliance ledger (identity, routing outcome, tokens,
+  # timings, error/blocking classification). super-admin sees all tenants;
+  # tenant-admin is scoped to its own. Reads not audited.
+  # ---------------------------------------------------------------------------
+  /api/v1/request-logs:
+    get:
+      tags: [request-logs]
+      summary: List data-plane request-audit entries (offset paginated, time-bounded)
+      parameters:
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: tenant
+          in: query
+          required: false
+          schema: { type: string }
+          description: super-admin only; filter to a single tenant. Ignored for tenant-admin (implicitly own tenant).
+        - name: group_name
+          in: query
+          required: false
+          schema: { type: string }
+        - name: api_key_id
+          in: query
+          required: false
+          schema: { type: string }
+        - name: provider
+          in: query
+          required: false
+          schema: { type: string }
+        - name: model_requested
+          in: query
+          required: false
+          schema: { type: string }
+        - name: error_type
+          in: query
+          required: false
+          schema: { type: string }
+        - name: blocked_by
+          in: query
+          required: false
+          schema: { type: string }
+        - name: stream
+          in: query
+          required: false
+          schema: { type: boolean }
+          description: Filter streaming vs non-streaming requests.
+        - name: fallback
+          in: query
+          required: false
+          schema: { type: boolean }
+          description: Filter requests that failed over across candidates.
+        - name: session_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: Filter to requests belonging to a single session (X-Voxeltoad-Session header value).
+        - name: request_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: Filter to a single request by its gateway-assigned correlation id (exact lookup, debug/trace drill-down).
+        - name: format
+          in: query
+          required: false
+          schema: { type: string, enum: [csv] }
+          description: Set to "csv" to export as CSV instead of JSON (2000-row cap, mirrors usage/audit CSV endpoints per ADR-0028).
+      responses:
+        '200':
+          description: Request-log entry page (JSON) or CSV export (when format=csv)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RequestLogPage' }
+            text/csv:
+              schema: { type: string, description: "CSV export with headers: id,tenant,group_name,api_key_id,provider,model_requested,model_resolved,stream,prompt_tokens,completion_tokens,total_tokens,ttft_ms,duration_ms,error_type,blocked_by,fallback,request_id,session_id,trace_id,session_source,agent_type,cache_hit,cache_tier,cache_source,cached_prompt_tokens,created_at" }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/request-logs/sessions:
+    get:
+      tags: [request-logs]
+      summary: Session list — aggregated per-session totals
+      description: >
+        Aggregates request_logs by session_id, returning per-session totals
+        (request count, token sums, total duration, latest agent type,
+        has-errors flag) plus cost merged from usage_records. Ordered by
+        most-recent activity DESC. Drives the session-list view of the trace UI.
+        A time window is advised to bound the GROUP BY scan. Tenant scope applies
+        identically to /request-logs.
+      parameters:
+        - name: agent_type
+          in: query
+          required: false
+          schema: { type: string }
+          description: Filter sessions by detected agent (claude-code/codex/codebuddy/workbuddy/opencode).
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: Inclusive lower bound on created_at (RFC3339).
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: Exclusive upper bound on created_at (RFC3339).
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, default: 1, minimum: 1 }
+        - name: page_size
+          in: query
+          required: false
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: Paginated list of session summaries.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/SessionSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/request-logs/sessions/{session_id}:
+    get:
+      tags: [request-logs]
+      summary: Session trace — chronological request timeline + cost summary for a session
+      description: >
+        Returns all request_logs entries for a given session_id in chronological
+        (ASC) order, plus the session's aggregated cost/tokens from
+        usage_records. Enables the session-chain analysis view (debug + cost
+        attribution). Tenant scope applies identically to /request-logs.
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema: { type: string }
+          description: The X-Voxeltoad-Session header value to trace.
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 200, maximum: 500 }
+          description: Caps the number of request rows returned (bounds cost on long-lived sessions).
+      responses:
+        '200':
+          description: Session trace (requests in timeline order + cost summary).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionTrace' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------------------
+  # LLM trace payloads — the message + raw layers below request_logs (ADR-0039).
+  # Where request_logs stores only metadata, trace_payloads stores the
+  # prompt/completion plaintext and raw upstream request/response bodies,
+  # enabling the Session → Request → Messages → Raw debugging view. Capture is
+  # opt-in on the data plane; these reads are RBAC + tenant-scoped, and the
+  # detail read (plaintext) is audited.
+  # ---------------------------------------------------------------------------
+  /api/v1/trace/sessions/{session_id}:
+    get:
+      tags: [trace]
+      summary: Session trace payloads — chronological request list (summary, no bodies)
+      description: >
+        Returns the trace_payloads summary rows for a session_id in chronological
+        (ASC) order — one row per request, with the summary dimensions
+        (model, status, stop_reason, token/message counts) but WITHOUT the large
+        JSONB bodies. Pairs with /request-logs/sessions/{session_id} (metadata
+        timeline): drill into a single request via /trace/requests/{request_id}
+        for the message + raw bodies. Tenant scope applies identically.
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema: { type: string }
+          description: The X-Voxeltoad-Session header value to trace.
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 200, maximum: 500 }
+          description: Caps the number of summary rows returned.
+      responses:
+        '200':
+          description: Session trace payload summaries (timeline order).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TraceSessionPayloads' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/trace/requests/{request_id}:
+    get:
+      tags: [trace]
+      summary: Single-request trace detail — messages + raw bodies (AUDITED read)
+      description: >
+        Returns the full trace_payloads row for a request_id: the normalized
+        message array and the raw upstream request/response bodies. This read is
+        AUDITED because it exposes prompt/completion plaintext (ADR-0039 §5).
+        Tenant scope applies (a tenant-admin cannot read another tenant's
+        payload). 404 when no payload was captured for the request_id (capture
+        disabled, or the row expired/retention-dropped).
+      parameters:
+        - name: request_id
+          in: path
+          required: true
+          schema: { type: string }
+          description: The gateway-assigned request correlation id (X-Request-Id).
+      responses:
+        '200':
+          description: Full trace payload (summary + messages + raw bodies).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TracePayloadDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/trace/rows/{id}:
+    get:
+      tags: [trace]
+      summary: Trace payload detail by row id (unique primary key)
+      description: >
+        Returns the full message + raw layers for a single trace_payloads row,
+        addressed by its identity primary key. Use this instead of
+        /trace/requests/{request_id} when request_id may be duplicated across
+        rows (some clients send the same X-Request-Id for every request in a
+        session). The row id is unique so each request resolves to its own
+        payload. Reading this is AUDITED (ADR-0039 §5). Tenant scope applies.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+          description: The trace_payloads row id (from TracePayloadSummary.id).
+      responses:
+        '200':
+          description: Full trace payload detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TracePayloadDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # Gateway-wide behavior settings (trace capture, future otel/rate_limit).
+  # Super-admin only. Hot-reloadable: the data plane applies changes from the
+  # config snapshot within one poll interval, no restart needed.
+  # ---------------------------------------------------------------------------
+  /api/v1/gateway-settings:
+    get:
+      tags: [settings]
+      summary: Get gateway-wide behavior settings
+      description: >
+        Returns the current gateway behavior settings (trace capture, etc.).
+        Non-secret knob values; read is not audited.
+      responses:
+        '200':
+          description: Current settings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GatewaySettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [settings]
+      summary: Replace gateway-wide behavior settings (audited)
+      description: >
+        Replaces the settings document. Bumps config_generation so the data plane
+        picks up the change on its next poll (hot-reloadable). Audited as
+        resource_type=gateway_settings.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GatewaySettings' }
+      responses:
+        '200':
+          description: Updated settings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GatewaySettings' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------------------
+  # Data plane nodes — cluster topology and instance health. Read-only; each
+  # proxy replica self-registers via heartbeat (cmd/gateway/main.go). super-admin
+  # only.
+  # ---------------------------------------------------------------------------
+  /api/v1/data-plane-nodes:
+    get:
+      tags: [data-plane-nodes]
+      summary: List data-plane instances with heartbeat health
+      responses:
+        '200':
+          description: Sorted list of data-plane nodes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DataPlaneNodeList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------------------
+  # Operators (super-admin). How additional operators — especially tenant-admins
+  # — are created without hand-inserting DB rows (ADR-0017 §4 extends bootstrap).
+  # ---------------------------------------------------------------------------
+  /api/v1/operators:
+    get:
+      tags: [auth]
+      summary: List operators (super-admin)
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Operator list (non-secret; never includes the password hash)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperatorList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [auth]
+      summary: Create an operator (super-admin)
+      description: >
+        Creates a super-admin (no tenant_id) or a tenant-admin (tenant_id
+        required). The password is argon2id-hashed server-side; the response
+        never contains the password or hash. Audited as resource_type=operator.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateOperatorRequest' }
+      responses:
+        '201':
+          description: Operator created (non-secret view)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Operator' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/operators/{id}:
+    delete:
+      tags: [auth]
+      summary: Delete an operator and revoke its sessions (super-admin)
+      description: >
+        Deletes the operator and revokes all its sessions immediately. Refuses
+        to delete the last super-admin (409), to keep the platform administrable.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Refused — cannot delete the last super-admin
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    put:
+      tags: [auth]
+      summary: Update an operator (super-admin)
+      description: >
+        Update email, password, and/or tenant_id for an operator. At least one
+        field must be provided. Empty strings are ignored (not updated). Email
+        must be unique; duplicate email returns 400/409.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateOperatorRequest' }
+      responses:
+        '200':
+          description: Updated operator
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Operator' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/operators/me/password:
+    post:
+      tags: [auth]
+      summary: Change the authenticated operator's own password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string }
+      responses:
+        '204': { description: Password changed }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ---------------------------------------------------------------------------
+  # Tenant-scoped groups (tenant-admin). CRUD + enable/disable toggle (mirrors
+  # tenant pattern). Delete is rejected when api_keys reference the group (409).
+  # Writes are audited as resource_type=group (ADR-0017 §5).
+  # ---------------------------------------------------------------------------
+  /api/v1/groups:
+    get:
+      tags: [tenancy]
+      summary: List the caller tenant's groups
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Group list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [tenancy]
+      summary: Create a group in the caller's tenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateGroupRequest' }
+      responses:
+        '201':
+          description: Group created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Group' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/groups/{name}:
+    patch:
+      tags: [tenancy]
+      summary: Enable or disable a group (reversible, mirrors tenant toggle)
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateGroupRequest' }
+      responses:
+        '200':
+          description: Group updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Group' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [tenancy]
+      summary: Delete a group (rejected if api_keys reference it — 409)
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: >
+            Refused — api_keys reference this group (via api_keys.group_id FK).
+            Repoint or revoke them first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ---------------------------------------------------------------------------
+  # Current operator identity (/me). Available to both roles (super-admin,
+  # tenant-admin). Returns role + (for tenant-admin) tenant_name.
+  # ---------------------------------------------------------------------------
+  /api/v1/me:
+    get:
+      tags: [auth]
+      summary: Return the authenticated operator's identity
+      description: >
+        Returns the operator's id, email, role, and (for tenant-admin)
+        tenant_name. Used by the control panel to gate navigation per role
+        and to construct quota scope strings.
+      responses:
+        '200':
+          description: Authenticated operator
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Operator' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------------------
+  # Roles & Permissions. Phase-2 RBAC custom roles management.
+  # super-admin only (wildcard); mounted on the global config group.
+  # ---------------------------------------------------------------------------
+  /api/v1/permissions:
+    get:
+      tags: [roles]
+      summary: List all available permission points (catalog)
+      responses:
+        '200':
+          description: Permission catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Permission'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/roles:
+    get:
+      tags: [roles]
+      summary: List all roles with their permission sets
+      responses:
+        '200':
+          description: Role list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RoleWithPermissions'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [roles]
+      summary: Create a new custom role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRoleRequest'
+      responses:
+        '201':
+          description: Created role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleWithPermissions'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/roles/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+    patch:
+      tags: [roles]
+      summary: Update a role's description and/or permissions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRoleRequest'
+      responses:
+        '200':
+          description: Updated role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleWithPermissions'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [roles]
+      summary: Delete a custom role (built-in roles cannot be deleted)
+      responses:
+        '204':
+          description: Role deleted
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Opaque operator session token from POST /auth/login.
+
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema: { type: string }
+      description: Opaque keyset cursor from a prior response's next_cursor. Omit for the first page.
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+      description: Max items to return.
+    From:
+      name: from
+      in: query
+      required: false
+      schema: { type: string, format: date-time }
+      description: Inclusive lower bound on created_at (RFC3339).
+    To:
+      name: to
+      in: query
+      required: false
+      schema: { type: string, format: date-time }
+      description: Exclusive upper bound on created_at (RFC3339).
+    Page:
+      name: page
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 500, default: 1 }
+      description: 1-based page number for offset pagination (clamped to max 500 to bound deep-offset scans).
+    PageSize:
+      name: page_size
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      description: Number of items per page.
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing/invalid/expired session
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Authenticated but not authorized for this resource
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found (or not in caller's tenant)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Resource conflict (e.g. role still referenced by operators)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    TooManyRequests:
+      description: Rate limited (e.g. login lockout)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotImplemented:
+      description: Endpoint not yet implemented (P2 placeholder)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    # --- Envelopes ---
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [message, type]
+          properties:
+            message: { type: string }
+            type:
+              type: string
+              description: OpenAI-compatible error type.
+              enum:
+                - invalid_request_error
+                - authentication_error
+                - permission_error
+                - not_found
+                - rate_limit_error
+                - api_error
+    ListEnvelope:
+      type: object
+      description: Uniform list envelope. next_cursor="" means no further pages.
+      required: [data, next_cursor]
+      properties:
+        data:
+          type: array
+          items: {}
+        next_cursor:
+          type: string
+    PageEnvelope:
+      type: object
+      description: Offset-pagination envelope for the audit & request-logs page-jump endpoints (separate from the keyset ListEnvelope to avoid perturbing ADR-0019).
+      required: [data, total, page, page_size]
+      properties:
+        data:
+          type: array
+          items: {}
+        total:
+          type: integer
+          format: int64
+          description: Total matching rows for the current filter (independent of page).
+        page:
+          type: integer
+          description: Current 1-based page number.
+        page_size:
+          type: integer
+          description: Page size used for this response.
+
+    # --- Money ---
+    Pricing:
+      type: object
+      description: Per-million-token rates in int64 micro-units of Currency (ADR-0013).
+      properties:
+        prompt_per_1m: { type: integer, format: int64 }
+        completion_per_1m: { type: integer, format: int64 }
+        currency: { type: string }
+        cache_hit_multiplier:
+          type: integer
+          format: int64
+          description: Billing multiplier applied to cached prompt tokens (usage.cached_tokens / Claude cache_read_input_tokens), in int64 micro-units. 1_000_000 = full price, 500_000 = half, 100_000 = 10%. A value of 0 (or field absent) is treated as full price — legacy-safe. Operators wanting a cache discount must set a non-zero value. Per-(alias, provider).
+          default: 0
+          minimum: 0
+          maximum: 1000000
+
+    # --- Auth ---
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+    LoginResponse:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string, description: Opaque bearer session token (TTL 12h). }
+
+    # --- Config resources (mirror internal/config/schema.go) ---
+    ProviderTimeouts:
+      type: object
+      properties:
+        connect: { type: integer, format: int64, description: Nanoseconds (Go time.Duration). }
+        first_byte: { type: integer, format: int64 }
+        overall: { type: integer, format: int64 }
+    Provider:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        type: { type: string, description: Descriptive brand (openai/tencent/zhipu/anthropic); does not select adapter. }
+        adapter: { type: string, description: Protocol adapter from the registry (openai|claude). }
+        base_url: { type: string }
+        api_key_ref: { type: string, description: 'Credential ref: env://VAR | db://provider/<name> | plain://literal | bare literal. Masked in responses (env://***). See ADR-0031.' }
+        api_key: { type: string, description: 'Write-only plaintext upstream key. When supplied, encrypted and stored in provider_credentials; api_key_ref is set to db://provider/<name>. Never returned.' }
+        timeouts: { $ref: '#/components/schemas/ProviderTimeouts' }
+        weight: { type: integer }
+    ProviderPatch:
+      type: object
+      description: >
+        Partial provider update. All fields optional; omitted fields are left
+        unchanged (not cleared). At least one field should be provided.
+      properties:
+        type: { type: string }
+        adapter: { type: string, description: Protocol adapter from the registry (openai|claude). }
+        base_url: { type: string }
+        api_key_ref: { type: string }
+        timeouts: { $ref: '#/components/schemas/ProviderTimeouts' }
+        weight: { type: integer }
+    ModelUpstream:
+      type: object
+      required: [provider, upstream_model]
+      properties:
+        provider: { type: string }
+        upstream_model: { type: string }
+        default_max_tokens: { type: integer }
+        pricing: { $ref: '#/components/schemas/Pricing' }
+    Model:
+      type: object
+      required: [alias]
+      properties:
+        alias: { type: string }
+        description: { type: string, description: 'Human-readable summary (model catalog). Informational only.' }
+        context_length: { type: integer, description: 'Advertised max context window in tokens. Informational only.' }
+        capabilities:
+          type: array
+          items: { type: string }
+          description: 'e.g. [vision, function_calling, streaming]. Surfaced for catalog filtering.'
+        tags:
+          type: array
+          items: { type: string }
+          description: Free-form labels for categorization/search.
+        upstreams:
+          type: array
+          items: { $ref: '#/components/schemas/ModelUpstream' }
+    ModelPatch:
+      type: object
+      description: Partial model update; omitted fields are left unchanged.
+      properties:
+        description: { type: string }
+        context_length: { type: integer }
+        capabilities:
+          type: array
+          items: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        upstreams:
+          type: array
+          items: { $ref: '#/components/schemas/ModelUpstream' }
+    RouteProvider:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        weight: { type: integer }
+    Route:
+      type: object
+      required: [model_alias]
+      properties:
+        model_alias: { type: string }
+        providers:
+          type: array
+          items: { $ref: '#/components/schemas/RouteProvider' }
+        strategy:
+          type: string
+          enum: [priority, weighted, round_robin, session_affinity]
+    RoutePatch:
+      type: object
+      description: Partial route update; omitted fields are left unchanged.
+      properties:
+        strategy:
+          type: string
+          enum: [priority, weighted, round_robin, session_affinity]
+        providers:
+          type: array
+          items: { $ref: '#/components/schemas/RouteProvider' }
+    PluginConfig:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        phase: { type: string, enum: [pre, post] }
+        params: { type: object, additionalProperties: true }
+        enabled: { type: boolean }
+        scope: { type: string }
+    PluginPatch:
+      type: object
+      description: >
+        Partial plugin update; omitted fields are left unchanged. Scope is NOT
+        patchable (it is identity, used to locate the row).
+      properties:
+        phase: { type: string, enum: [pre, post] }
+        params: { type: object, additionalProperties: true }
+        enabled: { type: boolean }
+
+    # --- Roles & Permissions (Phase-2 RBAC) ---
+    Permission:
+      type: object
+      description: One permission entry from the catalog (authz.AllPermissions).
+      properties:
+        perm: { type: string, description: "Permission key (e.g. provider.write)." }
+        scope: { type: string, enum: [global, tenant], description: "Whether this permission is global-scope or tenant-scope." }
+        label: { type: string, description: "Human-readable label." }
+    RoleWithPermissions:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        scope_kind: { type: string, enum: [global, tenant] }
+        is_builtin: { type: boolean }
+        description: { type: string }
+        permissions:
+          type: array
+          items: { type: string }
+    CreateRoleRequest:
+      type: object
+      required: [name, scope_kind, permissions]
+      properties:
+        name: { type: string }
+        scope_kind: { type: string, enum: [global, tenant] }
+        description: { type: string }
+        permissions:
+          type: array
+          items: { type: string }
+          description: "Permission keys for this role."
+    UpdateRoleRequest:
+      type: object
+      description: >
+        At least one of description or permissions must be provided.
+        Built-in roles cannot change name/scope_kind.
+      properties:
+        description: { type: string }
+        permissions:
+          type: array
+          items: { type: string }
+
+    # --- Tenancy ---
+    Tenant:
+      type: object
+      required: [id, name, enabled]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        enabled: { type: boolean }
+    CreateTenantRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+    UpdateTenantRequest:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+
+    # --- Groups ---
+    Group:
+      type: object
+      required: [id, name, enabled]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        enabled: { type: boolean }
+    CreateGroupRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+    UpdateGroupRequest:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+
+    # --- Operators ---
+    Operator:
+      type: object
+      description: Non-secret operator view — never includes the password hash.
+      required: [id, email, role]
+      properties:
+        id: { type: integer, format: int64 }
+        email: { type: string, format: email }
+        role:
+          type: string
+          enum: [super-admin, tenant-admin]
+          deprecated: true
+          description: Legacy role text. Prefer role_id for Phase-2 RBAC.
+        role_id:
+          type: integer
+          format: int64
+          description: FK to roles table (Phase-2 RBAC).
+        scope_kind:
+          type: string
+          enum: [global, tenant]
+          description: Whether the operator's role is global or tenant-scoped.
+        permissions:
+          type: array
+          items: { type: string }
+          description: Loaded permission set for this operator's role.
+        tenant_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: Bound tenant; null for a global-scope operator.
+        tenant_name:
+          type: string
+          nullable: true
+          description: >
+            Resolved tenant name (for quota scope construction). null for
+            super-admin.
+    CreateOperatorRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+        role:
+          type: string
+          enum: [super-admin, tenant-admin]
+          description: Legacy role text. Use role_id for custom roles.
+        role_id:
+          type: integer
+          format: int64
+          description: FK to roles table (Phase-2). Takes precedence over role.
+        tenant_id:
+          type: integer
+          format: int64
+          description: Required for tenant-scoped roles; must be omitted for global roles.
+    UpdateOperatorRequest:
+      type: object
+      description: >
+        At least one of email, password, role_id, or tenant_id must be provided.
+        Empty strings mean "leave unchanged"; nil means "leave unchanged".
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+        role_id:
+          type: integer
+          format: int64
+          description: Change operator's role (Phase-2 RBAC).
+        tenant_id:
+          type: integer
+          format: int64
+          nullable: true
+
+    # --- API keys ---
+    APIKeyInfo:
+      type: object
+      required: [key_id, revoked]
+      properties:
+        key_id: { type: string }
+        revoked: { type: boolean }
+        allowed_models:
+          type: array
+          items: { type: string }
+          description: Models this key is restricted to (empty = all).
+    CreateAPIKeyRequest:
+      type: object
+      required: [key_id]
+      properties:
+        key_id: { type: string }
+        allowed_models:
+          type: array
+          items: { type: string }
+          description: Empty/absent = all models allowed.
+    CreateAPIKeyResponse:
+      type: object
+      required: [key_id, api_key]
+      properties:
+        key_id: { type: string }
+        api_key: { type: string, description: "Plaintext key — returned exactly once, never retrievable again." }
+    UpdateAPIKeyRequest:
+      type: object
+      required: [allowed_models]
+      properties:
+        allowed_models:
+          type: array
+          items: { type: string }
+          description: Non-empty list of model aliases to restrict this key to.
+
+    # --- Quotas ---
+    QuotaBalance:
+      type: object
+      required: [scope, balance, currency]
+      properties:
+        scope: { type: string }
+        balance: { type: integer, format: int64, description: Micro-units. }
+        currency: { type: string }
+    TopUpRequest:
+      type: object
+      required: [scope, delta, currency]
+      properties:
+        scope: { type: string }
+        delta: { type: integer, format: int64, description: Micro-units to add (must be > 0). }
+        currency: { type: string }
+
+    # --- Overview ---
+    OverviewPayload:
+      type: object
+      required: [nodes, recent_stats, top_tenants]
+      properties:
+        nodes:
+          type: object
+          required: [online, total]
+          properties:
+            online: { type: integer }
+            total: { type: integer }
+        recent_stats:
+          type: object
+          required: [total_requests, total_errors, total_blocked, total_tokens_in, total_tokens_out]
+          properties:
+            total_requests: { type: integer, format: int64 }
+            total_errors: { type: integer, format: int64 }
+            total_blocked: { type: integer, format: int64 }
+            total_tokens_in: { type: integer, format: int64 }
+            total_tokens_out: { type: integer, format: int64 }
+        top_tenants:
+          type: array
+          items: { $ref: '#/components/schemas/UsageSummaryRow' }
+
+    # --- Usage ---
+    UsageRecord:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        tenant: { type: string }
+        group_name: { type: string }
+        api_key_id: { type: string }
+        provider: { type: string }
+        model: { type: string }
+        prompt_tokens: { type: integer }
+        completion_tokens: { type: integer }
+        cost: { type: integer, format: int64, description: Micro-units. }
+        created_at: { type: string, format: date-time }
+    UsageSummaryRow:
+      type: object
+      description: One aggregate bucket. group_key is the value of the group_by dimension.
+      properties:
+        group_key: { type: string }
+        prompt_tokens: { type: integer, format: int64 }
+        completion_tokens: { type: integer, format: int64 }
+        cost: { type: integer, format: int64, description: Summed micro-units. }
+        request_count: { type: integer, format: int64 }
+
+    # --- Audit ---
+    AuditEntry:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        operator_id: { type: integer, format: int64, nullable: true }
+        tenant: { type: string, nullable: true, description: Affected tenant (null = global config). }
+        action: { type: string, enum: [create, update, delete] }
+        resource_type: { type: string }
+        resource_id: { type: string }
+        after: { description: JSON snapshot of the mutation payload (may be null). }
+        created_at: { type: string, format: date-time }
+
+    # --- Request logs (data-plane per-request audit ledger, ADR-0021) ---
+    RequestLogEntry:
+      type: object
+      description: >
+        One data-plane request record: identity, provider/model routing
+        outcome, token/timing facts, and error/blocking classification. Not to
+        be confused with AuditEntry (management-plane mutation audit).
+      properties:
+        id: { type: integer, format: int64 }
+        tenant: { type: string }
+        group_name: { type: string }
+        api_key_id: { type: string }
+        provider: { type: string }
+        model_requested: { type: string }
+        model_resolved: { type: string, description: Upstream model name actually resolved to (ADR-0002). }
+        stream: { type: boolean }
+        prompt_tokens: { type: integer }
+        completion_tokens: { type: integer }
+        total_tokens: { type: integer }
+        ttft_ms: { type: integer, description: "Time-to-first-token, milliseconds (0 for non-streaming)." }
+        duration_ms: { type: integer }
+        error_type: { type: string, description: "OpenAI-compatible error type, empty on success." }
+        blocked_by: { type: string, description: Plugin name that blocked the request (empty if not blocked). }
+        fallback: { type: boolean, description: Whether the request failed over across candidates before succeeding. }
+        request_id: { type: string, description: "Gateway-assigned per-request correlation id (sourced from the X-Request-Id/X-Trace-Id/traceparent header when present, otherwise chi-generated)." }
+        upstream_request_id: { type: string, description: "Provider-assigned request id from the upstream response (OpenAI x-request-id header, Anthropic request-id header/body, …). Final/successful attempt only; empty when no upstream call succeeded or the provider returned no id." }
+        session_id: { type: string, description: "Client-supplied session key from X-Voxeltoad-Session header." }
+        trace_id: { type: string, description: "W3C trace id parsed from the traceparent header (empty if absent/invalid)." }
+        session_source: { type: string, description: "Which mechanism supplied the session key (header-config, header-generic, body-session, body-metadata, body-user, prefix, or empty)." }
+        agent_type: { type: string, description: "Detected calling agent (claude-code/codex/codebuddy/workbuddy/opencode); empty when unrecognized." }
+        created_at: { type: string, format: date-time }
+
+    # --- Typed list envelopes (data item types pinned) ---
+    ProviderList:
+      allOf:
+        - $ref: '#/components/schemas/ListEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/Provider' } }
+    ModelList:
+      allOf:
+        - $ref: '#/components/schemas/ListEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/Model' } }
+    RouteList:
+      allOf:
+        - $ref: '#/components/schemas/ListEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/Route' } }
+    PluginList:
+      allOf:
+        - $ref: '#/components/schemas/ListEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/PluginConfig' } }
+    TenantList:
+      allOf:
+        - $ref: '#/components/schemas/ListEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/Tenant' } }
+    GroupList:
+      allOf:
+        - $ref: '#/components/schemas/ListEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/Group' } }
+    OperatorList:
+      allOf:
+        - $ref: '#/components/schemas/ListEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/Operator' } }
+    APIKeyList:
+      allOf:
+        - $ref: '#/components/schemas/ListEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/APIKeyInfo' } }
+    UsageList:
+      allOf:
+        - $ref: '#/components/schemas/ListEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/UsageRecord' } }
+    UsageSummaryList:
+      allOf:
+        - $ref: '#/components/schemas/ListEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/UsageSummaryRow' } }
+    UsageBucket:
+      type: object
+      description: One time-bucketed aggregate for the timeseries endpoint.
+      properties:
+        bucket_start: { type: string, format: date-time }
+        prompt_tokens: { type: integer, format: int64 }
+        completion_tokens: { type: integer, format: int64 }
+        cost: { type: integer, format: int64, description: int64 micro-units (ADR-0013). }
+        request_count: { type: integer, format: int64 }
+    UsageTimeseriesList:
+      allOf:
+        - $ref: '#/components/schemas/ListEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/UsageBucket' } }
+    AuditPage:
+      allOf:
+        - $ref: '#/components/schemas/PageEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/AuditEntry' } }
+    RequestLogPage:
+      allOf:
+        - $ref: '#/components/schemas/PageEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/RequestLogEntry' } }
+    SessionCostSummary:
+      type: object
+      description: Aggregated cost/tokens for all usage_records rows in a session.
+      properties:
+        session_id: { type: string }
+        prompt_tokens: { type: integer, format: int64 }
+        completion_tokens: { type: integer, format: int64 }
+        cost: { type: integer, format: int64, description: int64 micro-units (ADR-0013). }
+        request_count: { type: integer, format: int64 }
+    SessionTrace:
+      type: object
+      description: >
+        Session-chain analysis payload: the chronological request timeline (from
+        request_logs) and the session's aggregated cost (from usage_records).
+      properties:
+        session_id: { type: string }
+        requests:
+          type: array
+          items: { $ref: '#/components/schemas/RequestLogEntry' }
+          description: Request-log entries in created_at ASC order (timeline order).
+        cost_summary: { $ref: '#/components/schemas/SessionCostSummary' }
+
+    SessionSummary:
+      type: object
+      description: >
+        One row of the session-list aggregation: per-session totals over
+        request_logs (tokens, duration, request count) plus the latest detected
+        agent type and cost merged from usage_records. Drives the trace UI's
+        session-list view.
+      properties:
+        session_id: { type: string }
+        agent_type: { type: string, description: "Detected agent (claude-code/codex/…); empty when unrecognized." }
+        request_count: { type: integer, description: Number of requests in the session. }
+        prompt_tokens: { type: integer, description: Sum of prompt tokens across the session. }
+        completion_tokens: { type: integer, description: Sum of completion tokens across the session. }
+        total_tokens: { type: integer, description: Sum of total tokens across the session. }
+        duration_ms: { type: integer, description: Sum of per-request durations in ms. }
+        cost: { type: integer, format: int64, description: Total cost in micro-units (from usage_records). }
+        started_at: { type: string, format: date-time, description: First request timestamp. }
+        last_seen: { type: string, format: date-time, description: Most recent request timestamp. }
+        has_errors: { type: boolean, description: Whether any request in the session errored. }
+
+    # --- LLM trace payloads (ADR-0039): message + raw layers below request_logs.
+    # trace_payloads stores prompt/completion plaintext + raw bodies; the summary
+    # row omits the JSONB bodies so the request-list view renders cheaply, and
+    # the detail row carries them for the Messages/Raw drill-down. ---
+    TracePayloadSummary:
+      type: object
+      description: >
+        One trace event as shown in a request-list view — summary dimensions only,
+        no JSONB bodies. 1:1 with a request_logs row via request_id.
+      properties:
+        id: { type: integer, format: int64 }
+        request_id: { type: string }
+        session_id: { type: string }
+        trace_id: { type: string }
+        tenant: { type: string }
+        provider: { type: string }
+        model_requested: { type: string }
+        stream: { type: boolean }
+        agent_type: { type: string, description: Detected calling agent (claude-code/codex/codebuddy/workbuddy/opencode); empty when unrecognized. }
+        status_code: { type: integer, description: Upstream HTTP status (0 if unknown). }
+        stop_reason: { type: string, description: Completion finish/stop reason. }
+        n_messages: { type: integer, description: Number of messages in the request. }
+        n_tool_use: { type: integer, description: Number of tool calls in the request. }
+        created_at: { type: string, format: date-time }
+    TracePayloadDetail:
+      allOf:
+        - $ref: '#/components/schemas/TracePayloadSummary'
+        - type: object
+          description: >
+            Full trace payload for a single request: the message + raw layers. The
+            messages/request_raw JSONB bodies are emitted verbatim
+            (provider-heterogeneous shapes); response_raw is the verbatim upstream
+            response body as TEXT (an SSE transcript for streams). Reading this is
+            AUDITED (ADR-0039 §5).
+          properties:
+            messages:
+              type: array
+              description: Normalized request message array (adapter.Message[]) — the message layer.
+              items:
+                type: object
+                additionalProperties: true
+            request_raw:
+              type: object
+              description: Original client request body — the raw request layer.
+              additionalProperties: true
+            response_raw:
+              type: string
+              description: >
+                Upstream response body (reassembled SSE transcript for streams) —
+                the raw response layer. Stored as TEXT because streaming responses
+                are SSE, not JSON.
+            error_raw:
+              type: string
+              description: Upstream error body surfaced on failure (empty on success).
+    TraceSessionPayloads:
+      type: object
+      description: Session trace payload summaries (request list, timeline order).
+      properties:
+        session_id: { type: string }
+        requests:
+          type: array
+          items: { $ref: '#/components/schemas/TracePayloadSummary' }
+          description: Trace summaries in created_at ASC order (timeline order).
+
+    # --- Gateway-wide behavior settings (hot-reloadable knobs). ---
+    GatewaySettings:
+      type: object
+      description: >
+        Gateway-wide behavior parameters, hot-reloadable via the config snapshot.
+        New parameters only need a field here (JSONB-backed, no migration).
+      properties:
+        trace:
+          $ref: '#/components/schemas/TraceSettings'
+    TraceSettings:
+      type: object
+      description: Hot-reloadable trace-capture parameters (ADR-0039).
+      properties:
+        capture_payload_enabled:
+          type: boolean
+          description: Toggle full message + raw body capture (hot-applied per request).
+          default: false
+        max_body_kb:
+          type: integer
+          description: Per-request captured body cap in KB (0 = uncapped). Hot-applied.
+          default: 0
+        retention_days:
+          type: integer
+          description: Trace-payload retention window in days (<=0 = default 7). Read by the admin TTL job.
+          default: 7
+
+    DataPlaneNode:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        instance_id: { type: string }
+        hostname: { type: string }
+        addr: { type: string }
+        version: { type: string }
+        commit: { type: string }
+        config_generation: { type: integer, format: int64 }
+        status: { type: string, enum: [online, offline, draining] }
+        started_at: { type: string, format: date-time }
+        last_heartbeat_at: { type: string, format: date-time }
+    DataPlaneNodeList:
+      allOf:
+        - $ref: '#/components/schemas/ListEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/DataPlaneNode' } }
+
+    # --- Config snapshot history (ADR-0025) ---
+    SnapshotItem:
+      type: object
+      required: [version, created_at]
+      properties:
+        version: { type: integer, format: int64, description: 'The config_generation value this snapshot captures.' }
+        created_at: { type: string, format: date-time }
+    SnapshotList:
+      allOf:
+        - $ref: '#/components/schemas/ListEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/SnapshotItem' } }
+    ConfigSnapshot:
+      type: object
+      description: Full config.Dynamic snapshot (versioned).
+      properties:
+        version: { type: string, description: 'config_generation as a string (ETag).' }
+        providers:
+          type: array
+          items: { $ref: '#/components/schemas/Provider' }
+        models:
+          type: array
+          items: { $ref: '#/components/schemas/Model' }
+        routes:
+          type: array
+          items: { $ref: '#/components/schemas/Route' }
+        plugins:
+          type: array
+          items: { $ref: '#/components/schemas/PluginConfig' }
+    ConfigDiff:
+      type: object
+      required: [from_version, to_version]
+      properties:
+        from_version: { type: integer, format: int64 }
+        to_version: { type: integer, format: int64 }
+        added_providers:    { type: array, items: { type: string } }
+        deleted_providers:  { type: array, items: { type: string } }
+        added_models:      { type: array, items: { type: string } }
+        deleted_models:    { type: array, items: { type: string } }
+        added_routes:      { type: array, items: { type: string } }
+        deleted_routes:    { type: array, items: { type: string } }
+        added_plugins:     { type: array, items: { type: string } }
+        deleted_plugins:   { type: array, items: { type: string } }
+    RollbackRequest:
+      type: object
+      required: [version]
+      properties:
+        version: { type: integer, format: int64, description: Target snapshot version to roll back to. }
+    PreviewResult:
+      type: object
+      required: [valid, diff, impact, warnings]
+      properties:
+        valid: { type: boolean }
+        diff:
+          type: object
+          description: Inline diff (added_*/removed_* arrays, same shape as ConfigDiff minus version fields).
+        impact:
+          type: object
+          properties:
+            new_resources: { type: integer }
+            deleted_resources: { type: integer }
+            changed_resources: { type: integer, description: Reserved; always 0 in P1. }
+        warnings:
+          type: array
+          items: { type: string }

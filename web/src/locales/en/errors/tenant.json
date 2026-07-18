@@ -1,0 +1,12 @@
+{
+  "tenantNotFound": "tenant not found",
+  "groupNotFound": "group not found",
+  "groupReferenced": "group is referenced by API keys",
+  "scopeOutsideTenant": "scope outside your tenant",
+  "tenantInvalidForSuperAdmin": "Super admin cannot be associated with a tenant",
+  "tenantRequired": "Tenant admin must be associated with a tenant",
+  "lastSuperAdmin": "Cannot delete the last super admin",
+  "apiKeyNotFoundInTenant": "api key not found in this tenant",
+  "tenantAdminHasNoTenant": "tenant-admin has no tenant",
+  "notAuthorizedToReadUsage": "not authorized to read usage"
+}

@@ -1,0 +1,70 @@
+# Default values for the voxeltoad data plane (gateway).
+# This chart deploys the gateway as a Kubernetes Deployment with readiness/
+# liveness probes, config/secrets wired from ConfigMap + Secret, and a Service
+# exposing the OpenAI-compatible API.
+
+# Gateway image — built from deploy/Dockerfile.gateway.
+image:
+  repository: voxeltoad/gateway
+  tag: dev
+  pullPolicy: IfNotPresent
+
+# Number of gateway replicas. Each replica is an independent data-plane
+# instance (in-memory rate-limit/breaker state; ADR-0008/0011 known gap for
+# multi-instance — scale-out is correct but per-instance limits are multiplied).
+replicaCount: 1
+
+# Data-plane listen port (container). Matches Dockerfile.gateway EXPOSE.
+service:
+  type: ClusterIP
+  port: 8080
+
+# Resource requests/limits. The gateway is CPU-light but memory scales with
+# in-flight streaming connections; tune the streaming workload accordingly.
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+
+# Probes: readiness checks config freshness + DB reachability (/readyz);
+# liveness is a bare /healthz. Both are unauthenticated (probe-only).
+probes:
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  readiness:
+    path: /readyz
+    initialDelaySeconds: 3
+    periodSeconds: 5
+
+# Bootstrap config (static). Dynamic config (providers/models/routes/plugins)
+# is owned by the admin plane and pulled via the snapshot endpoint; the data
+# plane polls <admin_url>/internal/config/snapshot. Set admin_url to point at
+# the admin service (or leave blank to run with an open channel in dev).
+config:
+  gateway:
+    addr: ":8080"
+  snapshot:
+    admin_url: ""    # e.g. http://voxeltoad-admin.default.svc.cluster.local:8090
+    poll_interval: 5s
+    # internal_token_ref references the shared secret on the snapshot channel
+    # (ADR-0007). REQUIRED in production — resolve via env://GATEWAY_INTERNAL_TOKEN.
+    # Empty is rejected at startup unless allow_insecure_dev=true (dev only).
+    internal_token_ref: "env://GATEWAY_INTERNAL_TOKEN"
+    allow_insecure_dev: false
+  otel:
+    enabled: false
+    endpoint: ""
+    service_name: "voxeltoad"
+
+# Secrets: provider API keys are referenced env://VAR by the admin config; the
+# gateway itself only needs GATEWAY_INTERNAL_TOKEN for the snapshot channel.
+secretEnv:
+  GATEWAY_INTERNAL_TOKEN:
+    secretKeyRef:
+      name: voxeltoad-gateway-secret
+      key: internal-token

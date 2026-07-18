@@ -1,0 +1,22 @@
+{
+  "heading": "数据面节点",
+  "subtitle": "网关实例 — 在线状态、版本、心跳和配置传播健康度。",
+  "columns": {
+    "instanceId": "实例 ID",
+    "hostname": "主机名",
+    "addr": "地址",
+    "version": "版本",
+    "configGeneration": "配置版本",
+    "status": "状态",
+    "startedAt": "启动时间",
+    "lastHeartbeat": "最近心跳"
+  },
+  "status": {
+    "online": "在线",
+    "offline": "离线",
+    "draining": "排水中"
+  },
+  "actions": {
+    "emptyState": "暂无数据面实例。请启动一个连接 PG 的 gateway 实例，它将自动注册到此处。"
+  }
+}

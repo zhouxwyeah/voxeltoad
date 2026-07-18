@@ -1,0 +1,30 @@
+{
+  "heading": "Tenants",
+  "subtitle": "Organizational units for resource isolation.",
+  "columns": {
+    "id": "ID",
+    "name": "Name",
+    "status": "Status"
+  },
+  "status": {
+    "enabled": "Enabled",
+    "disabled": "Disabled"
+  },
+  "form": {
+    "name": {
+      "label": "Name *"
+    }
+  },
+  "modal": {
+    "createTitle": "Create tenant",
+    "disableTitle": "Disable tenant"
+  },
+  "actions": {
+    "create": "Create tenant",
+    "save": "Save",
+    "emptyState": "No tenants yet.",
+    "disable": "Disable",
+    "enable": "Enable",
+    "disableConfirm": "Disable tenant \"{name}\"? Every API key under it will stop working until re-enabled."
+  }
+}

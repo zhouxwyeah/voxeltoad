@@ -1,0 +1,9 @@
+{
+  "routeAliasRequired": "模型别名为必填项",
+  "invalidStrategy": "策略必须是 priority、weighted、round_robin、session_affinity 之一",
+  "invalidPhase": "阶段必须是 pre 或 post",
+  "createFailed": "路由创建失败",
+  "deleteFailed": "路由删除失败",
+  "updateFailed": "路由更新失败",
+  "notFound": "路由不存在"
+}

@@ -1,0 +1,8 @@
+{
+  "pluginNameRequired": "插件名称为必填项",
+  "pluginNotFound": "插件未找到",
+  "invalidParams": "JSON 参数无效",
+  "createFailed": "插件创建失败",
+  "deleteFailed": "插件删除失败",
+  "updateFailed": "插件更新失败"
+}

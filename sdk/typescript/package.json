@@ -1,0 +1,49 @@
+{
+  "name": "@voxeltoad/gateway-sdk",
+  "version": "0.0.0",
+  "description": "Thin TypeScript SDK for voxeltoad — wraps the OpenAI SDK and injects enterprise capabilities (auth, gateway routing, usage/quota).",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./admin": {
+      "types": "./dist/admin.d.ts",
+      "import": "./dist/admin.js",
+      "require": "./dist/admin.cjs"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "codegen": "openapi-typescript ../../docs/openapi/admin.yaml -o src/admin-schema.d.ts",
+    "codegen:check": "npm run codegen && git diff --exit-code -- src/admin-schema.d.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "vitest run test/e2e",
+    "lint": "biome check .",
+    "format": "biome format --write ."
+  },
+  "dependencies": {
+    "openai": "^4.77.0",
+    "openapi-fetch": "^0.13.8"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "openapi-typescript": "^7.13.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.9"
+  }
+}

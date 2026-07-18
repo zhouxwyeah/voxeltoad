@@ -1,0 +1,8 @@
+{
+  "nameRequired": "provider name is required",
+  "createFailed": "provider create failed",
+  "notFound": "provider not found",
+  "deleteFailed": "provider delete failed",
+  "updateFailed": "provider update failed",
+  "notFound": "provider not found"
+}

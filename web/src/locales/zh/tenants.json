@@ -1,0 +1,30 @@
+{
+  "heading": "租户",
+  "subtitle": "资源隔离的组织单元。",
+  "columns": {
+    "id": "ID",
+    "name": "名称",
+    "status": "状态"
+  },
+  "status": {
+    "enabled": "已启用",
+    "disabled": "已停用"
+  },
+  "form": {
+    "name": {
+      "label": "名称 *"
+    }
+  },
+  "modal": {
+    "createTitle": "创建租户",
+    "disableTitle": "停用租户"
+  },
+  "actions": {
+    "create": "创建租户",
+    "save": "保存",
+    "emptyState": "暂无租户。",
+    "disable": "停用",
+    "enable": "启用",
+    "disableConfirm": "停用租户“{name}”？该租户下所有 API Key 将立即无法使用，直至重新启用。"
+  }
+}

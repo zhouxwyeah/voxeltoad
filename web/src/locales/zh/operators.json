@@ -1,0 +1,38 @@
+{
+  "heading": "运营人员",
+  "subtitle": "管理平台运营人员账号与权限",
+  "columns": {
+    "id": "ID",
+    "email": "邮箱",
+    "role": "角色",
+    "tenantId": "租户 ID"
+  },
+  "roles": {
+    "super-admin": "超级管理员",
+    "tenant-admin": "租户管理员"
+  },
+  "form": {
+    "email": { "label": "邮箱", "placeholder": "输入邮箱" },
+    "password": {
+      "label": "密码",
+      "placeholder": "输入密码",
+      "editLabel": "新密码（留空表示不修改）",
+      "editPlaceholder": "留空表示不修改"
+    },
+    "role": { "label": "角色", "placeholder": "选择角色" },
+    "tenantId": { "label": "租户", "placeholder": "选择租户" }
+  },
+  "modal": {
+    "createTitle": "创建运营人员",
+    "editTitle": "编辑运营人员"
+  },
+  "actions": {
+    "create": "创建运营人员",
+    "save": "保存",
+    "creating": "创建中…",
+    "saving": "保存中…",
+    "deleteConfirm": "确认删除运营人员 {email}？此操作不可撤销。",
+    "delete": "删除",
+    "emptyState": "暂无运营人员"
+  }
+}

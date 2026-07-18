@@ -1,0 +1,19 @@
+{
+  "heading": "概览",
+  "subtitle": "业务面板 — 节点健康、近期流量和租户排行。",
+  "cards": {
+    "nodesOnline": "在线节点",
+    "totalRequests": "近期请求",
+    "errors": "近期错误",
+    "blocked": "被拦截请求",
+    "tokensIn": "提示 Token (5m)",
+    "tokensOut": "生成 Token (5m)"
+  },
+  "topTenants": "租户排行 (24h)",
+  "columns": {
+    "tenant": "租户",
+    "requests": "请求",
+    "tokens": "Token",
+    "cost": "费用"
+  }
+}

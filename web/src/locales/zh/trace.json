@@ -1,0 +1,86 @@
+{
+  "heading": "LLM 追踪",
+  "subtitle": "会话 → 请求 → 消息 → 原始。完整的 prompt/completion 与原始报文，用于调试。捕获需在网关侧开启 (ADR-0039)。",
+  "nav": "追踪",
+  "back": "返回",
+  "notFound": "未找到 trace payload。可能网关未开启捕获，或该会话在留存窗口内无 payload。",
+  "captureDisabled": "数据面未开启捕获。请在网关配置中开启 trace.capture_payload.enabled 以记录消息与原始报文。",
+  "agent": {
+    "type": "Agent",
+    "all": "全部"
+  },
+  "sessions": {
+    "title": "会话",
+    "subtitle": "含 trace payload 的会话（聚合自 request_logs）。",
+    "session": "会话",
+    "requests": "请求数",
+    "lastSeen": "最近时间",
+    "tokenTotal": "Token (入/出/总)",
+    "duration": "执行时长",
+    "cost": "费用",
+    "startedAt": "开始时间",
+    "hasErrors": "有错误"
+  },
+  "requests": {
+    "title": "请求列表",
+    "subtitle": "该会话的 trace 事件。点击请求查看其消息与原始报文。",
+    "seq": "#",
+    "time": "时间",
+    "provider": "供应商",
+    "model": "模型",
+    "status": "状态",
+    "stopReason": "停止原因",
+    "messages": "消息数",
+    "tools": "工具数",
+    "viewMessages": "消息",
+    "viewRaw": "原始",
+    "agent": "Agent"
+  },
+  "messages": {
+    "title": "消息",
+    "subtitle": "归一化消息数组（网关实际转发的对话）。",
+    "role": "角色",
+    "content": "内容",
+    "toolCalls": "工具调用",
+    "toolCallsInline": "工具调用",
+    "empty": "该请求未捕获消息。",
+    "expand": "展开",
+    "collapse": "折叠",
+    "categories": {
+      "system": "系统提示",
+      "tools": "工具定义",
+      "toolsParameters": "参数",
+      "messages": "消息",
+      "user": "用户输入",
+      "assistant": "模型消息",
+      "carriedOver": "历史消息(继承)",
+      "new": "本轮新增",
+      "output": "本轮输出"
+    }
+  },
+  "raw": {
+    "title": "原始",
+    "subtitle": "原始客户端请求 + 上游响应报文（逐字）。",
+    "request": "请求",
+    "response": "响应",
+    "error": "错误",
+    "copy": "复制",
+    "copied": "已复制",
+    "empty": "空"
+  },
+  "detail": {
+    "backToSession": "返回会话",
+    "requestId": "请求 ID",
+    "loading": "加载 trace 详情…",
+    "notFound": "该请求未捕获 payload（未开启捕获，或记录已过期）。",
+    "statsBar": {
+      "startedAt": "开始时间",
+      "requestCount": "请求数",
+      "inputTokens": "输入 Tokens",
+      "outputTokens": "输出 Tokens",
+      "totalTokens": "总 Tokens",
+      "agent": "Agent"
+    },
+    "requestList": "请求列表"
+  }
+}

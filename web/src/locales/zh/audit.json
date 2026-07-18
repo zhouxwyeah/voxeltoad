@@ -1,0 +1,28 @@
+{
+  "heading": "审计日志",
+  "subtitle": "按受影响租户归因的管理面变更记录。",
+  "columns": {
+    "time": "时间",
+    "operator": "操作员",
+    "tenant": "租户",
+    "resourceType": "资源类型",
+    "resourceId": "资源 ID",
+    "action": "操作"
+  },
+  "filters": {
+    "from": "开始时间",
+    "to": "结束时间",
+    "resourceType": "资源类型",
+    "action": "操作",
+    "all": "全部",
+    "apply": "应用",
+    "reset": "重置"
+  },
+  "actions": {
+    "create": "创建",
+    "update": "更新",
+    "delete": "删除",
+    "read": "读取",
+    "emptyState": "尚无审计日志。"
+  }
+}

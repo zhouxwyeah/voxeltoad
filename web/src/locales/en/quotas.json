@@ -1,0 +1,18 @@
+{
+  "heading": "Quota",
+  "subtitle": "View your tenant's remaining quota balance. Quota top-up is managed by the platform administrator.",
+  "scope": "Scope",
+  "balance": "Balance",
+  "currency": "Currency",
+  "emptyState": "No quota has been configured for this scope yet. Contact your platform administrator.",
+  "actions": {
+    "refresh": "Refresh"
+  },
+  "topup": {
+    "button": "Top-up",
+    "title": "Top-up Quota",
+    "scope": { "label": "Scope" },
+    "amount": { "label": "Amount (display units)", "placeholder": "Enter amount" },
+    "currency": { "label": "Currency" }
+  }
+}

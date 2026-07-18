@@ -1,0 +1,30 @@
+{
+  "heading": "Groups",
+  "subtitle": "Organizational subdivisions within this tenant. Each group can have its own API keys and usage view.",
+  "columns": {
+    "id": "ID",
+    "name": "Name",
+    "status": "Status"
+  },
+  "status": {
+    "enabled": "Enabled",
+    "disabled": "Disabled"
+  },
+  "form": {
+    "name": { "label": "Name *" }
+  },
+  "modal": {
+    "createTitle": "Create Group",
+    "disableTitle": "Disable Group"
+  },
+  "actions": {
+    "create": "Create Group",
+    "save": "Save",
+    "emptyState": "No groups yet.",
+    "disable": "Disable",
+    "enable": "Enable",
+    "delete": "Delete",
+    "disableConfirm": "Disable group \"{name}\"?",
+    "deleteConfirm": "Delete group \"{name}\"? This cannot be undone unless no API keys reference it."
+  }
+}

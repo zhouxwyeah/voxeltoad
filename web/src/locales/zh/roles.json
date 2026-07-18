@@ -1,0 +1,41 @@
+{
+  "heading": "角色管理",
+  "subtitle": "管理 RBAC 角色与权限集合",
+  "builtin": "内置",
+  "wildcard": "全部",
+  "empty": "暂无角色",
+  "cols": {
+    "name": "名称",
+    "scope": "作用域",
+    "permissions_count": "权限数",
+    "description": "描述",
+    "actions": "操作"
+  },
+  "scope": {
+    "global": "全局",
+    "tenant": "租户"
+  },
+  "actions": {
+    "create": "创建角色",
+    "edit": "编辑",
+    "delete": "删除",
+    "confirm": "确认",
+    "cancel": "取消"
+  },
+  "modal": {
+    "createTitle": "创建角色",
+    "editTitle": "编辑角色"
+  },
+  "form": {
+    "name": "名称",
+    "namePlaceholder": "例如 billing-viewer",
+    "permissions": "权限",
+    "scope": "作用域类型",
+    "description": "描述",
+    "descriptionPlaceholder": "可选描述",
+    "builtinNameLocked": "内置角色名称不可更改。",
+    "builtinScopeLocked": "锁定",
+    "wildcard": "全部权限 (*)",
+    "wildcardHint": "授予所有当前和未来的权限"
+  }
+}
