@@ -85,7 +85,7 @@ export function ModelsPageClient({
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title={t("modal.createTitle")}
-        size="lg"
+        size="xl"
       >
         <ModelForm
           providers={providers}
@@ -102,7 +102,7 @@ export function ModelsPageClient({
             setEditTarget(null);
           }}
           title={t("modal.editTitle")}
-          size="lg"
+          size="xl"
         >
           <ModelForm
             providers={providers}

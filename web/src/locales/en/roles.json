@@ -19,6 +19,10 @@
     "create": "Create Role",
     "edit": "Edit",
     "delete": "Delete",
+    "deleteTitle": "Delete role",
+    "deleteBody": "Delete role \"{name}\"? Operators holding this role lose its permissions immediately.",
+    "deleted": "Role deleted.",
+    "deleteFailed": "Failed to delete the role. Please try again.",
     "confirm": "Confirm",
     "cancel": "Cancel"
   },

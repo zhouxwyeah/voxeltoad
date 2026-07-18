@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Skeleton } from "../components/ui/skeleton";
@@ -105,8 +106,9 @@ export function TraceViewer() {
       <div className="w-80 shrink-0 overflow-auto border-r border-border p-3">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold">请求时间线</h2>
-          <button className="text-xs text-primary hover:underline" onClick={() => navigate("/sessions")}>
-            ← 会话
+          <button className="inline-flex items-center gap-1 text-xs text-primary hover:underline" onClick={() => navigate("/sessions")}>
+            <ArrowLeft className="h-3 w-3" />
+            会话
           </button>
         </div>
         <div className="flex flex-col gap-1.5">

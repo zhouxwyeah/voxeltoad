@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui";
-import { Modal } from "@/components/modal";
+import { Badge } from "@/components/ui/badge";
+import { ConfirmModal, Modal } from "@/components/modal";
+import { toast } from "@/lib/toast";
 import { RoleForm } from "./create-form";
 import type { RoleRow, PermissionItem } from "./page";
 
@@ -58,13 +61,11 @@ export function RolesPageClient({
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  <span className={`rounded px-2 py-0.5 text-xs ${
-                    r.scope_kind === "global"
-                      ? "bg-blue-50 text-blue-700"
-                      : "bg-emerald-50 text-emerald-700"
-                  }`}>
+                  <Badge
+                    variant={r.scope_kind === "global" ? "info" : "secondary"}
+                  >
                     {r.scope_kind === "global" ? t("scope.global") : t("scope.tenant")}
-                  </span>
+                  </Badge>
                 </td>
                 <td className="px-4 py-3 text-muted-foreground">
                   {r.permissions.length}
@@ -145,43 +146,46 @@ export function RolesPageClient({
 
 function DeleteButton({ role }: { role: RoleRow }) {
   const t = useTranslations("roles");
+  const router = useRouter();
   const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  if (confirming) {
-    return (
-      <span className="ml-2">
-        <button
-          className="rounded px-2 py-1 text-xs font-medium text-destructive hover:bg-destructive/10"
-          onClick={async () => {
-            const { deleteRole } = await import("./actions");
-            const result = await deleteRole(role.id);
-            if (result?.ok) {
-              // refresh handled by router.refresh in form
-              window.location.reload();
-            } else {
-              alert(result?.error ?? "Delete failed");
-              setConfirming(false);
-            }
-          }}
-        >
-          {t("actions.confirm")}
-        </button>
-        <button
-          className="ml-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
-          onClick={() => setConfirming(false)}
-        >
-          {t("actions.cancel")}
-        </button>
-      </span>
-    );
+  async function onConfirm() {
+    setDeleting(true);
+    setError(null);
+    const { deleteRole } = await import("./actions");
+    const result = await deleteRole(role.id);
+    setDeleting(false);
+    if (result?.ok) {
+      setConfirming(false);
+      toast.success(t("actions.deleted"));
+      router.refresh();
+    } else {
+      setError(result?.error ?? t("actions.deleteFailed"));
+    }
   }
 
   return (
-    <button
-      className="ml-2 rounded px-2 py-1 text-xs font-medium text-muted-foreground hover:text-destructive"
-      onClick={() => setConfirming(true)}
-    >
-      {t("actions.delete")}
-    </button>
+    <>
+      <button
+        className="ml-2 rounded px-2 py-1 text-xs font-medium text-muted-foreground hover:text-destructive"
+        onClick={() => setConfirming(true)}
+      >
+        {t("actions.delete")}
+      </button>
+      <ConfirmModal
+        open={confirming}
+        title={t("actions.deleteTitle")}
+        message={t("actions.deleteBody", { name: role.name })}
+        loading={deleting}
+        error={error}
+        onCancel={() => {
+          setConfirming(false);
+          setError(null);
+        }}
+        onConfirm={onConfirm}
+      />
+    </>
   );
 }

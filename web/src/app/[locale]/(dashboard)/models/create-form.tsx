@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { createModel, updateModel } from "./actions";
 import { Button, Input } from "@/components/ui";
+import { modalFormActionsClass } from "@/components/modal";
 import { Textarea } from "@/components/ui/textarea";
 import { UpstreamRow } from "./upstream-row";
 
@@ -180,7 +181,7 @@ export function ModelForm({
         </p>
       )}
 
-      <div className="flex justify-end gap-3 pt-2">
+      <div className={modalFormActionsClass}>
         <Button type="button" variant="outline" onClick={onCancel}>
           {tCommon("actions.cancel")}
         </Button>

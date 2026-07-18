@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { Button } from "@/components/ui";
+import { Button, DetailField } from "@/components/ui";
 import { Modal } from "@/components/modal";
 import { RouteForm } from "./route-form";
 import { RoutesTable } from "./routes-table";
@@ -81,7 +81,7 @@ export function RoutesPageClient({
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title={t("modal.createTitle")}
-        size="lg"
+        size="xl"
       >
         <RouteForm
           models={models}
@@ -96,7 +96,7 @@ export function RoutesPageClient({
         open={!!editRow}
         onClose={() => setEditRow(null)}
         title={t("modal.editTitle")}
-        size="lg"
+        size="xl"
       >
         {editRow && (
           <RouteForm
@@ -114,47 +114,32 @@ export function RoutesPageClient({
         open={!!detailRow}
         onClose={() => setDetailRow(null)}
         title={t("modal.detailTitle")}
-        size="lg"
+        size="md"
       >
         {detailRow && (
           <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                {t("columns.modelAlias")}
-              </span>
-              <span className="text-sm text-foreground">
-                {detailRow.model_alias}
-              </span>
-            </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                {t("columns.strategy")}
-              </span>
-              <span className="text-sm text-foreground">
-                {detailRow.strategy
-                  ? t(`strategy.${detailRow.strategy}`)
-                  : "-"}
-              </span>
-            </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                {t("columns.providers")}
-              </span>
-              <div className="flex flex-col gap-1">
-                {(detailRow.providers ?? []).length === 0 ? (
-                  <span className="text-sm text-muted-foreground">
-                    {t("actions.noProviders")}
-                  </span>
-                ) : (
-                  (detailRow.providers ?? []).map((p, i) => (
-                    <span key={i} className="text-sm text-foreground">
+            <DetailField label={t("columns.modelAlias")}>
+              {detailRow.model_alias}
+            </DetailField>
+            <DetailField label={t("columns.strategy")}>
+              {detailRow.strategy ? t(`strategy.${detailRow.strategy}`) : "-"}
+            </DetailField>
+            <DetailField label={t("columns.providers")}>
+              {(detailRow.providers ?? []).length === 0 ? (
+                <span className="text-muted-foreground">
+                  {t("actions.noProviders")}
+                </span>
+              ) : (
+                <span className="flex flex-col gap-1">
+                  {(detailRow.providers ?? []).map((p, i) => (
+                    <span key={i}>
                       {p.name}
                       {p.weight !== undefined && ` · weight: ${p.weight}`}
                     </span>
-                  ))
-                )}
-              </div>
-            </div>
+                  ))}
+                </span>
+              )}
+            </DetailField>
           </div>
         )}
       </Modal>

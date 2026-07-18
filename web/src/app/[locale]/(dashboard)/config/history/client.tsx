@@ -3,8 +3,15 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "@/i18n/navigation";
 import { useTranslations } from "next-intl";
+import { TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui";
-import { rollbackAction, previewAction } from "./actions";
+import { ConfirmModal } from "@/components/modal";
+import {
+  rollbackAction,
+  previewAction,
+  diffAction,
+  snapshotAction,
+} from "./actions";
 
 type Snapshot = { version: number; created_at?: string };
 
@@ -100,11 +107,15 @@ export function ConfigHistoryPageClient({
       )}
 
       {confirmVersion !== null && (
-        <ConfirmDialog
-          version={confirmVersion}
+        <ConfirmModal
+          open
+          title={t("confirm.title")}
+          message={`${t("confirm.body", { version: confirmVersion })} ${t("confirm.warning")}`}
+          confirmLabel={t("confirm.confirm")}
+          loadingLabel={t("confirm.rollingBack")}
+          loading={pending}
           onCancel={() => setConfirmVersion(null)}
           onConfirm={rollback}
-          pending={pending}
         />
       )}
     </div>
@@ -148,11 +159,7 @@ function SnapshotRow({
     }
     setDiff({ kind: "loading" });
     try {
-      const res = await fetch(
-        `/api/v1/config/history/diff?from=${row.version}&to=${latestVersion}`,
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const data = await diffAction(row.version, latestVersion);
       setDiff({
         kind: "loaded",
         added: [
@@ -168,21 +175,16 @@ function SnapshotRow({
           ...(data.deleted_plugins ?? []),
         ],
       });
-    } catch (err) {
-      setDiff({
-        kind: "error",
-        message: err instanceof Error ? err.message : "fetch failed",
-      });
+    } catch {
+      setDiff({ kind: "error", message: t("diff.error") });
     }
   }
 
   async function viewPreview() {
     setPreview({ kind: "loading" });
     try {
-      // Fetch the snapshot content for this version
-      const res = await fetch(`/api/v1/config/history/${row.version}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const snapshot = await res.json();
+      // Fetch the snapshot content for this version, then dry-run it.
+      const snapshot = await snapshotAction(row.version);
       const result = await previewAction({
         providers: snapshot.providers ?? [],
         models: snapshot.models ?? [],
@@ -190,11 +192,8 @@ function SnapshotRow({
         plugins: snapshot.plugins ?? [],
       });
       setPreview({ kind: "loaded", result });
-    } catch (err) {
-      setPreview({
-        kind: "error",
-        message: err instanceof Error ? err.message : "preview failed",
-      });
+    } catch {
+      setPreview({ kind: "error", message: t("preview.error") });
     }
   }
 
@@ -284,22 +283,22 @@ function DiffView({ added, removed }: { added: string[]; removed: string[] }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex gap-4 text-xs">
-        <span className="text-green-600 dark:text-green-400">
+        <span className="text-success">
           + {added.length} {t("diff.added")}
         </span>
-        <span className="text-red-600 dark:text-red-400">
+        <span className="text-destructive">
           − {removed.length} {t("diff.removed")}
         </span>
       </div>
       {(added.length > 0 || removed.length > 0) && (
         <div className="flex flex-col gap-1 font-mono text-[11px]">
           {added.map((name) => (
-            <span key={`a-${name}`} className="text-green-600 dark:text-green-400">
+            <span key={`a-${name}`} className="text-success">
               + {name}
             </span>
           ))}
           {removed.map((name) => (
-            <span key={`r-${name}`} className="text-red-600 dark:text-red-400">
+            <span key={`r-${name}`} className="text-destructive">
               − {name}
             </span>
           ))}
@@ -329,7 +328,7 @@ function PreviewView({ result }: { result: PreviewResult }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2 text-xs">
-        <span className={result.valid ? "text-green-600 dark:text-green-400" : "text-destructive"}>
+        <span className={result.valid ? "text-success" : "text-destructive"}>
           {result.valid ? t("preview.valid") : t("preview.invalid")}
         </span>
         {result.impact && (
@@ -344,29 +343,30 @@ function PreviewView({ result }: { result: PreviewResult }) {
       {result.warnings && result.warnings.length > 0 && (
         <div className="flex flex-col gap-1">
           {result.warnings.map((w, i) => (
-            <p key={i} className="text-xs text-amber-600 dark:text-amber-400">
-              ⚠ {w}
+            <p key={i} className="flex items-center gap-1.5 text-xs text-warning">
+              <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+              {w}
             </p>
           ))}
         </div>
       )}
       <div className="flex gap-4 text-xs">
-        <span className="text-green-600 dark:text-green-400">
+        <span className="text-success">
           + {added.length} {t("diff.added")}
         </span>
-        <span className="text-red-600 dark:text-red-400">
+        <span className="text-destructive">
           − {removed.length} {t("diff.removed")}
         </span>
       </div>
       {(added.length > 0 || removed.length > 0) && (
         <div className="flex flex-col gap-1 font-mono text-[11px]">
           {added.map((name) => (
-            <span key={`a-${name}`} className="text-green-600 dark:text-green-400">
+            <span key={`a-${name}`} className="text-success">
               + {name}
             </span>
           ))}
           {removed.map((name) => (
-            <span key={`r-${name}`} className="text-red-600 dark:text-red-400">
+            <span key={`r-${name}`} className="text-destructive">
               − {name}
             </span>
           ))}
@@ -375,43 +375,6 @@ function PreviewView({ result }: { result: PreviewResult }) {
       {added.length === 0 && removed.length === 0 && (
         <p className="text-xs text-muted-foreground">{t("diff.noChanges")}</p>
       )}
-    </div>
-  );
-}
-
-function ConfirmDialog({
-  version,
-  onCancel,
-  onConfirm,
-  pending,
-}: {
-  version: number;
-  onCancel: () => void;
-  onConfirm: () => void;
-  pending: boolean;
-}) {
-  const t = useTranslations("config-history");
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-md rounded-lg bg-background p-6 shadow-lg">
-        <h2 className="text-lg font-semibold text-foreground">
-          {t("confirm.title")}
-        </h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {t("confirm.body", { version })}
-        </p>
-        <p className="mt-2 text-xs text-muted-foreground">
-          {t("confirm.warning")}
-        </p>
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onCancel} disabled={pending}>
-            {t("confirm.cancel")}
-          </Button>
-          <Button variant="primary" size="sm" onClick={onConfirm} disabled={pending}>
-            {pending ? t("confirm.rollingBack") : t("confirm.confirm")}
-          </Button>
-        </div>
-      </div>
     </div>
   );
 }

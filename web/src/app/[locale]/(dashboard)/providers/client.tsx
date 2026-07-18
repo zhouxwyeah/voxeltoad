@@ -53,11 +53,12 @@ export function ProvidersPageClient({
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title={t("modal.createTitle")}
-        size="md"
+        size="lg"
       >
         <ProviderForm
           defaultValues={null}
           onSuccess={() => setCreateOpen(false)}
+          onCancel={() => setCreateOpen(false)}
         />
       </Modal>
 
@@ -66,11 +67,12 @@ export function ProvidersPageClient({
         open={!!editRow}
         onClose={() => setEditRow(null)}
         title={t("modal.editTitle")}
-        size="md"
+        size="lg"
       >
         <ProviderForm
           defaultValues={editRow}
           onSuccess={() => setEditRow(null)}
+          onCancel={() => setEditRow(null)}
         />
       </Modal>
     </>

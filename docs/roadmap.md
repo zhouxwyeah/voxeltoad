@@ -48,6 +48,27 @@
 
 **编译期 canary**：任何改 `internal/proxy` 的 PR 都会被 desktop 编译失败先撞到。
 
+### UI 产品级化（2026-07 启动）
+
+短期目标：控制台与 desktop-ui 从「功能真实可用」提升到「体验产品级」。规范与门禁先行，
+缺口分批收敛，单一事实来源是 [design/design-system.md](../design/design-system.md)（§1 设计
+参照系 / §8 缺口清单 / §9 门禁）。
+
+- [x] **P0（2026-07-18 完成）**：设计规范升级（Sentry/Linear 参照系、五条硬性规则）+
+  `make check-ui` 门禁上线；Modal 布局规范化（表单操作栏固定底部、xl 尺寸档、DetailField
+  基元）；usage 图表色值修复；config/history diff/preview 404 修复；品牌 logo 落地；
+  emoji/字符画图标清零（lucide 化）；roles 收敛 ConfirmModal；`dark:` 死类清零；
+  非白名单彩虹色 token 化
+- [ ] **P1 一致性批次**：trace 彩虹色收敛（web/desktop 两份分叉副本，评估合并）、
+  Badge/EmptyState 全量推广、表格 4 变体收敛 §4.2、详情页模板推广（5 个既有详情页）、
+  原生 `<select>` 残余迁移（7 处）、FilterField 抽取、i18n 硬编码文案、语言切换 UI、
+  loading.tsx 按需铺设
+- [ ] **P2 韧性批次**：全局 error.tsx/not-found.tsx、usage 静默吞错修复、overview 弱类型、
+  spacing/radius/typography scale token 化
+
+**约束**：`make check-ui` 已挂入 CI，白名单只减不增；新增 UI 基元/token/模板必须同步
+design-system.md（CODEBUDDY.md 门禁条款）。
+
 ---
 
 ## P2 等触发
@@ -117,3 +138,4 @@
 ## 更新记录
 
 - 2026-07-17：初版，基于 grill session 拍板结果
+- 2026-07-18：新增「UI 产品级化」批次（P0 完成，P1/P2 排期）；design-system.md 升级为视觉单一事实源 + `make check-ui` 门禁

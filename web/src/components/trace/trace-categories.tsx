@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { ChevronDown, ChevronRight, Wrench } from "lucide-react";
 
 /**
  * TraceCategories renders a request's trace data as an indented summary tree
@@ -319,7 +320,11 @@ function Section({
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-2 px-2 py-1 text-left text-xs font-semibold uppercase tracking-wide"
       >
-        <span className="text-muted-foreground">{open ? "▾" : "▸"}</span>
+        {open ? (
+          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+        )}
         <span className="text-foreground">{title}</span>
         <span className="text-muted-foreground">· {count}</span>
       </button>
@@ -359,7 +364,11 @@ function Group({
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 py-0.5 text-left text-xs font-semibold"
       >
-        <span className="text-muted-foreground">{open ? "▾" : "▸"}</span>
+        {open ? (
+          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+        )}
         <span className="text-muted-foreground">{title}</span>
         <span className="text-muted-foreground/70">· {count}</span>
       </button>
@@ -385,7 +394,11 @@ function RoleGroup({
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 py-0.5 text-left text-xs font-semibold uppercase tracking-wide"
       >
-        <span className="text-muted-foreground">{open ? "▾" : "▸"}</span>
+        {open ? (
+          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+        )}
         <span className={roleTextColor(role)}>{role}</span>
         <span className="text-muted-foreground/70">· {msgs.length}</span>
       </button>
@@ -419,7 +432,11 @@ function MessageNode({
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-1.5 py-0.5 text-left text-xs hover:bg-accent/30"
       >
-        <span className="text-muted-foreground">{open ? "▾" : "▸"}</span>
+        {open ? (
+          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+        )}
         <span className="text-muted-foreground/70">#{index + 1}</span>
         <span className="flex flex-wrap items-center gap-1">
           {blocks.map((b, i) => (
@@ -453,7 +470,11 @@ function OutputNode({
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-1.5 py-0.5 text-left text-xs hover:bg-accent/30"
       >
-        <span className="text-muted-foreground">{open ? "▾" : "▸"}</span>
+        {open ? (
+          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+        )}
         {item.text ? (
           <BlockChip block={{ kind: "text", text: item.text }} />
         ) : (
@@ -549,8 +570,9 @@ function BlockChip({ block }: { block: Block }) {
   const detail = blockChipDetail(block);
   return (
     <span
-      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium ${cls}`}
+      className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-medium ${cls}`}
     >
+      {block.kind === "tool_use" && <Wrench className="h-3 w-3" />}
       {label}
       {detail ? <span className="ml-1 opacity-70">{detail}</span> : null}
     </span>
@@ -560,15 +582,15 @@ function BlockChip({ block }: { block: Block }) {
 function blockChipStyle(block: Block): { label: string; cls: string } {
   switch (block.kind) {
     case "text":
-      return { label: "text", cls: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300" };
+      return { label: "text", cls: "bg-blue-100 text-blue-700" };
     case "image":
-      return { label: "img", cls: "bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300" };
+      return { label: "img", cls: "bg-orange-100 text-orange-700" };
     case "thinking":
-      return { label: "thinking", cls: "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300" };
+      return { label: "thinking", cls: "bg-purple-100 text-purple-700" };
     case "tool_use":
-      return { label: "🔧", cls: "bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300" };
+      return { label: "", cls: "bg-cyan-100 text-cyan-700" };
     case "tool_result":
-      return { label: "tool_result", cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" };
+      return { label: "tool_result", cls: "bg-emerald-100 text-emerald-700" };
     case "unknown":
       return { label: "?", cls: "bg-muted text-muted-foreground" };
   }
@@ -599,9 +621,10 @@ function ToolCallChip({ tc }: { tc: Record<string, unknown> }) {
   const name = String(fn.name ?? "(tool)");
   return (
     <span
-      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium ${toolLabelColor(name)}`}
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${toolLabelColor(name)}`}
     >
-      🔧 {name}
+      <Wrench className="h-3 w-3" />
+      {name}
     </span>
   );
 }
@@ -630,7 +653,11 @@ function ToolLabel({
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-2 py-0.5 text-left text-xs hover:bg-accent/30"
       >
-        <span className="text-muted-foreground">{open ? "▾" : "▸"}</span>
+        {open ? (
+          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+        )}
         <span
           className={`inline-flex shrink-0 items-center rounded px-1.5 py-0.5 font-medium ${toolLabelColor(name)}`}
         >
@@ -684,7 +711,7 @@ function BlockRaw({
       );
     case "tool_result":
       return (
-        <pre className="whitespace-pre-wrap break-words rounded bg-emerald-50/50 p-1.5 text-xs text-foreground dark:bg-emerald-950/20">
+        <pre className="whitespace-pre-wrap break-words rounded bg-emerald-50/50 p-1.5 text-xs text-foreground">
           {block.text || t("raw.empty")}
         </pre>
       );
@@ -702,10 +729,11 @@ function BlockRaw({
       let argsPretty = argsRaw;
       try { argsPretty = JSON.stringify(JSON.parse(argsRaw), null, 2); } catch { /* raw */ }
       return (
-        <div className="rounded bg-cyan-50/40 p-1.5 text-xs dark:bg-cyan-950/20">
+        <div className="rounded bg-cyan-50/40 p-1.5 text-xs">
           <div className="mb-0.5 flex items-center gap-1">
-            <span className={`rounded px-1 py-0.5 font-medium ${toolLabelColor(name)}`}>
-              🔧 {name}
+            <span className={`inline-flex items-center gap-1 rounded px-1 py-0.5 font-medium ${toolLabelColor(name)}`}>
+              <Wrench className="h-3 w-3" />
+              {name}
             </span>
             {id && <span className="font-mono text-muted-foreground">id: {id}</span>}
           </div>
@@ -743,10 +771,11 @@ function ToolCallRaw({
     // partial JSON during streaming; keep raw
   }
   return (
-    <div className="rounded bg-cyan-50/40 p-1.5 text-xs dark:bg-cyan-950/20">
+    <div className="rounded bg-cyan-50/40 p-1.5 text-xs">
       <div className="mb-0.5 flex items-center gap-1">
-        <span className={`rounded px-1 py-0.5 font-medium ${toolLabelColor(name)}`}>
-          🔧 {name}
+        <span className={`inline-flex items-center gap-1 rounded px-1 py-0.5 font-medium ${toolLabelColor(name)}`}>
+          <Wrench className="h-3 w-3" />
+          {name}
         </span>
         {id && <span className="font-mono text-muted-foreground">id: {id}</span>}
       </div>
@@ -760,13 +789,13 @@ function ToolCallRaw({
 function sectionColor(label: string): string {
   switch (label) {
     case "system":
-      return "border-amber-200 bg-amber-50/50 dark:border-amber-900 dark:bg-amber-950/20";
+      return "border-amber-200 bg-amber-50/50";
     case "tools":
-      return "border-cyan-200 bg-cyan-50/50 dark:border-cyan-900 dark:bg-cyan-950/20";
+      return "border-cyan-200 bg-cyan-50/50";
     case "messages":
-      return "border-slate-200 bg-slate-50/50 dark:border-slate-700 dark:bg-slate-900/20";
+      return "border-slate-200 bg-slate-50/50";
     case "output":
-      return "border-indigo-200 bg-indigo-50/50 dark:border-indigo-900 dark:bg-indigo-950/20";
+      return "border-indigo-200 bg-indigo-50/50";
     default:
       return "border-border bg-muted/30";
   }
@@ -790,13 +819,13 @@ function labelTitle(label: string, t: ReturnType<typeof useTranslations>): strin
 function roleBarColor(role: string): string {
   switch (role) {
     case "user":
-      return "border-blue-300 dark:border-blue-800";
+      return "border-blue-300";
     case "assistant":
-      return "border-emerald-300 dark:border-emerald-800";
+      return "border-emerald-300";
     case "system":
-      return "border-amber-300 dark:border-amber-800";
+      return "border-amber-300";
     case "tool":
-      return "border-purple-300 dark:border-purple-800";
+      return "border-purple-300";
     default:
       return "border-border";
   }
@@ -805,13 +834,13 @@ function roleBarColor(role: string): string {
 function roleTextColor(role: string): string {
   switch (role) {
     case "user":
-      return "text-blue-600 dark:text-blue-400";
+      return "text-blue-600";
     case "assistant":
-      return "text-emerald-600 dark:text-emerald-400";
+      return "text-emerald-600";
     case "system":
-      return "text-amber-600 dark:text-amber-400";
+      return "text-amber-600";
     case "tool":
-      return "text-purple-600 dark:text-purple-400";
+      return "text-purple-600";
     default:
       return "text-muted-foreground";
   }
@@ -821,12 +850,12 @@ function roleTextColor(role: string): string {
 // are visually distinct. Hash the name to one of a small palette.
 function toolLabelColor(name: string): string {
   const palette = [
-    "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300",
-    "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300",
-    "bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300",
-    "bg-teal-100 text-teal-700 dark:bg-teal-950 dark:text-teal-300",
-    "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
-    "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-950 dark:text-fuchsia-300",
+    "bg-rose-100 text-rose-700",
+    "bg-sky-100 text-sky-700",
+    "bg-violet-100 text-violet-700",
+    "bg-teal-100 text-teal-700",
+    "bg-amber-100 text-amber-700",
+    "bg-fuchsia-100 text-fuchsia-700",
   ];
   let h = 0;
   for (let i = 0; i < name.length; i++) {
@@ -835,7 +864,7 @@ function toolLabelColor(name: string): string {
   return palette[h % palette.length];
 }
 
-const indigoBar = "border-indigo-300 dark:border-indigo-800";
+const indigoBar = "border-indigo-300";
 
 function flattenContent(content: unknown): string {
   if (content == null) return "";

@@ -20,19 +20,20 @@
     "loading": "正在加载差异…",
     "added": "新增",
     "removed": "删除",
-    "noChanges": "两个版本之间无差异。"
+    "noChanges": "两个版本之间无差异。",
+    "error": "加载差异失败，请重试。"
   },
   "preview": {
     "loading": "正在加载预览…",
     "valid": "有效",
     "invalid": "无效",
-    "impact": "+{new} 新增, −{deleted} 删除"
+    "impact": "+{new} 新增, −{deleted} 删除",
+    "error": "加载预览失败，请重试。"
   },
   "confirm": {
     "title": "回滚配置",
     "body": "将当前配置回滚到版本 {version}？",
     "warning": "此操作将替换所有当前的供应商、模型、路由和插件。回滚本身会产生新的快照版本，因此可在本页面再次回滚。",
-    "cancel": "取消",
     "confirm": "回滚",
     "rollingBack": "正在回滚…"
   }

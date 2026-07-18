@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef } from "react";
+import { X } from "lucide-react";
 import { cn } from "../../lib/cn";
 
 // Modal — generic overlay dialog with title/body/footer slots.
@@ -8,6 +9,9 @@ import { cn } from "../../lib/cn";
 // (App form): the webview renders a stable DOM tree, so a top-level fixed
 // element covers the full viewport without needing a portal to document.body.
 // Mirrors web/src/components/modal.tsx minus the next-intl dependency.
+//
+// Layout contract: the panel is a fixed-height flex column (max-h-[85vh]);
+// title and footer never scroll, body scrolls (design-system.md §3 Modal).
 
 const sizeClasses = {
   sm: "max-w-sm",
@@ -59,7 +63,7 @@ export function Modal({
   return (
     <div
       ref={backdropRef}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       onClick={(e) => {
         if (e.target === backdropRef.current) onClose();
       }}
@@ -67,9 +71,9 @@ export function Modal({
       aria-labelledby={titleId}
       aria-modal="true"
     >
-      <div className={cn("w-full rounded-lg border border-border bg-background shadow-lg", sizeClasses[size])}>
+      <div className={cn("flex max-h-[85vh] w-full flex-col rounded-lg border border-border bg-background shadow-lg", sizeClasses[size])}>
         {/* Title */}
-        <div className="flex items-center justify-between border-b border-border px-6 py-4">
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-6 py-4">
           <h2 id={titleId} className="text-lg font-semibold text-foreground">
             {title}
           </h2>
@@ -79,17 +83,15 @@ export function Modal({
             className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
             aria-label="关闭"
           >
-            <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-              <path d="M4 4l8 8M12 4l-8 8" />
-            </svg>
+            <X className="h-4 w-4" strokeWidth={1.6} />
           </button>
         </div>
 
         {/* Body */}
-        <div className="max-h-[70vh] overflow-y-auto px-6 py-4">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">{children}</div>
 
         {/* Footer */}
-        {footer && <div className="flex justify-end gap-3 border-t border-border px-6 py-4">{footer}</div>}
+        {footer && <div className="flex shrink-0 justify-end gap-3 border-t border-border px-6 py-4">{footer}</div>}
       </div>
     </div>
   );

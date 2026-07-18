@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { createProvider, updateProvider } from "./actions";
 import { Button, Input } from "@/components/ui";
+import { modalFormActionsClass } from "@/components/modal";
 import { Select } from "@/components/ui/select";
 import { toast } from "@/lib/toast";
 
@@ -35,9 +36,11 @@ type CredMode = "ref" | "key";
 export function ProviderForm({
   defaultValues,
   onSuccess,
+  onCancel,
 }: {
   defaultValues?: Record<string, unknown> | null;
   onSuccess?: () => void;
+  onCancel?: () => void;
 }) {
   const isEdit = !!defaultValues;
   const t = useTranslations("providers");
@@ -225,8 +228,8 @@ export function ProviderForm({
         </p>
       )}
 
-      <div className="flex justify-end gap-3 pt-2">
-        <Button type="button" variant="outline" onClick={onSuccess}>
+      <div className={modalFormActionsClass}>
+        <Button type="button" variant="outline" onClick={onCancel ?? onSuccess}>
           {tCommon("actions.cancel")}
         </Button>
         <Button type="submit" disabled={pending}>

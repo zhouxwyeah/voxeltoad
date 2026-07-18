@@ -20,19 +20,20 @@
     "loading": "Loading diff…",
     "added": "added",
     "removed": "removed",
-    "noChanges": "No changes between these versions."
+    "noChanges": "No changes between these versions.",
+    "error": "Failed to load the diff. Please try again."
   },
   "preview": {
     "loading": "Loading preview…",
     "valid": "Valid",
     "invalid": "Invalid",
-    "impact": "+{new} new, −{deleted} deleted"
+    "impact": "+{new} new, −{deleted} deleted",
+    "error": "Failed to load the preview. Please try again."
   },
   "confirm": {
     "title": "Roll back config",
     "body": "Roll back the live config to version {version}?",
     "warning": "This replaces all current providers, models, routes, and plugins. The rollback itself produces a new snapshot version, so it is reversible from this page.",
-    "cancel": "Cancel",
     "confirm": "Roll back",
     "rollingBack": "Rolling back…"
   }

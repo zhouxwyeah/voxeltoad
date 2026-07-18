@@ -19,6 +19,10 @@
     "create": "创建角色",
     "edit": "编辑",
     "delete": "删除",
+    "deleteTitle": "删除角色",
+    "deleteBody": "确定删除角色「{name}」吗？持有该角色的操作员将立即失去其权限。",
+    "deleted": "角色已删除。",
+    "deleteFailed": "删除角色失败，请重试。",
     "confirm": "确认",
     "cancel": "取消"
   },

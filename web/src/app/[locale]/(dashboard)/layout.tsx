@@ -1,4 +1,5 @@
 import { getLocale, getTranslations } from "next-intl/server";
+import Image from "next/image";
 import { redirect } from "@/i18n/navigation";
 import { getSession } from "@/lib/session";
 import { has } from "@/lib/permissions";
@@ -35,21 +36,14 @@ export default async function DashboardLayout({
     <div className="flex min-h-full flex-1">
       <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-muted">
         <div className="flex items-center gap-2 px-5 py-5">
-          {/* Brand mark: a small blue rounded square (gateway glyph). */}
-          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <svg
-              viewBox="0 0 16 16"
-              className="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M2 4h12M2 8h12M2 12h8" />
-            </svg>
-          </span>
+          {/* Brand mark: pixel-toad logo (design/branding.md §2). */}
+          <Image
+            src="/logo.svg"
+            alt="voxeltoad"
+            width={32}
+            height={32}
+            className="h-8 w-8"
+          />
           <div className="flex flex-col leading-tight">
             <span className="text-sm font-semibold text-foreground">
               {t("appName")}

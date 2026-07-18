@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { useTranslations } from "next-intl";
+import Image from "next/image";
 import { loginAction } from "./actions";
 import { Button, Input } from "@/components/ui";
 
@@ -20,20 +21,14 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Brand header */}
         <div className="mb-6 flex flex-col items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
-            <svg
-              viewBox="0 0 16 16"
-              className="h-5 w-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M2 4h12M2 8h12M2 12h8" />
-            </svg>
-          </span>
+          <Image
+            src="/logo.svg"
+            alt="voxeltoad"
+            width={48}
+            height={48}
+            className="h-12 w-12"
+            priority
+          />
           <div className="text-center">
             <h1 className="text-xl font-semibold text-foreground">
               {tAuth("heading")}

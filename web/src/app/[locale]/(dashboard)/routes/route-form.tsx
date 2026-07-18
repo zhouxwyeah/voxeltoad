@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { upsertRoute, updateRoute } from "./actions";
 import { Button, Input } from "@/components/ui";
+import { modalFormActionsClass } from "@/components/modal";
 import { Select } from "@/components/ui/select";
 import { RouteProviderRow } from "./route-provider-row";
 
@@ -194,7 +195,7 @@ export function RouteForm({
         </p>
       )}
 
-      <div className="flex justify-end gap-3 pt-2">
+      <div className={modalFormActionsClass}>
         <Button type="button" variant="outline" onClick={onCancel}>
           {tCommon("actions.cancel")}
         </Button>

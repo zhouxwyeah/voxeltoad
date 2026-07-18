@@ -11,6 +11,7 @@ import {
 import { useTranslations } from "next-intl";
 import { deletePlugin } from "./actions";
 import { Button } from "@/components/ui";
+import { Badge } from "@/components/ui/badge";
 import { ConfirmModal, Modal } from "@/components/modal";
 
 type PluginRow = {
@@ -72,13 +73,9 @@ export function PluginsTable({
         cell: ({ getValue }) => {
           const v = getValue<boolean | undefined>();
           return v ? (
-            <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
-              Yes
-            </span>
+            <Badge variant="success">Yes</Badge>
           ) : (
-            <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-              No
-            </span>
+            <Badge variant="secondary">No</Badge>
           );
         },
       },
