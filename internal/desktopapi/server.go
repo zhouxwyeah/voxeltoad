@@ -279,9 +279,20 @@ func offsetEnvelope(data any, total int64, page, pageSize int) map[string]any {
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	buf, err := json.Marshal(v)
+	if err != nil {
+		// Marshal 失败时不能再用原 status：WriteHeader(200) 已写出去会让前端
+		// 拿到 200 + 空 body（desktop trace viewer 的 "Unexpected end of JSON
+		// input" 即来源于此）。改写 500 + 一个合法的 JSON 错误文档。
+		body, _ := json.Marshal(map[string]string{"error": "response marshal failed"})
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write(body)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(buf)
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
