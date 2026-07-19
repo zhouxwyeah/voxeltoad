@@ -3,7 +3,8 @@
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { createProvider, updateProvider } from "./actions";
+import { createProvider, updateProvider, testProviderConnection } from "./actions";
+import type { ProviderTestOutcome, ProviderTestSpec } from "./actions";
 import { Button, Input } from "@/components/ui";
 import { modalFormActionsClass } from "@/components/modal";
 import { Select } from "@/components/ui/select";
@@ -77,6 +78,42 @@ export function ProviderForm({
   const [credMode, setCredMode] = useState<CredMode>(
     dvApiKeyRef.startsWith(DB_PROVIDER_REF_PREFIX) ? "key" : "ref",
   );
+
+  // ----- connectivity test (unsaved form values; nothing is persisted) -----
+  const [testing, setTesting] = useState(false);
+  const [testOutcome, setTestOutcome] = useState<ProviderTestOutcome | null>(null);
+
+  async function runFormTest() {
+    if (!formRef.current) return;
+    const fd = new FormData(formRef.current);
+    const adapterValue = String(fd.get("adapter") ?? "").trim();
+    const baseUrl = String(fd.get("base_url") ?? "").trim();
+    if (!adapterValue || !baseUrl) {
+      setTestOutcome({ ok: false, error: t("test.missingFields") });
+      return;
+    }
+    const spec: ProviderTestSpec = { adapter: adapterValue, baseUrl };
+    // On edit, send the name so the backend can fall back to the stored
+    // credential when no new credential material is provided.
+    if (isEdit) {
+      spec.name = String(fd.get("name") ?? "").trim() || undefined;
+    }
+    if (credMode === "key") {
+      const key = String(fd.get("api_key") ?? "").trim();
+      if (key) spec.apiKey = key;
+    } else {
+      const ref = String(fd.get("api_key_ref") ?? "").trim();
+      // Masked placeholders ("env://***", "***") are not real refs — the
+      // backend ignores them and falls back to the stored credential.
+      if (ref && ref !== "***" && !ref.endsWith("://***")) {
+        spec.apiKeyRef = ref;
+      }
+    }
+    setTesting(true);
+    setTestOutcome(null);
+    setTestOutcome(await testProviderConnection(spec));
+    setTesting(false);
+  }
 
   useEffect(() => {
     if (state?.ok && !success) {
@@ -228,7 +265,34 @@ export function ProviderForm({
         </p>
       )}
 
+      {testOutcome && (
+        <p
+          role={testOutcome.ok ? "status" : "alert"}
+          className={
+            testOutcome.ok
+              ? "w-full rounded-md bg-success/10 px-3 py-2 text-sm text-success"
+              : "w-full rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          }
+        >
+          {testOutcome.ok
+            ? t("test.success", { latency: testOutcome.latencyMs })
+            : t("test.failed", {
+                error: testOutcome.errorKey
+                  ? tErr(testOutcome.errorKey)
+                  : testOutcome.error,
+              })}
+        </p>
+      )}
+
       <div className={modalFormActionsClass}>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={runFormTest}
+          disabled={testing || pending}
+        >
+          {testing ? t("test.testing") : t("test.action")}
+        </Button>
         <Button type="button" variant="outline" onClick={onCancel ?? onSuccess}>
           {tCommon("actions.cancel")}
         </Button>

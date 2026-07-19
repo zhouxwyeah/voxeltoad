@@ -9,9 +9,10 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { useTranslations } from "next-intl";
-import { deleteProvider } from "./actions";
+import { deleteProvider, testProvider } from "./actions";
 import { Button } from "@/components/ui";
 import { ConfirmModal } from "@/components/modal";
+import { toast } from "@/lib/toast";
 
 type ProviderRow = Record<string, unknown>;
 
@@ -33,11 +34,30 @@ export function ProvidersTable({
   const searchParams = useSearchParams();
   const tCommon = useTranslations("common");
   const tP = useTranslations("providers");
+  const tErr = useTranslations("errors");
 
   // ConfirmModal state
   const [deleteTarget, setDeleteTarget] = useState<ProviderRow | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Connectivity test state: name of the row currently being probed.
+  const [testingName, setTestingName] = useState<string | null>(null);
+
+  async function runTest(name: string) {
+    setTestingName(name);
+    const res = await testProvider(name);
+    if (res.ok) {
+      toast.success(tP("test.success", { latency: res.latencyMs }));
+    } else {
+      toast.error(
+        tP("test.failed", {
+          error: res.errorKey ? tErr(res.errorKey) : res.error,
+        }),
+      );
+    }
+    setTestingName(null);
+  }
 
   const columns: ColumnDef<ProviderRow>[] = useMemo(
     () => [
@@ -121,6 +141,16 @@ export function ProvidersTable({
                   ))}
                   <td className="px-4 py-2.5 text-right">
                     <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={testingName === String(row.original.name ?? "")}
+                        onClick={() => runTest(String(row.original.name ?? ""))}
+                      >
+                        {testingName === String(row.original.name ?? "")
+                          ? tP("test.testing")
+                          : tP("test.actionShort")}
+                      </Button>
                       <Button
                         variant="ghost"
                         size="sm"

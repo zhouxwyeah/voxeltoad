@@ -193,6 +193,53 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/providers/{name}/test:
+    post:
+      tags: [config]
+      summary: Test connectivity to a saved provider
+      description: >
+        Probes GET {base_url}/models with adapter-appropriate auth (Bearer for
+        openai, x-api-key + anthropic-version for claude), resolving the stored
+        credential server-side — so masked list rows can be tested directly.
+        Always answers 200 with a ProviderTestResult: a failed probe is a
+        business result (ok=false), not an HTTP error.
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Probe outcome
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderTestResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/provider-tests:
+    post:
+      tags: [config]
+      summary: Test connectivity to an unsaved (ad-hoc) provider config
+      description: >
+        Same probe as /providers/{name}/test but for values that have not been
+        saved yet (create/edit modal). A plaintext api_key is used in-memory
+        for the single probe request and is never persisted; when no credential
+        material is supplied, the stored credential of the provider named by
+        `name` is used as a fallback (edit modal leaving the key unchanged).
+        The path lives outside /providers/ because gin rejects a static "test"
+        segment next to the ":name" wildcard.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProviderTestRequest' }
+      responses:
+        '200':
+          description: Probe outcome
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderTestResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   # ---------------------------------------------------------------------------
   # Config snapshot history, diff, rollback, preview (ADR-0025).
@@ -1650,6 +1697,31 @@ components:
         api_key_ref: { type: string }
         timeouts: { $ref: '#/components/schemas/ProviderTimeouts' }
         weight: { type: integer }
+    ProviderTestRequest:
+      type: object
+      required: [adapter, base_url]
+      description: >
+        Ad-hoc provider connectivity probe (unsaved form values). Credential
+        material is used for the single probe request only — never persisted.
+        Resolution order: api_key → api_key_ref → the stored credential of the
+        provider named by `name` (edit-modal "key unchanged" case).
+      properties:
+        name: { type: string, description: Existing provider whose stored credential is the fallback. }
+        adapter: { type: string, description: Protocol adapter from the registry (openai|claude). }
+        base_url: { type: string }
+        api_key: { type: string, description: 'Plaintext upstream key. In-memory only; never persisted or returned.' }
+        api_key_ref: { type: string, description: 'Credential ref (env://VAR | plain://literal). Masked placeholders (env://***) are ignored.' }
+    ProviderTestResult:
+      type: object
+      required: [ok, latency_ms]
+      description: >
+        Probe outcome. A failed probe is a business result, not an API error:
+        the endpoints answer 200 with ok=false and a human-readable reason.
+      properties:
+        ok: { type: boolean }
+        latency_ms: { type: integer, format: int64 }
+        status: { type: integer, description: Upstream HTTP status, when the upstream answered. }
+        error: { type: string, description: Human-readable failure reason (empty on success). }
     ModelUpstream:
       type: object
       required: [provider, upstream_model]

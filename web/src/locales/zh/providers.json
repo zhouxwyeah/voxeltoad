@@ -54,5 +54,13 @@
     "saving": "保存中…",
     "deleteConfirm": "删除供应商 \"{name}\"?",
     "emptyState": "暂无供应商。"
+  },
+  "test": {
+    "action": "测试连接",
+    "actionShort": "测试",
+    "testing": "测试中…",
+    "success": "连接正常（{latency} ms）",
+    "failed": "连接失败：{error}",
+    "missingFields": "请先填写适配器和基础 URL。"
   }
 }

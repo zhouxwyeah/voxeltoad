@@ -138,3 +138,91 @@ export async function deleteProvider(name: string): Promise<FormResult> {
   revalidatePath("/providers");
   return { ok: true };
 }
+
+/**
+ * Outcome of a provider connectivity test. Unlike FormResult, success carries
+ * probe data (latency/status); failure carries a displayable reason (probe
+ * failures are free-form backend text, HTTP failures go through
+ * mapBackendError for an optional i18n key). Never revalidates — a test
+ * changes nothing.
+ */
+export type ProviderTestOutcome =
+  | { ok: true; latencyMs: number; status?: number }
+  | { ok: false; error: string; errorKey?: string };
+
+/** Unsaved form values to probe (create/edit modal "测试连接"). */
+export interface ProviderTestSpec {
+  /** Existing provider whose stored credential is the fallback (edit modal). */
+  name?: string;
+  adapter: string;
+  baseUrl: string;
+  apiKey?: string;
+  apiKeyRef?: string;
+}
+
+type TestResultBody = {
+  ok: boolean;
+  latency_ms: number;
+  status?: number;
+  error?: string;
+};
+
+function toOutcome(data: TestResultBody | undefined): ProviderTestOutcome {
+  if (data?.ok) {
+    return { ok: true, latencyMs: data.latency_ms, status: data.status };
+  }
+  return { ok: false, error: data?.error ?? "test failed" };
+}
+
+async function testHttpFailure(
+  error: { error?: { message?: string } } | undefined,
+): Promise<ProviderTestOutcome> {
+  const mapped = mapBackendError(error?.error?.message ?? "test failed");
+  return { ok: false, error: mapped.fallback, errorKey: mapped.key };
+}
+
+/** Probe a saved provider; the credential is resolved server-side. */
+export async function testProvider(name: string): Promise<ProviderTestOutcome> {
+  try {
+    const client = await serverAdminClient();
+    const { data, error, response } = await client.POST(
+      "/api/v1/providers/{name}/test",
+      { params: { path: { name } } },
+    );
+    if (error || !response.ok) {
+      return testHttpFailure(error);
+    }
+    return toOutcome(data);
+  } catch (err) {
+    const fe = await toFormError(err);
+    return fe.ok ? { ok: false, error: "unexpected error" } : fe;
+  }
+}
+
+/** Probe unsaved form values; nothing is persisted server-side. */
+export async function testProviderConnection(
+  spec: ProviderTestSpec,
+): Promise<ProviderTestOutcome> {
+  try {
+    const client = await serverAdminClient();
+    const { data, error, response } = await client.POST(
+      "/api/v1/provider-tests",
+      {
+        body: {
+          adapter: spec.adapter,
+          base_url: spec.baseUrl,
+          ...(spec.name ? { name: spec.name } : {}),
+          ...(spec.apiKey ? { api_key: spec.apiKey } : {}),
+          ...(spec.apiKeyRef ? { api_key_ref: spec.apiKeyRef } : {}),
+        },
+      },
+    );
+    if (error || !response.ok) {
+      return testHttpFailure(error);
+    }
+    return toOutcome(data);
+  } catch (err) {
+    const fe = await toFormError(err);
+    return fe.ok ? { ok: false, error: "unexpected error" } : fe;
+  }
+}

@@ -54,5 +54,13 @@
     "saving": "Saving…",
     "deleteConfirm": "Delete provider \"{name}\"?",
     "emptyState": "No providers yet."
+  },
+  "test": {
+    "action": "Test connection",
+    "actionShort": "Test",
+    "testing": "Testing…",
+    "success": "Connection OK ({latency} ms)",
+    "failed": "Connection failed: {error}",
+    "missingFields": "Fill in the adapter and base URL first."
   }
 }

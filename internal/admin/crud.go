@@ -39,6 +39,7 @@ func resourceIDFrom(c *gin.Context) string {
 // audited via middleware (ADR-0017 §5).
 func mountConfigCRUD(readGroup *gin.RouterGroup, writeGroup *gin.RouterGroup, repo *store.ConfigRepo, credService credential.Service, credRepo *store.CredentialRepo, auth *rbac) {
 	mountProviderCRUD(writeGroup, repo, credService, credRepo, auth)
+	mountProviderConnTest(writeGroup, repo, credService, credRepo)
 	mountModelCRUD(readGroup, writeGroup, repo, auth)
 	mountRouteCRUD(writeGroup, repo, auth)
 	mountPluginCRUD(writeGroup, repo, auth)
