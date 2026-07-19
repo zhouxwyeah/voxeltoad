@@ -88,10 +88,10 @@ make dev-deps        # 停止并清理：make dev-deps-down
 
 # 4. 运行
 make run-admin       # 管理面，监听 :8090
-make run-gateway     # 数据面，监听 :8080
+make run-gateway     # 数据面，监听 :12800
 ```
 
-健康检查：`curl localhost:8080/healthz`、`curl localhost:8090/healthz`。
+健康检查：`curl localhost:12800/healthz`、`curl localhost:8090/healthz`。
 
 > **关于 PostgreSQL 的两种用法（不冲突）**：`make dev-deps` 用 Docker 起一个 PostgreSQL，
 > 供**运行整个网关服务**时持久化配置/Key 等数据；而**跑测试**时需要库的用例改用
@@ -315,11 +315,11 @@ GATEWAY_SEED_DEMO=0    make start-stack   # 不种演示数据（默认开启）
 - 持久化模式下数据目录在 `$TMPDIR/voxeltoad-adminstack-pg/data`，删掉即重置。
 - 种子是幂等的（store 层全部走 `ON CONFLICT` upsert），持久化模式下重复启动不会产生重复行、不会覆盖你的改动。
 
-**在 `start-stack` 运行时启动真实数据面** — adminstack 不起数据面，但你可以另开一个终端，在不打断 start-stack 的情况下把真正的 `cmd/gateway` 拉起来做端到端测试（:8080，从管理面热加载配置、解密你在 UI 里填的 provider 明文 API key）：
+**在 `start-stack` 运行时启动真实数据面** — adminstack 不起数据面，但你可以另开一个终端，在不打断 start-stack 的情况下把真正的 `cmd/gateway` 拉起来做端到端测试（:12800，从管理面热加载配置、解密你在 UI 里填的 provider 明文 API key）：
 
 ```bash
 make start-gateway   # 需先在另一终端跑 `make start-stack`
-# 数据面 → http://127.0.0.1:8080   管理面 → http://127.0.0.1:8090   web UI → http://localhost:3000
+# 数据面 → http://127.0.0.1:12800   管理面 → http://127.0.0.1:8090   web UI → http://localhost:3000
 # Ctrl-C 只停 gateway，admin + web 继续运行
 ```
 

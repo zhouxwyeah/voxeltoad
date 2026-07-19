@@ -133,7 +133,7 @@ const defaultTraceRetentionDays = 7
 // Default returns a Bootstrap with sensible local-development defaults.
 func Default() Bootstrap {
 	return Bootstrap{
-		Gateway:  GatewayConfig{Addr: ":8080"},
+		Gateway:  GatewayConfig{Addr: ":12800"},
 		Admin:    AdminConfig{Addr: ":8090"},
 		Snapshot: SnapshotConfig{AdminURL: "http://localhost:8090", PollInterval: 5 * time.Second},
 		DB:       DBConfig{DSN: "postgres://postgres:postgres@localhost:5432/voxeltoad?sslmode=disable"},

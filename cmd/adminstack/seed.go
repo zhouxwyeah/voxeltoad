@@ -54,6 +54,7 @@ func seedDemoData(ctx context.Context, db *store.DB, credService credential.Serv
 		{name: "深度求索", typ: "deepseek", adapter: "openai", baseURL: "https://api.deepseek.com", envKey: "GATEWAY_SEED_DEEPSEEK_KEY"},
 		{name: "TokenHub", typ: "tencent", adapter: "openai", baseURL: "https://tokenhub.tencentmaas.com/v1", envKey: "GATEWAY_SEED_TOKENHUB_KEY"},
 		{name: "Kimi-code", typ: "Kimi", adapter: "openai", baseURL: "https://api.kimi.com/coding/v1", envKey: "GATEWAY_SEED_KIMI_KEY"},
+		{name: "GLM", typ: "zhipu", adapter: "openai", baseURL: "https://open.bigmodel.cn/api/coding/paas/v4", envKey: "GATEWAY_SEED_GLM_KEY"},
 	}
 	providerTimeouts := config.ProviderTimeouts{
 		Connect: 2 * time.Second, FirstByte: 5 * time.Second, Overall: 30 * time.Second,
@@ -102,15 +103,15 @@ func seedDemoData(ctx context.Context, db *store.DB, credService credential.Serv
 		mk("deepseek-v4-flash", "TokenHub", "deepseek-v4-flash", 2_500_000, 10_000_000),
 		mk("deepseek-v4-pro", "TokenHub", "deepseek-v4-pro", 150_000, 600_000),
 		mk("hy3", "TokenHub", "hy3", 150_000, 600_000),
-		mk("kimi-k2.7-code", "TokenHub", "kimi-k2.7-code", 150_000, 600_000),
 		mk("kimi-for-coding", "Kimi-code", "kimi-for-coding", 150_000, 600_000),
+		mk("glm-5.2", "GLM", "glm-5.2", 150_000, 600_000),
 		// default-chat demonstrates cross-provider failover: both upstreams under
 		// one alias, the priority route lists openai first.
 		{
 			Alias: "deepseek-v4-flash",
 			Upstreams: []config.ModelUpstream{
 				{Provider: "深度求索", UpstreamModel: "deepseek-v4-flash", Pricing: config.Pricing{PromptPer1M: 2_500_000, CompletionPer1M: 10_000_000, Currency: "usd"}},
-				{Provider: "TokenHub", UpstreamModel: "deepseek-v4-flash", Pricing: config.Pricing{PromptPer1M: 3_000_000, CompletionPer1M: 15_000_000, Currency: "usd"}},
+				// {Provider: "TokenHub", UpstreamModel: "deepseek-v4-flash", Pricing: config.Pricing{PromptPer1M: 3_000_000, CompletionPer1M: 15_000_000, Currency: "usd"}},
 			},
 		},
 	}
@@ -129,10 +130,10 @@ func seedDemoData(ctx context.Context, db *store.DB, credService credential.Serv
 		return config.Route{ModelAlias: alias, Strategy: strategy, Providers: rps}
 	}
 	routes := []config.Route{
-		route("deepseek-v4-flash", "priority", "深度求索", "TokenHub"),
-		route("deepseek-v4-pro", "round_robin", "深度求索", "TokenHub"),
-		route("hy3", "session_affinity", "TokenHub"),
-		route("kimi-k2.7-code", "session_affinity", "TokenHub"),
+		route("deepseek-v4-flash", "priority", "深度求索"),
+		route("deepseek-v4-pro", "round_robin", "深度求索"),
+		// route("hy3", "session_affinity", "TokenHub"),
+		route("glm-5.2", "session_affinity", "GLM"),
 		route("kimi-for-coding", "session_affinity", "Kimi-code"),
 	}
 	for _, rt := range routes {
@@ -158,7 +159,7 @@ func seedDemoData(ctx context.Context, db *store.DB, credService credential.Serv
 		return "", fmt.Errorf("seed group: %w", err)
 	}
 	sum := sha256.Sum256([]byte(keyPlaintext))
-	allowedModels := []string{"deepseek-v4-pro", "deepseek-v4-flash", "hy3", "kimi-k2.7-code", "kimi-for-coding"}
+	allowedModels := []string{"deepseek-v4-pro", "deepseek-v4-flash", "glm-5.2", "kimi-for-coding"}
 	if err := tRepo.CreateAPIKey(ctx, store.APIKeySpec{
 		KeyID: keyID, Hash: hex.EncodeToString(sum[:]),
 		GroupID: &groupID, AllowedModels: allowedModels,

@@ -197,7 +197,7 @@ func TestProviders_DeleteReferenceCheck(t *testing.T) {
 
 // A config write via the HTTP API must preserve the bootstrap gateway:
 // section (listen addr + session headers) — config.Dynamic does not model it,
-// and dropping it would move the gateway back to :8080 on the next restart.
+// and dropping it would move the gateway back to :12800 on the next restart.
 func TestConfigWrite_PreservesGatewaySection(t *testing.T) {
 	ts, cfgPath := newConfigTestServer(t)
 

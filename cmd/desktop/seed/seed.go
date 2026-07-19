@@ -46,14 +46,15 @@ func Key(ctx context.Context, db *desktopstore.DB, plaintext string) error {
 }
 
 // ConfigTemplate is the default dynamic config written on first run. It seeds
-// the same realistic test dataset used by cmd/adminstack/seed.go: three real
-// providers (深度求索 / TokenHub / Kimi-code) with five model aliases spanning
-// all routing strategies (priority / round_robin / session_affinity), so the
-// desktop UI is useful out of the box rather than showing a single empty
-// route. Upstream keys are referenced via ${GATEWAY_SEED_*_KEY} env vars and
-// expanded by EnsureTemplate before the file is written; unset vars yield an
-// empty plain:// ref, so the gateway fails fast with a clear auth error
-// rather than silently using a missing key.
+// the same realistic test dataset used by cmd/adminstack/seed.go: four real
+// providers (深度求索 / TokenHub / Kimi-code / GLM) with five model aliases
+// spanning all routing strategies (priority / round_robin / session_affinity),
+// so the desktop UI is useful out of the box rather than showing a single empty
+// route. hy3 is seeded as a catalog entry only (no route) to mirror admin.
+// Upstream keys are referenced via ${GATEWAY_SEED_*_KEY} env vars and expanded
+// by EnsureTemplate before the file is written; unset vars yield an empty
+// plain:// ref, so the gateway fails fast with a clear auth error rather than
+// silently using a missing key.
 const ConfigTemplate = `# Desktop personal gateway — configuration.
 # Seeded with real test providers (mirrors cmd/adminstack/seed.go).
 # Providers reference real keys via GATEWAY_SEED_*_KEY env vars.
@@ -85,15 +86,19 @@ providers:
     api_key_ref: "plain://${GATEWAY_SEED_KIMI_KEY}"
     timeouts: {connect: 2s, first_byte: 5s, overall: 30s}
     weight: 100
+  - name: GLM
+    type: zhipu
+    adapter: openai
+    base_url: https://open.bigmodel.cn/api/coding/paas/v4
+    api_key_ref: "plain://${GATEWAY_SEED_GLM_KEY}"
+    timeouts: {connect: 2s, first_byte: 5s, overall: 30s}
+    weight: 100
 models:
   - alias: deepseek-v4-flash
     upstreams:
       - provider: 深度求索
         upstream_model: deepseek-v4-flash
         pricing: {prompt_per_1m: 2500000, completion_per_1m: 10000000, currency: usd}
-      - provider: TokenHub
-        upstream_model: deepseek-v4-flash
-        pricing: {prompt_per_1m: 3000000, completion_per_1m: 15000000, currency: usd}
   - alias: deepseek-v4-pro
     upstreams:
       - provider: 深度求索
@@ -104,39 +109,33 @@ models:
       - provider: TokenHub
         upstream_model: hy3
         pricing: {prompt_per_1m: 150000, completion_per_1m: 600000, currency: usd}
-  - alias: kimi-k2.7-code
-    upstreams:
-      - provider: TokenHub
-        upstream_model: kimi-k2.7-code
-        pricing: {prompt_per_1m: 150000, completion_per_1m: 600000, currency: usd}
   - alias: kimi-for-coding
     upstreams:
       - provider: Kimi-code
         upstream_model: kimi-for-coding
+        pricing: {prompt_per_1m: 150000, completion_per_1m: 600000, currency: usd}
+  - alias: glm-5.2
+    upstreams:
+      - provider: GLM
+        upstream_model: glm5.2
         pricing: {prompt_per_1m: 150000, completion_per_1m: 600000, currency: usd}
 routes:
   - model_alias: deepseek-v4-flash
     strategy: priority
     providers:
       - {name: 深度求索, weight: 1}
-      - {name: TokenHub, weight: 1}
   - model_alias: deepseek-v4-pro
     strategy: round_robin
     providers:
       - {name: 深度求索, weight: 1}
-      - {name: TokenHub, weight: 1}
-  - model_alias: hy3
-    strategy: session_affinity
-    providers:
-      - {name: TokenHub, weight: 1}
-  - model_alias: kimi-k2.7-code
-    strategy: session_affinity
-    providers:
-      - {name: TokenHub, weight: 1}
   - model_alias: kimi-for-coding
     strategy: session_affinity
     providers:
       - {name: Kimi-code, weight: 1}
+  - model_alias: glm-5.2
+    strategy: session_affinity
+    providers:
+      - {name: GLM, weight: 1}
 settings:
   trace:
     capture_payload_enabled: true

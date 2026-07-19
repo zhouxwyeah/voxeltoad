@@ -14,7 +14,7 @@
 
 # Data-plane (gateway) HTTP listen address.
 gateway:
-  addr: ":8080"
+  addr: ":12800"
 
 # Management-plane (admin) HTTP listen address.
 admin:

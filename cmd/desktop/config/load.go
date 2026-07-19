@@ -98,7 +98,7 @@ type yamlTraceSettings struct {
 // bootstrap loader (internal/config.Load). It is NOT part of config.Dynamic,
 // so the CRUD write path must carry it alongside the dynamic document —
 // otherwise every UI save would silently drop it and the next restart would
-// fall back to the enterprise default ":8080". Only the fields the desktop
+// fall back to the enterprise default ":12800". Only the fields the desktop
 // template and the settings editor use are modeled; enterprise-only bootstrap
 // knobs (rate_limit, max_tokens_ceiling, ...) are not supported in desktop
 // YAML.

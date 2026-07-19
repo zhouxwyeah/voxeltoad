@@ -5,7 +5,7 @@
 # 127.0.0.1:8090 + an embedded PostgreSQL on a RANDOM port) and the web UI.
 # It does NOT start the data plane. This script starts the data plane
 # (cmd/gateway) so that configuration you change in the UI is hot-reloaded
-# by the gateway, and requests to the OpenAI-compatible API (:8080) flow
+# by the gateway, and requests to the OpenAI-compatible API (:12800) flow
 # through to upstream providers — without disturbing the running stack.
 #
 #   make start-gateway         # from the repo root
@@ -36,8 +36,8 @@ DSN_REGEX='postgres://postgres:postgres@localhost:[0-9]+/voxeltoad_adminstack\?s
 # raw bytes), so we base64-encode the same digest here.
 KEK_SEED="adminstack-dev-provider-credential-kek"
 
-# Data-plane listen address; defaults to :8080 (config.Default).
-GATEWAY_ADDR="${GATEWAY_ADDR:-:8080}"
+# Data-plane listen address; defaults to :12800 (config.Default).
+GATEWAY_ADDR="${GATEWAY_ADDR:-:12800}"
 # Snapshot poll interval (Go duration string).
 POLL_INTERVAL="${POLL_INTERVAL:-5s}"
 
@@ -131,7 +131,7 @@ YAML
 echo "  $(green "ok") admin reachable → $ADMIN_URL"
 echo "  $(green "ok") PG recovered    → $DSN"
 echo
-# GATEWAY_ADDR like ":8080" → "http://127.0.0.1:8080"; if it already has a
+# GATEWAY_ADDR like ":12800" → "http://127.0.0.1:12800"; if it already has a
 # host, strip nothing.
 ADDR_PORT="${GATEWAY_ADDR##*:}"
 echo "  data plane   → http://127.0.0.1:${ADDR_PORT}"

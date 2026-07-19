@@ -46,7 +46,7 @@ settings:
 
 // The CRUD write path must not clobber the bootstrap gateway: section —
 // config.Dynamic has no gateway fields, so a naive round-trip drops them and
-// the next restart silently falls back to :8080.
+// the next restart silently falls back to :12800.
 func TestSaveFile_PreservesGatewaySection(t *testing.T) {
 	path := writeYAML(t, withGateway)
 

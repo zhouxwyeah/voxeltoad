@@ -260,6 +260,96 @@ export interface paths {
         };
         trace?: never;
     };
+    "/api/v1/providers/{name}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test connectivity to a saved provider
+         * @description Probes GET {base_url}/models with adapter-appropriate auth (Bearer for openai, x-api-key + anthropic-version for claude), resolving the stored credential server-side — so masked list rows can be tested directly. Always answers 200 with a ProviderTestResult: a failed probe is a business result (ok=false), not an HTTP error.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Probe outcome */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderTestResult"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/provider-tests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test connectivity to an unsaved (ad-hoc) provider config
+         * @description Same probe as /providers/{name}/test but for values that have not been saved yet (create/edit modal). A plaintext api_key is used in-memory for the single probe request and is never persisted; when no credential material is supplied, the stored credential of the provider named by `name` is used as a fallback (edit modal leaving the key unchanged). The path lives outside /providers/ because gin rejects a static "test" segment next to the ":name" wildcard.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ProviderTestRequest"];
+                };
+            };
+            responses: {
+                /** @description Probe outcome */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderTestResult"];
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/config/history": {
         parameters: {
             query?: never;
@@ -2600,6 +2690,28 @@ export interface components {
             api_key_ref?: string;
             timeouts?: components["schemas"]["ProviderTimeouts"];
             weight?: number;
+        };
+        /** @description Ad-hoc provider connectivity probe (unsaved form values). Credential material is used for the single probe request only — never persisted. Resolution order: api_key → api_key_ref → the stored credential of the provider named by `name` (edit-modal "key unchanged" case). */
+        ProviderTestRequest: {
+            /** @description Existing provider whose stored credential is the fallback. */
+            name?: string;
+            /** @description Protocol adapter from the registry (openai|claude). */
+            adapter: string;
+            base_url: string;
+            /** @description Plaintext upstream key. In-memory only; never persisted or returned. */
+            api_key?: string;
+            /** @description Credential ref (env://VAR | plain://literal). Masked placeholders (env://***) are ignored. */
+            api_key_ref?: string;
+        };
+        /** @description Probe outcome. A failed probe is a business result, not an API error: the endpoints answer 200 with ok=false and a human-readable reason. */
+        ProviderTestResult: {
+            ok: boolean;
+            /** Format: int64 */
+            latency_ms: number;
+            /** @description Upstream HTTP status */
+            status?: number;
+            /** @description Human-readable failure reason (empty on success). */
+            error?: string;
         };
         ModelUpstream: {
             provider: string;

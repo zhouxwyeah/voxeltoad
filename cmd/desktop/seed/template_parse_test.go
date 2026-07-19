@@ -31,14 +31,14 @@ func TestConfigTemplateParses(t *testing.T) {
 	if strings.Contains(string(data), "sk-") {
 		t.Fatal("template contains hardcoded upstream key")
 	}
-	if len(dyn.Providers) != 3 {
-		t.Errorf("providers = %d, want 3", len(dyn.Providers))
+	if len(dyn.Providers) != 4 {
+		t.Errorf("providers = %d, want 4", len(dyn.Providers))
 	}
 	if len(dyn.Models) != 5 {
 		t.Errorf("models = %d, want 5", len(dyn.Models))
 	}
-	if len(dyn.Routes) != 5 {
-		t.Errorf("routes = %d, want 5", len(dyn.Routes))
+	if len(dyn.Routes) != 4 {
+		t.Errorf("routes = %d, want 4", len(dyn.Routes))
 	}
 	// Spot-check a timeout parsed correctly (time.Duration via yaml.v3 "2s").
 	if len(dyn.Providers) > 0 {
