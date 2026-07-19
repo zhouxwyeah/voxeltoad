@@ -2,7 +2,11 @@
 /bin/
 *.exe
 *.out
-adminstack
+/adminstack
+/gateway
+/admin
+/devstack
+/testpg
 
 # Test artifacts
 *.test
