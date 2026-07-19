@@ -189,6 +189,56 @@ func TestTraceByRequestID(t *testing.T) {
 	}
 }
 
+// TestTraceByRowIDEmptyBodies guards against the desktop trace viewer bug
+// "Failed to execute 'json' on 'Response': Unexpected end of JSON input".
+// A trace row with empty messages/request_raw (capture missed / marshal
+// failed / upstream 4xx before parse) must still return a valid JSON document
+// — the empty columns surface as JSON null via rawMessageOrNull in the query
+// layer, and writeJSON marshals to a buffer first so a marshal failure can
+// never produce 200 + empty body.
+func TestTraceByRowIDEmptyBodies(t *testing.T) {
+	db := openTestDB(t)
+	base := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+	row := desktopstore.TracePayloadRow{
+		ID:             1,
+		RequestID:      "req-empty",
+		SessionID:      "sess-empty",
+		Provider:       "openai",
+		ModelRequested: "default",
+		AgentType:      "claude-code",
+		StatusCode:     400,
+		NMessages:      0,
+		Messages:       "", // empty column — the bug trigger
+		RequestRaw:     "",
+		ErrorRaw:       "bad request",
+		CreatedAt:      base,
+	}
+	if err := db.Create(&row).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	ts := httptest.NewServer(New(db, "", nil, nil, nil).Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/v1/trace/rows/1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var m map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+		t.Fatalf("decode failed (this is the bug): %v", err)
+	}
+	if m["messages"] != nil {
+		t.Errorf("messages = %v, want nil (JSON null)", m["messages"])
+	}
+	if m["request_raw"] != nil {
+		t.Errorf("request_raw = %v, want nil (JSON null)", m["request_raw"])
+	}
+}
+
 // TestTraceByRequestIDWithSlash guards the multi-segment wildcard
 // ({request_id...}). The data plane emits request IDs that contain a slash
 // (e.g. "NODE/abc-000001"); a single-segment wildcard returned 404 for them.
