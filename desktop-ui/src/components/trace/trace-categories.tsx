@@ -46,15 +46,17 @@ type OutputItem = {
   raw: string;
 };
 
+// Coerces the (already-parsed, json.RawMessage-emitted) messages field into a
+// typed array, tolerating null/missing/non-array payloads (rawMessageOrNull
+// in the desktop store emits "null" for empty bodies).
+export function messagesOf(detail: TraceDetailLike | null | undefined): Record<string, unknown>[] {
+  if (!detail) return [];
+  return (Array.isArray(detail.messages) ? detail.messages : []) as Record<string, unknown>[];
+}
+
 function analyze(current: TraceDetailLike, previous: TraceDetailLike | null) {
-  const curMsgs = (Array.isArray(current.messages) ? current.messages : []) as Record<
-    string,
-    unknown
-  >[];
-  const prevMsgs = (Array.isArray(previous?.messages) ? previous!.messages : []) as Record<
-    string,
-    unknown
-  >[];
+  const curMsgs = messagesOf(current);
+  const prevMsgs = messagesOf(previous);
 
   const prefixLen = commonPrefixLength(curMsgs, prevMsgs);
   // system messages get their own top-level section, so exclude them from
@@ -78,7 +80,7 @@ function signature(m: Record<string, unknown>): string {
   return `${m.role ?? ""}|${JSON.stringify(m.content ?? "")}|${m.tool_call_id ?? ""}`;
 }
 
-function commonPrefixLength(
+export function commonPrefixLength(
   a: Record<string, unknown>[],
   b: Record<string, unknown>[],
 ): number {

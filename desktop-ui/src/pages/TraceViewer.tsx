@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { Badge } from "../components/ui/badge";
@@ -7,6 +7,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import { EmptyState } from "../components/ui/empty-state";
 import { Tabs } from "../components/ui/tabs";
 import { TraceCategories } from "../components/trace/trace-categories";
+import { pickBaseline } from "../components/trace/trace-baseline";
 import { JsonTree } from "../components/trace/json-tree";
 import { PromptFormModal } from "../components/prompts/prompt-form-modal";
 import { getTraceByRowID, listRequestLogs, listTraceBySession } from "../lib/api";
@@ -20,6 +21,13 @@ import {
   shortId,
   statusTone,
 } from "../lib/format";
+
+// How many timeline rows above the selected one we inspect to find a good diff
+// baseline. Subagent requests (Task/Explore) interleave with the main agent and
+// share no message prefix (different system prompt), so we look back past them
+// to find the same-branch ancestor. 10 covers typical Claude Code fan-out depth
+// while staying cheap against the local desktop API + the row cache below.
+const BASELINE_WINDOW = 10;
 
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -36,6 +44,7 @@ export function TraceViewer() {
   const [timeline, setTimeline] = useState<TraceSummary[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<TraceDetail | null>(null);
+  const [prevDetail, setPrevDetail] = useState<TraceDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,18 +62,70 @@ export function TraceViewer() {
       .finally(() => setLoading(false));
   }, [sessionId]);
 
+  // Candidate rows to score for the diff baseline: up to BASELINE_WINDOW rows
+  // immediately above the selected one on the timeline. pickBaseline keeps the
+  // one sharing the longest message prefix (skipping interleaved subagent
+  // rows automatically); the closest same-branch ancestor wins.
+  const prevIds = useMemo(() => {
+    const idx = timeline.findIndex((t) => t.id === selectedId);
+    if (idx <= 0) return [];
+    const start = Math.max(0, idx - BASELINE_WINDOW);
+    // Closest-first so pickBaseline's tie-break favours the nearest row.
+    return timeline.slice(start, idx).map((t) => t.id).reverse();
+  }, [timeline, selectedId]);
+
+  // Small row-detail cache so clicking back and forth doesn't re-fetch rows
+  // we already pulled. Bounded naturally — entries beyond the current window
+  // just go unused; lifetime is this component instance, no manual eviction.
+  const rowCache = useRef<Map<number, TraceDetail>>(new Map());
+
   useEffect(() => {
     if (selectedId == null) {
       setDetail(null);
+      setPrevDetail(null);
       return;
     }
+    let cancelled = false;
     setLoadingDetail(true);
     setActiveTab("messages");
-    getTraceByRowID(selectedId)
-      .then(setDetail)
-      .catch((e) => setError(String(e?.message ?? e)))
-      .finally(() => setLoadingDetail(false));
-  }, [selectedId]);
+
+    const cache = rowCache.current;
+    // Current is always pulled fresh (it may have changed) and cached.
+    const currentP = getTraceByRowID(selectedId).then((d) => {
+      cache.set(selectedId, d);
+      return d;
+    });
+    // Pull only candidates not already cached. Failures degrade to null so a
+    // single broken row never blocks the baseline search or the detail view.
+    const candPs = prevIds.map((id) => {
+      const hit = cache.get(id);
+      if (hit) return Promise.resolve(hit);
+      return getTraceByRowID(id)
+        .then((d) => {
+          cache.set(id, d);
+          return d;
+        })
+        .catch(() => null);
+    });
+
+    Promise.all([currentP, ...candPs])
+      .then(([cur, ...cands]) => {
+        if (cancelled) return;
+        const prev = pickBaseline(cur, cands.filter((c): c is TraceDetail => c != null));
+        setDetail(cur);
+        setPrevDetail(prev);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(String(e?.message ?? e));
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingDetail(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, prevIds]);
 
   async function onCopy(key: string, text: string) {
     if (await copyText(text)) {
@@ -155,6 +216,7 @@ export function TraceViewer() {
         ) : (
           <DetailView
             detail={detail}
+            previous={prevDetail}
             activeTab={activeTab}
             onTabChange={setActiveTab}
             onCopy={onCopy}
@@ -168,12 +230,14 @@ export function TraceViewer() {
 
 function DetailView({
   detail,
+  previous,
   activeTab,
   onTabChange,
   onCopy,
   copied,
 }: {
   detail: TraceDetail;
+  previous: TraceDetail | null;
   activeTab: string;
   onTabChange: (v: string) => void;
   onCopy: (key: string, text: string) => void;
@@ -268,7 +332,7 @@ function DetailView({
       <Tabs items={tabs} value={activeTab} onValueChange={onTabChange} />
 
       <div>
-        {activeTab === "messages" && <TraceCategories current={detail} previous={null} />}
+        {activeTab === "messages" && <TraceCategories current={detail} previous={previous} />}
         {activeTab === "request" && <JsonTree value={detail.request_raw} />}
         {activeTab === "response" && detail.response_raw && <JsonTree value={detail.response_raw} />}
         {activeTab === "error" && detail.error_raw && (
