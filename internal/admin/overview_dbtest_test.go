@@ -80,6 +80,68 @@ func TestOverview_ReturnsStats(t *testing.T) {
 	}
 }
 
+// TestOverview_AgentStats verifies the per-agent rollup: rows are returned
+// ordered by request_count DESC, with token sums and error counts aggregated
+// correctly. Also verifies the ?from/&to window filters rows.
+func TestOverview_AgentStats(t *testing.T) {
+	h, db, tok := authedAdmin(t)
+
+	// Seed 3 rows for codex, 1 for claude-code, 1 with empty agent_type.
+	// All seeded at now() so the default 24h fallback picks them up.
+	seedRequestLogRowWithAgent(t, db, "acme", "openai", "", "codex")
+	seedRequestLogRowWithAgent(t, db, "acme", "openai", "", "codex")
+	seedRequestLogRowWithAgent(t, db, "acme", "openai", "timeout_error", "codex")
+	seedRequestLogRowWithAgent(t, db, "acme", "anthropic", "", "claude-code")
+	seedRequestLogRowWithAgent(t, db, "acme", "openai", "", "")
+
+	// Use an explicit wide window so the test is robust to clock skew.
+	from := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339)
+	to := time.Now().UTC().Add(1 * time.Hour).Format(time.RFC3339)
+	rr := doAuth(t, h, tok, http.MethodGet, "/api/v1/overview?from="+from+"&to="+to, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("overview status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	body := decodeJSON(t, rr)
+	rowsRaw, ok := body["agent_stats"].([]interface{})
+	if !ok {
+		t.Fatalf("overview.agent_stats missing or not an array; body=%s", rr.Body.String())
+	}
+	if len(rowsRaw) != 3 {
+		t.Fatalf("agent_stats len = %d, want 3 (codex / claude-code / empty)", len(rowsRaw))
+	}
+
+	// First row must be codex (3 requests > 1 > 1).
+	first := rowsRaw[0].(map[string]interface{})
+	if first["agent_type"] != "codex" {
+		t.Errorf("agent_stats[0].agent_type = %v, want codex", first["agent_type"])
+	}
+	if v := first["request_count"].(float64); v != 3 {
+		t.Errorf("agent_stats[0].request_count = %v, want 3", v)
+	}
+	if v := first["prompt_tokens"].(float64); v != 30 {
+		t.Errorf("agent_stats[0].prompt_tokens = %v, want 30 (3×10)", v)
+	}
+	if v := first["completion_tokens"].(float64); v != 60 {
+		t.Errorf("agent_stats[0].completion_tokens = %v, want 60 (3×20)", v)
+	}
+	if v := first["total_tokens"].(float64); v != 90 {
+		t.Errorf("agent_stats[0].total_tokens = %v, want 90 (3×30)", v)
+	}
+	if v := first["error_count"].(float64); v != 1 {
+		t.Errorf("agent_stats[0].error_count = %v, want 1 (one timeout_error)", v)
+	}
+
+	// Verify all rows have non-negative integer fields (smoke test).
+	for i, r := range rowsRaw {
+		row := r.(map[string]interface{})
+		for _, k := range []string{"request_count", "prompt_tokens", "completion_tokens", "total_tokens", "duration_ms", "ttft_ms", "error_count"} {
+			if v, ok := row[k].(float64); !ok || v < 0 {
+				t.Errorf("agent_stats[%d].%s = %v, want non-negative number", i, k, row[k])
+			}
+		}
+	}
+}
+
 // TestConfigSnapshots_ListHistory verifies snapshots are saved after mutations.
 func TestConfigSnapshots_ListHistory(t *testing.T) {
 	h, _, tok := authedAdmin(t)

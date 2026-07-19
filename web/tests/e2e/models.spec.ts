@@ -9,12 +9,15 @@ import { expect, test, type Locator } from "@playwright/test";
  * provider rather than depending on providers.spec.ts having run first
  * (same fix applied to operators.spec.ts for tenants).
  *
+ * Card-grid view (ADR-0044 merged /model-catalog into /models). Models render
+ * as `<a>` cards (role=link) wrapping a ModelCard; CRUD buttons appear on
+ * hover via group-hover (super-admin only).
+ *
  * We test:
  * 1. Unauthenticated redirect to login
  * 2. Login → navigate to models → list is visible
- * 3. Create a model with 0 upstreams → row appears
- * 4. Create a model with 1 upstream (incl. pricing) → row + pill appears →
- *    delete it
+ * 3. Create a model with 0 upstreams → card appears
+ * 4. Create a model with 1 upstream (incl. pricing) → card + price → delete it
  * 5. Add/remove upstream row interaction
  */
 const EMAIL = process.env.VOXELTOAD_ADMIN_EMAIL ?? "root@adminstack";
@@ -71,6 +74,14 @@ async function createProvider(
   await expect(page.getByRole("cell", { name })).toBeVisible();
 }
 
+/**
+ * cardFor locates the card (anchor wrapping a ModelCard) for the given alias.
+ * Cards live at /models/<alias> links; the alias is the card heading.
+ */
+function cardFor(page: import("@playwright/test").Page, alias: string): Locator {
+  return page.getByRole("link", { name: new RegExp(alias) });
+}
+
 test("unauthenticated visit to /models redirects to login", async ({
   page,
 }) => {
@@ -106,9 +117,8 @@ test("login → create model with 0 upstreams → see it", async ({ page }) => {
   await modal.getByRole("button", { name: "Create model" }).click();
   await expect(modal).not.toBeVisible();
 
-  await expect(page.getByRole("cell", { name: alias })).toBeVisible();
-  const row = page.getByRole("row", { name: new RegExp(alias) });
-  await expect(row.getByText("No upstreams")).toBeVisible();
+  // Card-grid view: the alias renders as the card heading inside a link.
+  await expect(cardFor(page, alias)).toBeVisible();
 });
 
 test("login → create model with 1 upstream + pricing → see it → delete it", async ({
@@ -143,17 +153,20 @@ test("login → create model with 1 upstream + pricing → see it → delete it"
   await modal.getByRole("button", { name: "Create model" }).click();
   await expect(modal).not.toBeVisible();
 
-  await expect(page.getByRole("cell", { name: alias })).toBeVisible();
-  const row = page.getByRole("row", { name: new RegExp(alias) });
-  await expect(row.getByText(/gpt-4o/)).toBeVisible();
-  await expect(row.getByText(/0\.03\/0\.06 per 1M/)).toBeVisible();
+  // Card-grid view: card shows the alias; starting price derived from the
+  // upstream's prompt_per_1m (= $0.03).
+  const card = cardFor(page, alias);
+  await expect(card).toBeVisible();
+  await expect(card.getByText(/0\.03/)).toBeVisible();
 
-  // Delete
-  await row.getByRole("button", { name: "Delete" }).click();
+  // Delete via the card's hover-revealed Delete button. Hover first to make
+  // the opacity-0 group-hover buttons visible to Playwright.
+  await card.hover();
+  await card.getByRole("button", { name: "Delete" }).click();
   const confirmDialog = page.getByRole("dialog", { name: "Confirm Delete" });
   await expect(confirmDialog).toBeVisible();
   await confirmDialog.getByRole("button", { name: "Delete" }).click();
-  await expect(page.getByRole("cell", { name: alias })).toHaveCount(0);
+  await expect(cardFor(page, alias)).toHaveCount(0);
 });
 
 test("create form: add/remove upstream row interaction", async ({ page }) => {

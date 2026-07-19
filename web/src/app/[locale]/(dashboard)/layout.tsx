@@ -106,7 +106,6 @@ export default async function DashboardLayout({
           )}
           {/* Both-scope: available to any authenticated operator. */}
           <div className="mt-2 flex flex-col gap-0.5 border-t border-border pt-2">
-            <NavLink href="/model-catalog">{t("nav.modelCatalog")}</NavLink>
             {has(session, NAV_PERMS.usage) && (
               <NavLink href="/usage">{t("nav.usage")}</NavLink>
             )}

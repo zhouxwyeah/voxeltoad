@@ -757,7 +757,9 @@ paths:
           in: query
           required: false
           schema: { type: string, enum: [5m, 1h, 24h], default: 5m }
-          description: Look-back window for recent_stats (default 5m).
+          description: Look-back window for recent_stats (default 5m). Does not affect top_tenants or agent_stats.
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
       responses:
         '200':
           description: Dashboard overview
@@ -2013,7 +2015,7 @@ components:
     # --- Overview ---
     OverviewPayload:
       type: object
-      required: [nodes, recent_stats, top_tenants]
+      required: [nodes, recent_stats, top_tenants, agent_stats]
       properties:
         nodes:
           type: object
@@ -2032,7 +2034,24 @@ components:
             total_tokens_out: { type: integer, format: int64 }
         top_tenants:
           type: array
+          description: Top 5 tenants by token volume over the ?from-&to window (falls back to last 24h when both are absent).
           items: { $ref: '#/components/schemas/UsageSummaryRow' }
+        agent_stats:
+          type: array
+          description: Per-agent_type rollup over the ?from-&to window (falls back to last 24h when both are absent). Ordered by request_count DESC.
+          items: { $ref: '#/components/schemas/AgentUsageRow' }
+    AgentUsageRow:
+      type: object
+      description: One row of the per-agent rollup. agent_type is '' for requests whose User-Agent didn't match a known detector.
+      properties:
+        agent_type: { type: string }
+        request_count: { type: integer, format: int64 }
+        prompt_tokens: { type: integer, format: int64 }
+        completion_tokens: { type: integer, format: int64 }
+        total_tokens: { type: integer, format: int64 }
+        duration_ms: { type: integer, format: int64 }
+        ttft_ms: { type: integer, format: int64 }
+        error_count: { type: integer, format: int64 }
 
     # --- Usage ---
     UsageRecord:

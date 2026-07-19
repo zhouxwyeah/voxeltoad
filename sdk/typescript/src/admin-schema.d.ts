@@ -1299,8 +1299,12 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    /** @description Look-back window for recent_stats (default 5m). */
+                    /** @description Look-back window for recent_stats (default 5m). Does not affect top_tenants or agent_stats. */
                     window?: "5m" | "1h" | "24h";
+                    /** @description Inclusive lower bound on created_at (RFC3339). */
+                    from?: components["parameters"]["From"];
+                    /** @description Exclusive upper bound on created_at (RFC3339). */
+                    to?: components["parameters"]["To"];
                 };
                 header?: never;
                 path?: never;
@@ -2837,7 +2841,28 @@ export interface components {
                 /** Format: int64 */
                 total_tokens_out: number;
             };
+            /** @description Top 5 tenants by token volume over the ?from-&to window (falls back to last 24h when both are absent). */
             top_tenants: components["schemas"]["UsageSummaryRow"][];
+            /** @description Per-agent_type rollup over the ?from-&to window (falls back to last 24h when both are absent). Ordered by request_count DESC. */
+            agent_stats: components["schemas"]["AgentUsageRow"][];
+        };
+        /** @description One row of the per-agent rollup. agent_type is '' for requests whose User-Agent didn't match a known detector. */
+        AgentUsageRow: {
+            agent_type?: string;
+            /** Format: int64 */
+            request_count?: number;
+            /** Format: int64 */
+            prompt_tokens?: number;
+            /** Format: int64 */
+            completion_tokens?: number;
+            /** Format: int64 */
+            total_tokens?: number;
+            /** Format: int64 */
+            duration_ms?: number;
+            /** Format: int64 */
+            ttft_ms?: number;
+            /** Format: int64 */
+            error_count?: number;
         };
         UsageRecord: {
             /** Format: int64 */

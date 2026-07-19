@@ -9,11 +9,27 @@
     "tokensIn": "提示 Token (5m)",
     "tokensOut": "生成 Token (5m)"
   },
-  "topTenants": "租户排行 (24h)",
+  "range": {
+    "today": "今天",
+    "yesterday": "昨天",
+    "week": "本周",
+    "month": "本月",
+    "last_month": "上月"
+  },
+  "topTenants": "租户排行",
   "columns": {
     "tenant": "租户",
     "requests": "请求",
     "tokens": "Token",
     "cost": "费用"
+  },
+  "agentStats": "按 Agent 统计",
+  "agentColumns": {
+    "agent": "Agent",
+    "requests": "请求",
+    "prompt": "提示",
+    "completion": "生成",
+    "total": "合计",
+    "errors": "错误"
   }
 }

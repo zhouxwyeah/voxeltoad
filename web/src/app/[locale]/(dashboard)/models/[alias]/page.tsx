@@ -3,7 +3,7 @@ import { handleAdminError } from "@/lib/errors";
 import { unwrap } from "@voxeltoad/gateway-sdk/admin";
 import { ForbiddenNotice } from "@/components/forbidden-notice";
 import { getSession } from "@/lib/session";
-import { ModelsPageClient } from "./client";
+import { ModelDetailClient } from "./client";
 
 export const dynamic = "force-dynamic";
 
@@ -31,29 +31,28 @@ type CatalogModel = {
 
 type ProviderOption = { name: string };
 
-// searchParams drives the search box (?q=) and capability chip (?capability=).
-// Default is empty (no filter). We fetch the full model list (limit=1000) and
-// filter client-side — see ADR-0044 for why we dropped cursor pagination.
-export default async function ModelsPage({
-  searchParams,
+export default async function ModelDetailPage({
+  params,
 }: {
-  searchParams: Promise<{ q?: string; capability?: string }>;
+  params: Promise<{ alias: string }>;
 }) {
-  const { q = "", capability = "" } = await searchParams;
+  const { alias } = await params;
+  const decoded = decodeURIComponent(alias);
   const session = await getSession();
   // Only super-admin can write; also only super-admin can call GET /providers
-  // (mounted on writeGroup). Skip the providers fetch for tenant-admin to
-  // avoid 403 — the create/edit UI is hidden when canWrite is false.
+  // (it's mounted on writeGroup). Load providers only when canWrite to avoid
+  // 403 for tenant-admins visiting the detail page.
   const canWrite = session.scopeKind === "global";
 
-  let models: CatalogModel[] = [];
+  let model: CatalogModel | null = null;
   let providers: ProviderOption[] = [];
   try {
     const client = await serverAdminClient();
     const page = unwrap(
       await client.GET("/api/v1/models", { params: { query: { limit: 1000 } } }),
     );
-    models = (page.data ?? []) as CatalogModel[];
+    const all = (page.data ?? []) as CatalogModel[];
+    model = all.find((m) => m.alias === decoded) ?? null;
 
     if (canWrite) {
       const providerPage = unwrap(
@@ -64,24 +63,20 @@ export default async function ModelsPage({
       );
     }
   } catch (err) {
-    // 401 redirects to /logout; a 403 (rare here since GET /models is open to
-    // any authenticated operator) renders a no-permission notice.
     const outcome = await handleAdminError(err);
     return (
-      <div className="mx-auto flex max-w-6xl flex-col gap-6 p-8">
+      <div className="mx-auto flex max-w-4xl flex-col gap-6 p-8">
         <ForbiddenNotice message={outcome.message} />
       </div>
     );
   }
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6 p-8">
-      <ModelsPageClient
-        models={models}
-        providers={providers}
-        query={q}
-        capability={capability}
+    <div className="mx-auto flex max-w-4xl flex-col gap-6 p-8">
+      <ModelDetailClient
+        model={model}
         canWrite={canWrite}
+        providers={providers}
       />
     </div>
   );

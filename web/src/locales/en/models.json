@@ -1,6 +1,42 @@
 {
   "heading": "Models",
-  "subtitle": "Alias to upstream provider mappings with per-million-token pricing.",
+  "subtitle": "Browse available models, their capabilities, and pricing.",
+  "search": {
+    "placeholder": "Search by alias, description, or tag…"
+  },
+  "filters": {
+    "capability": "Capability",
+    "allCapabilities": "All capabilities"
+  },
+  "card": {
+    "contextLength": "Context",
+    "startingPrice": "From",
+    "perMillion": "/ 1M tokens",
+    "providers": "{count} provider(s)",
+    "noPricing": "Pricing not configured",
+    "noDescription": "No description provided."
+  },
+  "capabilities": {
+    "vision": "Vision",
+    "function_calling": "Function Calling",
+    "streaming": "Streaming",
+    "code": "Code"
+  },
+  "detail": {
+    "back": "Back to models",
+    "description": "Description",
+    "capabilities": "Capabilities",
+    "tags": "Tags",
+    "contextLength": "Context Length",
+    "upstreams": "Upstream Providers",
+    "provider": "Provider",
+    "upstreamModel": "Upstream Model",
+    "promptPrice": "Prompt Price",
+    "completionPrice": "Completion Price",
+    "maxTokens": "Default Max Tokens"
+  },
+  "notFound": "Model not found.",
+  "empty": "No models available.",
   "columns": {
     "alias": "Alias",
     "upstreams": "Upstreams"
@@ -44,6 +80,7 @@
     "saving": "Saving…",
     "deleteConfirm": "Delete model \"{alias}\"? Routes referencing it must be removed first.",
     "delete": "Delete",
+    "edit": "Edit",
     "emptyState": "No models yet.",
     "noProviders": "You need at least one provider before creating a model.",
     "goToProviders": "Go to Providers",
