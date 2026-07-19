@@ -151,3 +151,71 @@ export interface ConfigWriteResult<T = unknown> {
   data: T;
   warning?: string;
 }
+
+// /api/v1/settings payload: editable gateway settings (design/desktop.md §7).
+// gateway.* is bootstrap-only (restart-applied); trace.* hot-applies on save.
+export interface GatewaySettingsView {
+  addr: string;
+  session_headers: string[];
+}
+
+export interface TraceSettingsView {
+  capture_payload_enabled: boolean;
+  max_body_kb: number;
+  retention_days: number;
+}
+
+export interface SettingsView {
+  gateway: GatewaySettingsView;
+  trace: TraceSettingsView;
+}
+
+// /api/v1/apikey payload. `key` is present only while the plaintext is known
+// (seeded/env at startup, or just rotated); after a restart with a rotated
+// key the plaintext is unrecoverable and only `plaintext_known: false` shows.
+export interface APIKeyView {
+  key_id: string;
+  key?: string;
+  plaintext_known: boolean;
+}
+
+// /api/v1/playground/chat result. On upstream failure the endpoint answers
+// 502 with {error, provider, latency_ms} — surfaced verbatim by the page.
+// Thinking models may return empty content with reasoning_content set (the
+// chain-of-thought that consumed the output budget).
+export interface PlaygroundResult {
+  content: string;
+  provider: string;
+  model_resolved: string;
+  fallback: boolean;
+  latency_ms: number;
+  finish_reason?: string;
+  reasoning_content?: string;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+}
+
+// /api/v1/prompts — favorited prompt templates (design/desktop.md §10.3-7).
+export interface PromptTemplate {
+  id: number;
+  title: string;
+  content: string;
+  tags: string[];
+  session_id?: string;
+  source_trace_row_id?: number;
+  note: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PromptPayload {
+  title: string;
+  content: string;
+  tags: string[];
+  note: string;
+  session_id?: string;
+  source_trace_row_id?: number;
+}

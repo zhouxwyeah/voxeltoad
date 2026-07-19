@@ -25,6 +25,7 @@ import (
 
 	desktopcfg "voxeltoad/cmd/desktop/config"
 	"voxeltoad/internal/app"
+	"voxeltoad/internal/buildinfo"
 	"voxeltoad/internal/config"
 	"voxeltoad/internal/desktoplog"
 	"voxeltoad/internal/desktopstore"
@@ -123,7 +124,10 @@ func (s *Server) Handler() http.Handler {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	// version lets the UI (and support) tell a stale binary apart from one
+	// that has the endpoints it calls — a version mismatch is the usual cause
+	// of API 404s after an upgrade.
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": buildinfo.Version})
 }
 
 func (s *Server) handleRequestLogs(w http.ResponseWriter, r *http.Request) {

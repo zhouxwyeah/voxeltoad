@@ -27,6 +27,7 @@ import (
 	"voxeltoad/cmd/desktop/seed"
 	"voxeltoad/internal/app"
 	"voxeltoad/internal/auth"
+	"voxeltoad/internal/buildinfo"
 	cfg "voxeltoad/internal/config"
 	"voxeltoad/internal/desktopapi"
 	"voxeltoad/internal/desktoplog"
@@ -53,7 +54,7 @@ func Main() {
 	webDist := flag.String("web-dist", envOr("DESKTOP_WEB_DIST", "desktop-ui/dist"), "path to built desktop UI (Vite dist); empty disables the UI")
 	flag.Parse()
 
-	log.Println("starting desktop gateway")
+	log.Printf("starting desktop gateway (version %s)", buildinfo.Version)
 
 	cfgPath, dbPath, err := resolveDataPaths(*cfgFlag, *dbFlag)
 	if err != nil {
@@ -159,8 +160,10 @@ func Main() {
 	// Thin read API (design/desktop.md §10.2) + the built SPA are mounted
 	// alongside the data plane on the same port. Routing: /api/v1/* → read API,
 	// /v1/* → data plane (agents' base_url), everything else → SPA. The Wails
-	// (or browser) frontend calls the read API on the same origin.
-	apiHandler := desktopapi.New(db, cfgPath, dispWatcher, logRing, keyState).Handler()
+	// (or browser) frontend calls the read API on the same origin. The read API
+	// is wrapped in its own access log so UI-driven API activity is visible in
+	// the Logs page too — the data-plane logger only covers /v1/*.
+	apiHandler := desktopapi.WithAccessLog(desktopapi.New(db, cfgPath, dispWatcher, logRing, keyState).Handler())
 	staticHandler := desktopapi.Static(*webDist)
 	rootHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

@@ -83,6 +83,35 @@ func TestPlayground_Success(t *testing.T) {
 	}
 }
 
+// TestPlayground_ReasoningFallback: a thinking model that burned its whole
+// output budget on reasoning_content (empty content, finish_reason=length)
+// must surface the reasoning trace + finish reason — not a bare "（空响应）" —
+// so the probe result reads as "worked, but truncated", not as a failure.
+func TestPlayground_ReasoningFallback(t *testing.T) {
+	mu := testsupport.NewMockUpstream(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-y","object":"chat.completion","model":"m1up","choices":[{"index":0,"message":{"role":"assistant","content":"","reasoning_content":"让我先思考一下这个问题……"},"finish_reason":"length"}],"usage":{"prompt_tokens":11,"completion_tokens":64,"total_tokens":75}}`))
+	})
+	defer mu.Close()
+	ts := newPlaygroundServer(t, mu.URL())
+
+	code, b := postPlayground(t, ts, `{"model":"m1","prompt":"ping"}`)
+	if code != 200 {
+		t.Fatalf("code = %d %s, want 200", code, b)
+	}
+	var out map[string]any
+	_ = json.Unmarshal(b, &out)
+	if out["content"] != "" {
+		t.Errorf("content = %v, want empty", out["content"])
+	}
+	if out["finish_reason"] != "length" {
+		t.Errorf("finish_reason = %v, want length", out["finish_reason"])
+	}
+	if out["reasoning_content"] != "让我先思考一下这个问题……" {
+		t.Errorf("reasoning_content = %v, want the upstream trace", out["reasoning_content"])
+	}
+}
+
 func TestPlayground_UpstreamErrorVerbatim(t *testing.T) {
 	mu := testsupport.NewMockUpstream(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

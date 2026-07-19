@@ -338,15 +338,30 @@ func chatCompletionsHandler(provider DispatcherProvider, chain *plugin.Chain, ex
 		acc.captureRequest(rawBody, &req)
 
 		// Mirror the outcome onto the access-log entry (when the access logger is
-		// installed) so the single INFO line is self-explanatory: model,
-		// provider, and error_type accompany status. request_id is added by the
-		// entry itself (covers every request), so it is not set here.
+		// installed) so the single access line is self-explanatory: agent, model,
+		// provider, token usage, TTFT and error_type accompany status — the same
+		// fields the audit ledger persists, so the desktop log viewer alone is
+		// enough to see who called what and what it cost. request_id is added by
+		// the entry itself (covers every request), so it is not set here.
 		if ale, ok := middleware.GetLogEntry(r).(*accessLogEntry); ok {
 			modelReq := req.Model
 			defer func() {
 				ale.model = modelReq
 				ale.provider = acc.provider
 				ale.errorType = acc.errType
+				ale.agentType = acc.agentType
+				ale.sessionID = acc.sessionID
+				ale.modelResolved = acc.modelResolved
+				ale.stream = acc.stream
+				if acc.usage != nil {
+					ale.promptTokens = acc.usage.PromptTokens
+					ale.completeTokens = acc.usage.CompletionTokens
+					ale.totalTokens = acc.usage.TotalTokens
+					ale.cachedTokens = acc.usage.CachedPromptTokens
+				}
+				ale.ttftMs = acc.ttft.Milliseconds()
+				ale.retries = acc.retryCount
+				ale.fallback = acc.fallback
 			}()
 		}
 

@@ -57,7 +57,7 @@ export function Playground() {
       <Card>
         <CardHeader>
           <CardTitle>发送测试请求</CardTitle>
-          <CardDescription>最多生成 64 tokens，成本可忽略。</CardDescription>
+          <CardDescription>最多生成 512 tokens，成本可忽略。</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           {models === null ? (
@@ -114,10 +114,26 @@ export function Playground() {
               {result.fallback && " · 发生了候选回退"}
               {result.usage &&
                 ` · tokens ${formatTokens(result.usage.total_tokens)}（${formatTokens(result.usage.prompt_tokens)}/${formatTokens(result.usage.completion_tokens)}）`}
+              {result.finish_reason &&
+                ` · 结束原因 ${result.finish_reason}${result.finish_reason === "length" ? "（输出达上限）" : ""}`}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="whitespace-pre-wrap text-sm text-foreground">{result.content || "（空响应）"}</p>
+            {result.content ? (
+              <p className="whitespace-pre-wrap text-sm text-foreground">{result.content}</p>
+            ) : result.reasoning_content ? (
+              <div className="flex flex-col gap-2">
+                <p className="text-sm text-muted-foreground">
+                  正文为空：思考型模型把输出预算用在了思考过程，未产出正文（链路本身正常）。
+                  模型思考内容：
+                </p>
+                <pre className="whitespace-pre-wrap break-all rounded-md bg-muted/40 p-3 font-mono text-xs text-muted-foreground">
+                  {result.reasoning_content}
+                </pre>
+              </div>
+            ) : (
+              <p className="whitespace-pre-wrap text-sm text-foreground">（空响应）</p>
+            )}
           </CardContent>
         </Card>
       )}

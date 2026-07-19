@@ -65,17 +65,22 @@ echo "== stage 3: wails build ($TARGET, CGO_ENABLED=1) =="
 # internal/desktopapp. The embed.FS lives in deploy/desktop/app/assets.go
 # and points at app/dist/. We've pre-synced dist/ so the embed resolves at
 # compile time — wails build itself doesn't re-run npm.
+#
+# Stamp the binary with the git commit so /api/v1/health and the startup log
+# can identify a stale build (the usual cause of API 404s in the UI).
+VERSION="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)"
+LDFLAGS="-X voxeltoad/internal/buildinfo.Version=$VERSION"
 cd deploy/desktop
 
 case "$TARGET" in
   darwin)
-    CGO_ENABLED=1 "$WAILS_BIN" build -tags desktop -platform darwin/universal
+    CGO_ENABLED=1 "$WAILS_BIN" build -tags desktop -ldflags "$LDFLAGS" -platform darwin/universal
     ;;
   windows)
     # Run on Windows. NSIS must be installed (choco install nsis).
     # Wails auto-invokes makensis using the templates under build/windows/
     # (or its bundled defaults if those files are absent).
-    CGO_ENABLED=1 "$WAILS_BIN" build -tags desktop -platform windows/amd64 -nsis
+    CGO_ENABLED=1 "$WAILS_BIN" build -tags desktop -ldflags "$LDFLAGS" -platform windows/amd64 -nsis
     ;;
   windows-cross)
     # Cross-compile from Linux/WSL2. Requires mingw-w64 + nsis:
@@ -96,7 +101,7 @@ case "$TARGET" in
     CGO_ENABLED=1 \
     GOOS=windows \
     GOARCH=amd64 \
-      "$WAILS_BIN" build -tags desktop -platform windows/amd64 -nsis
+      "$WAILS_BIN" build -tags desktop -ldflags "$LDFLAGS" -platform windows/amd64 -nsis
     ;;
 esac
 

@@ -24,12 +24,26 @@ type accessLogEntry struct {
 	start time.Time
 
 	// Optional fields stashed by the handler so the single access-log line is
-	// self-explanatory. errorType/provider/model come from the chat handler
-	// (only meaningful for /v1/chat/completions); requestID is filled in Write
-	// from chi's id so it covers every request including early rejections.
-	errorType string
-	provider  string
-	model     string
+	// self-explanatory. They mirror a subset of telemetryAcc (see router.go's
+	// deferred copy): identity/routing (provider, model, modelResolved,
+	// agentType, sessionID), usage (token counts, ttft), reliability (retries,
+	// fallback, errorType). Only meaningful for /v1/chat/completions; requestID
+	// is filled in Write from chi's id so it covers every request including
+	// early rejections. Zero values are omitted from the line.
+	errorType      string
+	provider       string
+	model          string
+	modelResolved  string
+	agentType      string
+	sessionID      string
+	stream         bool
+	promptTokens   int
+	completeTokens int
+	totalTokens    int
+	cachedTokens   int
+	ttftMs         int64
+	retries        int
+	fallback       bool
 }
 
 func (e *accessLogEntry) Write(status, bytes int, _ http.Header, elapsed time.Duration, _ interface{}) {
@@ -55,17 +69,62 @@ func (e *accessLogEntry) Write(status, bytes int, _ http.Header, elapsed time.Du
 		)
 	}
 
+	if e.agentType != "" {
+		args = append(args, "agent_type", e.agentType)
+	}
 	if e.model != "" {
 		args = append(args, "model", e.model)
 	}
+	if e.modelResolved != "" && e.modelResolved != e.model {
+		args = append(args, "model_resolved", e.modelResolved)
+	}
 	if e.provider != "" {
 		args = append(args, "provider", e.provider)
+	}
+	if e.stream {
+		args = append(args, "stream", true)
+	}
+	if e.sessionID != "" {
+		args = append(args, "session_id", e.sessionID)
+	}
+	if e.promptTokens != 0 {
+		args = append(args, "prompt_tokens", e.promptTokens)
+	}
+	if e.completeTokens != 0 {
+		args = append(args, "completion_tokens", e.completeTokens)
+	}
+	if e.totalTokens != 0 {
+		args = append(args, "total_tokens", e.totalTokens)
+	}
+	if e.cachedTokens != 0 {
+		args = append(args, "cached_tokens", e.cachedTokens)
+	}
+	if e.ttftMs != 0 {
+		args = append(args, "ttft_ms", e.ttftMs)
+	}
+	if e.retries != 0 {
+		args = append(args, "retries", e.retries)
+	}
+	if e.fallback {
+		args = append(args, "fallback", true)
 	}
 	if e.errorType != "" {
 		args = append(args, "error_type", e.errorType)
 	}
 
-	observability.Logger().Info(e.req.Method+" "+e.req.URL.Path, args...)
+	// Severity follows the outcome: upstream/forward failures (5xx) and client
+	// rejections (4xx) must stand out in the desktop log viewer instead of
+	// drowning in a uniform INFO stream.
+	logger := observability.Logger()
+	msg := e.req.Method + " " + e.req.URL.Path
+	switch {
+	case status >= 500:
+		logger.Error(msg, args...)
+	case status >= 400:
+		logger.Warn(msg, args...)
+	default:
+		logger.Info(msg, args...)
+	}
 }
 
 func (e *accessLogEntry) Panic(v interface{}, stack []byte) {

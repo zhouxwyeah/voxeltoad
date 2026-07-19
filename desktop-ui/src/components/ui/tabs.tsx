@@ -4,6 +4,13 @@ import { cn } from "../../lib/cn";
 // Tabs — lightweight tab strip matching the desktop-ui design tokens.
 // Uncontrolled by default; pass `value` + `onValueChange` to control.
 //
+// Two variants:
+//   - "underline" (default): classic tab strip with a primary bottom border on
+//     the active tab — used for page-level section switching (TraceViewer).
+//   - "pill": segmented-control look, active item gets a raised background —
+//     used for compact filter/preset switching (Overview time ranges) where the
+//     selected state must be obvious at a glance.
+//
 // Follows the same style conventions as select.tsx / modal.tsx (pure React
 // + Tailwind, no portal, no framer-motion).
 
@@ -19,12 +26,14 @@ export function Tabs({
   value,
   onValueChange,
   className,
+  variant = "underline",
 }: {
   items: TabItem[];
   defaultValue?: string;
   value?: string;
   onValueChange?: (v: string) => void;
   className?: string;
+  variant?: "underline" | "pill";
 }) {
   const [internal, setInternal] = useState<string>(defaultValue ?? items[0]?.value ?? "");
   const active = value !== undefined ? value : internal;
@@ -34,6 +43,38 @@ export function Tabs({
     if (value === undefined) setInternal(v);
     onValueChange?.(v);
   };
+
+  if (variant === "pill") {
+    return (
+      <div
+        role="tablist"
+        className={cn("inline-flex items-center gap-1 rounded-lg bg-muted p-1", className)}
+      >
+        {items.map((it) => {
+          const isActive = it.value === active;
+          return (
+            <button
+              key={it.value}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              aria-disabled={it.disabled || undefined}
+              disabled={it.disabled}
+              onClick={() => handleClick(it.value, it.disabled)}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors",
+                "hover:text-foreground",
+                isActive && "bg-background text-foreground font-medium shadow-sm",
+                it.disabled && "cursor-not-allowed opacity-50 hover:text-muted-foreground",
+              )}
+            >
+              {it.label}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <div role="tablist" className={cn("flex items-center gap-1 border-b border-border", className)}>

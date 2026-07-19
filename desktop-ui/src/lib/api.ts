@@ -21,6 +21,15 @@ import type {
 // SPA and during `vite dev` (with the API proxied to the gateway port).
 const BASE = "/api/v1";
 
+// A bare 404 from the Go ServeMux (plain-text "404 page not found", no JSON
+// error body) means the running gateway binary predates the endpoint the UI
+// called — almost always a stale build. Say so plainly instead of surfacing
+// the cryptic "请求失败 (404)". Handlers' own 404s (trace/provider not found)
+// carry a JSON error and keep their original message.
+function staleBackendError(): Error {
+  return new Error("接口不存在 (404)：网关后端版本过旧，请重启或重新构建桌面应用");
+}
+
 async function getJSON<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
   const url = new URL(BASE + path, window.location.origin);
   if (params) {
@@ -31,12 +40,17 @@ async function getJSON<T>(path: string, params?: Record<string, string | number 
   const resp = await fetch(url.toString());
   if (!resp.ok) {
     let msg = `请求失败 (${resp.status})`;
+    let hasApiError = false;
     try {
       const body = (await resp.json()) as { error?: string };
-      if (body?.error) msg = body.error;
+      if (body?.error) {
+        msg = body.error;
+        hasApiError = true;
+      }
     } catch {
       /* ignore */
     }
+    if (resp.status === 404 && !hasApiError) throw staleBackendError();
     throw new Error(msg);
   }
   return (await resp.json()) as T;
@@ -105,8 +119,9 @@ async function sendJSON<T>(method: string, path: string, body?: unknown): Promis
     try { parsed = JSON.parse(text); } catch { /* non-JSON body, fall through */ }
   }
   if (!resp.ok) {
-    const errMsg = (parsed as { error?: string } | null)?.error ?? `请求失败 (${resp.status})`;
-    throw new Error(errMsg);
+    const errMsg = (parsed as { error?: string } | null)?.error;
+    if (resp.status === 404 && !errMsg) throw staleBackendError();
+    throw new Error(errMsg ?? `请求失败 (${resp.status})`);
   }
   return parsed as T;
 }

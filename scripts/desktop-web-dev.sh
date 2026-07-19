@@ -93,7 +93,10 @@ EOF
 echo "  config at $CFG_PATH (mirrors seed.ConfigTemplate; edit to change providers)"
 
 hr "starting desktop gateway on 127.0.0.1:$GATEWAY_PORT"
-go run "$ROOT/cmd/desktop" -config "$CFG_PATH" -db "$WORKDIR/desktop.db" >"$WORKDIR/desktop.log" 2>&1 &
+# Stamp the dev binary with the git commit too, so /api/v1/health matches what
+# the packaged app reports (see scripts/build-desktop.sh).
+VERSION="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)"
+go run -ldflags "-X voxeltoad/internal/buildinfo.Version=$VERSION" "$ROOT/cmd/desktop" -config "$CFG_PATH" -db "$WORKDIR/desktop.db" >"$WORKDIR/desktop.log" 2>&1 &
 DESKTOP_PID=$!
 
 # Wait for the gateway health endpoint.
