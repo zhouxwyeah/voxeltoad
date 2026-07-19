@@ -9,11 +9,27 @@
     "tokensIn": "Prompt Tokens (5m)",
     "tokensOut": "Completion Tokens (5m)"
   },
-  "topTenants": "Top Tenants (24h)",
+  "range": {
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "week": "This Week",
+    "month": "This Month",
+    "last_month": "Last Month"
+  },
+  "topTenants": "Top Tenants",
   "columns": {
     "tenant": "Tenant",
     "requests": "Requests",
     "tokens": "Tokens",
     "cost": "Cost"
+  },
+  "agentStats": "Agent Stats",
+  "agentColumns": {
+    "agent": "Agent",
+    "requests": "Requests",
+    "prompt": "Prompt",
+    "completion": "Completion",
+    "total": "Total",
+    "errors": "Errors"
   }
 }

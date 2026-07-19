@@ -1,6 +1,42 @@
 {
   "heading": "模型",
-  "subtitle": "模型别名到上游供应商的映射，含每百万 token 定价。",
+  "subtitle": "浏览可用模型的能力与定价。",
+  "search": {
+    "placeholder": "按别名、描述或标签搜索…"
+  },
+  "filters": {
+    "capability": "能力",
+    "allCapabilities": "全部能力"
+  },
+  "card": {
+    "contextLength": "上下文",
+    "startingPrice": "起价",
+    "perMillion": "/ 百万 token",
+    "providers": "{count} 个供应商",
+    "noPricing": "未配置定价",
+    "noDescription": "暂无描述。"
+  },
+  "capabilities": {
+    "vision": "视觉",
+    "function_calling": "函数调用",
+    "streaming": "流式输出",
+    "code": "代码"
+  },
+  "detail": {
+    "back": "返回模型列表",
+    "description": "描述",
+    "capabilities": "能力",
+    "tags": "标签",
+    "contextLength": "上下文长度",
+    "upstreams": "上游供应商",
+    "provider": "供应商",
+    "upstreamModel": "上游模型",
+    "promptPrice": "输入价格",
+    "completionPrice": "输出价格",
+    "maxTokens": "默认最大 Token 数"
+  },
+  "notFound": "未找到该模型。",
+  "empty": "暂无可用模型。",
   "columns": {
     "alias": "别名",
     "upstreams": "上游"
@@ -35,7 +71,7 @@
     }
   },
   "modal": {
-    "createTitle": "创建模型",
+    "createTitle": "创建模��",
     "editTitle": "编辑模型"
   },
   "actions": {
@@ -44,6 +80,7 @@
     "saving": "保存中…",
     "deleteConfirm": "确定要删除模型「{alias}」吗？需先移除引用它的路由。",
     "delete": "删除",
+    "edit": "编辑",
     "emptyState": "暂无模型",
     "noProviders": "创建模型前需要先添加至少一个供应商。",
     "goToProviders": "前往供应商页面",

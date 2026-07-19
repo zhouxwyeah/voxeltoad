@@ -15,6 +15,22 @@ type OverviewPayload struct {
 	Nodes       NodeOverview            `json:"nodes"`
 	RecentStats RecentStatsOverview     `json:"recent_stats"`
 	TopTenants  []store.UsageSummaryRow `json:"top_tenants"`
+	AgentStats  []AgentUsageRow         `json:"agent_stats"`
+}
+
+// AgentUsageRow is one row of the per-agent rollup on the overview page.
+// Empty agent_type rows (requests whose User-Agent didn't match a known agent
+// detector — see internal/proxy/agentdetect.go) are returned as-is; the UI
+// renders them under the empty label.
+type AgentUsageRow struct {
+	AgentType        string `json:"agent_type"`
+	RequestCount     int64  `json:"request_count"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CompletionTokens int64  `json:"completion_tokens"`
+	TotalTokens      int64  `json:"total_tokens"`
+	DurationMs       int64  `json:"duration_ms"`
+	TTFTms           int64  `json:"ttft_ms"`
+	ErrorCount       int64  `json:"error_count"`
 }
 
 type NodeOverview struct {
@@ -70,14 +86,24 @@ func mountOverview(g *gin.RouterGroup, db *store.DB) {
 			}
 		}
 
-		// Recent stats from request_logs (last window). The window is now
-		// client-controllable via ?window=5m|1h|24h (default 5m).
+		// Recent stats from request_logs over a short look-back window
+		// (?window=5m|1h|24h, default 5m). This is an instantaneous health
+		// indicator — intentionally NOT affected by the new ?from/&to range
+		// selector, which drives the TopTenants and AgentStats tables below.
 		window := parseOverviewWindow(c.Query("window"))
 		p.RecentStats = queryRecentStats(ctx, db, window)
 
-		// Top 5 tenants by token volume in the last 24h.
+		// Optional ?from/&to (RFC3339) drive the time-scoped tables. Absent
+		// both → fall back to last 24h so a bare curl / old SDK still returns
+		// sensible data instead of an unbounded scan.
+		from, to, ok := parseTimeRange(c)
+		if !ok {
+			return
+		}
+
 		usageRepo := store.NewUsageQueryRepo(db, "") // global view
-		p.TopTenants = queryTopTenants(ctx, usageRepo)
+		p.TopTenants = queryTopTenants(ctx, usageRepo, from, to)
+		p.AgentStats = queryAgentStats(ctx, db, from, to)
 
 		c.JSON(http.StatusOK, p)
 	})
@@ -109,13 +135,59 @@ func queryRecentStats(ctx context.Context, db *store.DB, window time.Duration) R
 	}
 }
 
-func queryTopTenants(ctx context.Context, repo *store.UsageQueryRepo) []store.UsageSummaryRow {
-	rows, err := repo.Summary(ctx, time.Time{}, time.Now().UTC().Add(24*time.Hour), "tenant")
+// queryTopTenants returns the top 5 tenants by token volume over the given
+// time window. When both from and to are zero (no ?from/&to passed), it falls
+// back to the last 24h so a bare curl / old SDK still gets sensible data.
+func queryTopTenants(ctx context.Context, repo *store.UsageQueryRepo, from, to time.Time) []store.UsageSummaryRow {
+	if from.IsZero() && to.IsZero() {
+		to = time.Now().UTC().Add(24 * time.Hour)
+	}
+	rows, err := repo.Summary(ctx, from, to, "tenant")
 	if err != nil {
 		return nil
 	}
 	if len(rows) > 5 {
 		rows = rows[:5]
+	}
+	return rows
+}
+
+// queryAgentStats returns a per-agent_type rollup over the given time window.
+// When both from and to are zero, falls back to the last 24h. Rows are ordered
+// by request_count DESC. SQL mirrors internal/desktopstore/query.go:441 so the
+// desktop and admin overviews stay semantically aligned.
+func queryAgentStats(ctx context.Context, db *store.DB, from, to time.Time) []AgentUsageRow {
+	if from.IsZero() && to.IsZero() {
+		from = time.Now().UTC().Add(-24 * time.Hour)
+	}
+	where := "1=1"
+	var args []any
+	if !from.IsZero() {
+		where += " AND created_at >= ?"
+		args = append(args, from)
+	}
+	if !to.IsZero() {
+		where += " AND created_at < ?"
+		args = append(args, to)
+	}
+	q := `SELECT agent_type,
+	             COUNT(*)                                                        AS request_count,
+	             COALESCE(SUM(prompt_tokens), 0)                                 AS prompt_tokens,
+	             COALESCE(SUM(completion_tokens), 0)                             AS completion_tokens,
+	             COALESCE(SUM(total_tokens), 0)                                  AS total_tokens,
+	             COALESCE(SUM(duration_ms), 0)                                   AS duration_ms,
+	             COALESCE(SUM(ttft_ms), 0)                                       AS ttft_ms,
+	             COALESCE(SUM(CASE WHEN error_type <> '' THEN 1 ELSE 0 END), 0)  AS error_count
+	      FROM request_logs
+	      WHERE ` + where + `
+	      GROUP BY agent_type
+	      ORDER BY request_count DESC`
+	var rows []AgentUsageRow
+	if err := db.WithContext(ctx).Raw(q, args...).Scan(&rows).Error; err != nil {
+		return nil
+	}
+	if rows == nil {
+		rows = []AgentUsageRow{}
 	}
 	return rows
 }

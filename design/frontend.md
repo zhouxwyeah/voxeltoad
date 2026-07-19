@@ -84,7 +84,8 @@ client 表单 → Server Action('use server')
 
 | 资源/页面 | super-admin | tenant-admin |
 |---|---|---|
-| providers/models/routes/plugins(全局 config) | ✅ 增删列 | ❌ 隐藏(后端 403) |
+| providers/routes/plugins(全局 config) | ✅ 增删列 | ❌ 隐藏(后端 403) |
+| models(全局共享，GET 对两角色开放) | ✅ 卡片 + CRUD（菜单在 providers 下） | ✅ 卡片只读(菜单隐藏，URL 直达；后端 403 写) |
 | tenants | ✅ 列表/创建/启停(可逆) | ❌ 隐藏 |
 | operators | ✅ 列表/创建/删除 | ❌ 隐藏 |
 | api-keys | ❌(它无租户) | ✅ 自租户增删列 |
@@ -137,7 +138,8 @@ money 模块(若涉及 pricing)全链路成立。
 
 ### 首版范围(后端 API 已就绪,可立刻做)
 - 登录 / 布局 / 角色导航守卫
-- providers / models / routes / plugins:列表 + 创建 + 编辑 + 详情 + 删除（2026-07 已补全 routes/plugins，操作集扩展到编辑+详情）
+- providers / routes / plugins:列表 + 创建 + 编辑 + 详情 + 删除（2026-07 已补全 routes/plugins，操作集扩展到编辑+详情）
+- models:卡片视图 + 搜索过滤 + 角色条件 CRUD（ADR-0044 合并 model-catalog）
 - tenants:列表 + 创建 + 启停(可逆开关)
 - operators:列表 + 创建 + 删除(super-admin)
 - api-keys:列表 + 创建(明文一次性展示)+ 撤销(tenant-admin)

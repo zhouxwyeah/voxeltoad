@@ -79,7 +79,9 @@ async function createModel(
   await modal.locator('input[name="upstream_model"]').fill("gpt-4o");
   await modal.getByRole("button", { name: "Create model" }).click();
   await expect(modal).not.toBeVisible();
-  await expect(page.getByRole("cell", { name: alias })).toBeVisible();
+  // Card-grid view (ADR-0044): the alias renders as the card heading inside
+  // a link to /models/<alias>.
+  await expect(page.getByRole("link", { name: new RegExp(alias) })).toBeVisible();
 }
 
 test("unauthenticated visit to /routes redirects to login", async ({

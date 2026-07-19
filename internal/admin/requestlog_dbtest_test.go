@@ -13,6 +13,13 @@ import (
 // seedRequestLogRow inserts a request_logs row for a tenant (created_at
 // defaults to now()).
 func seedRequestLogRow(t *testing.T, db *store.DB, tenant, provider, errorType string) {
+	seedRequestLogRowWithAgent(t, db, tenant, provider, errorType, "")
+}
+
+// seedRequestLogRowWithAgent is seedRequestLogRow with an explicit agent_type.
+// Use this when the test needs to verify per-agent aggregation (e.g. overview
+// AgentStats). Empty agentType matches the legacy default ('').
+func seedRequestLogRowWithAgent(t *testing.T, db *store.DB, tenant, provider, errorType, agentType string) {
 	t.Helper()
 	if err := db.Exec(
 		`INSERT INTO request_logs
@@ -20,9 +27,9 @@ func seedRequestLogRow(t *testing.T, db *store.DB, tenant, provider, errorType s
 		    model_requested, model_resolved, stream,
 		    prompt_tokens, completion_tokens, total_tokens,
 		    ttft_ms, duration_ms, error_type, blocked_by, fallback,
-		    request_id, session_id)
-		 VALUES (?, '', 'k', ?, 'chat', 'gpt-4o', false, 10, 20, 30, 50, 100, ?, '', false, 'req-1', 'sess-1')`,
-		tenant, provider, errorType,
+		    request_id, session_id, agent_type)
+		 VALUES (?, '', 'k', ?, 'chat', 'gpt-4o', false, 10, 20, 30, 50, 100, ?, '', false, 'req-1', 'sess-1', ?)`,
+		tenant, provider, errorType, agentType,
 	).Error; err != nil {
 		t.Fatalf("seed request_logs: %v", err)
 	}
