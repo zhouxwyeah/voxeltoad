@@ -127,9 +127,20 @@ func (a *telemetryAcc) captureRequest(rawBody []byte, req *adapter.UnifiedReques
 	}
 	a.tracePL.requestRaw = append([]byte(nil), capBytes(rawBody, maxBodyBytes)...)
 	if req != nil {
-		if b, err := json.Marshal(req.Messages); err == nil {
-			a.tracePL.messages = b
+		// Always emit a valid JSON array, even on marshal failure or empty
+		// messages — downstream stores this as json.RawMessage and an empty
+		// value would surface as invalid JSON in the desktop trace viewer.
+		// (json.Marshal of a nil []Message returns "null", so guard the empty
+		// case explicitly.)
+		var msgs []byte
+		if len(req.Messages) == 0 {
+			msgs = []byte("[]")
+		} else if b, err := json.Marshal(req.Messages); err == nil {
+			msgs = b
+		} else {
+			msgs = []byte("[]")
 		}
+		a.tracePL.messages = msgs
 		a.tracePL.nMessages = len(req.Messages)
 		nTools := 0
 		for _, m := range req.Messages {

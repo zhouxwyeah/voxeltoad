@@ -334,11 +334,24 @@ type traceDetailScan struct {
 func toTraceDetail(s traceDetailScan) *TraceDetail {
 	return &TraceDetail{
 		TraceSummary: s.TraceSummary,
-		Messages:     json.RawMessage(s.Messages),
-		RequestRaw:   json.RawMessage(s.RequestRaw),
+		Messages:     rawMessageOrNull(s.Messages),
+		RequestRaw:   rawMessageOrNull(s.RequestRaw),
 		ResponseRaw:  s.ResponseRaw,
 		ErrorRaw:     s.ErrorRaw,
 	}
+}
+
+// rawMessageOrNull normalizes a TEXT column rendered as json.RawMessage. An
+// empty string (capture missed / marshal failed / upstream 4xx before parse)
+// would otherwise produce json.RawMessage(""), which is invalid JSON and makes
+// encoding/json fail the entire TraceDetail marshal — surfacing in the desktop
+// trace viewer as "Unexpected end of JSON input". Map empty → "null" so the
+// API always emits a valid JSON document.
+func rawMessageOrNull(s string) json.RawMessage {
+	if s == "" {
+		return json.RawMessage("null")
+	}
+	return json.RawMessage(s)
 }
 
 const traceSummaryCols = `id, request_id, session_id, trace_id, tenant,

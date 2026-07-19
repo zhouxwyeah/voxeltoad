@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -109,6 +110,24 @@ func TestCaptureNilSettingsIsDisabled(t *testing.T) {
 	acc.captureRequest([]byte(`{"model":"m"}`), &adapter.UnifiedRequest{Model: "m"})
 	if len(acc.tracePL.requestRaw) != 0 {
 		t.Errorf("nil settings should disable capture; got requestRaw=%s", acc.tracePL.requestRaw)
+	}
+}
+
+// TestCaptureEmptyMessagesIsValidJSON guards against the desktop trace viewer
+// bug "Unexpected end of JSON input". captureRequest must always leave messages
+// as a valid JSON array, even when req.Messages is empty or marshal fails —
+// otherwise the stored trace_payloads row has messages="" which surfaces as
+// invalid JSON in the trace API.
+func TestCaptureEmptyMessagesIsValidJSON(t *testing.T) {
+	acc := newTelemetryAcc("m", false, "rid", "sid", "tid", settingsFn(true, 0))
+
+	// Empty messages slice: must default to "[]" rather than nil.
+	acc.captureRequest([]byte(`{}`), &adapter.UnifiedRequest{Model: "m"})
+	if string(acc.tracePL.messages) != "[]" {
+		t.Errorf("empty messages = %s, want []", acc.tracePL.messages)
+	}
+	if !json.Valid(acc.tracePL.messages) {
+		t.Errorf("messages not valid JSON: %s", acc.tracePL.messages)
 	}
 }
 

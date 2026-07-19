@@ -33,6 +33,10 @@ func seedTestData(t *testing.T, db *DB) {
 		{ID: 2, RequestID: "req-2", SessionID: "sess-claude", Provider: "openai", ModelRequested: "default", Stream: false, AgentType: "claude-code", StatusCode: 200, NMessages: 2, Messages: string(msgs), RequestRaw: `{"model":"default"}`, ResponseRaw: "data: {...}", CreatedAt: base.Add(time.Minute)},
 		{ID: 3, RequestID: "req-3", SessionID: "sess-cb-err", Provider: "openai", ModelRequested: "default", Stream: false, AgentType: "codebuddy", StatusCode: 502, NMessages: 1, Messages: string(msgs), RequestRaw: `{"model":"default"}`, ErrorRaw: "upstream 401", CreatedAt: base.Add(2 * time.Minute)},
 		{ID: 4, RequestID: "req-4", SessionID: "sess-cb-ok", Provider: "openai", ModelRequested: "default", Stream: false, AgentType: "codebuddy", StatusCode: 200, NMessages: 1, Messages: string(msgs), RequestRaw: `{"model":"default"}`, ResponseRaw: "data: {...}", CreatedAt: base.Add(3 * time.Minute)},
+		// Empty bodies row: simulates marshal failure / capture missed /
+		// upstream 4xx before parse. Must surface as JSON null, not invalid
+		// JSON (regression for desktop trace viewer bug).
+		{ID: 5, RequestID: "req-5", SessionID: "sess-empty", Provider: "openai", ModelRequested: "default", Stream: false, AgentType: "claude-code", StatusCode: 400, NMessages: 0, Messages: "", RequestRaw: "", ErrorRaw: "bad request", CreatedAt: base.Add(4 * time.Minute)},
 	}
 	for _, tr := range traces {
 		if err := db.Create(&tr).Error; err != nil {
@@ -179,5 +183,19 @@ func TestTraceQueries(t *testing.T) {
 	d2, ok2, err := repo.GetTraceByRequestID(context.Background(), "req-4")
 	if err != nil || !ok2 || d2.SessionID != "sess-cb-ok" {
 		t.Fatalf("GetTraceByRequestID = %+v ok=%v err=%v", d2, ok2, err)
+	}
+
+	// Regression: empty messages/request_raw columns must surface as JSON null,
+	// not invalid JSON that breaks the desktop trace viewer
+	// ("Unexpected end of JSON input").
+	d3, ok3, err := repo.GetTraceByRowID(context.Background(), 5)
+	if err != nil || !ok3 {
+		t.Fatalf("GetTraceByRowID(5) = %+v ok=%v err=%v", d3, ok3, err)
+	}
+	if string(d3.Messages) != "null" {
+		t.Errorf("empty messages = %q, want \"null\"", string(d3.Messages))
+	}
+	if string(d3.RequestRaw) != "null" {
+		t.Errorf("empty request_raw = %q, want \"null\"", string(d3.RequestRaw))
 	}
 }
