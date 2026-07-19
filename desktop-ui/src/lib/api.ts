@@ -169,6 +169,17 @@ export function reloadConfig(): Promise<ConfigWriteResult<{ status: string }>> {
   return sendJSON<ConfigWriteResult<{ status: string }>>("POST", "/config/reload");
 }
 
+// Reveal the YAML config file in the OS file manager (sidebar footer button).
+export function revealConfigFolder(): Promise<ConfigWriteResult<{ path: string }>> {
+  return sendJSON<ConfigWriteResult<{ path: string }>>("POST", "/config/reveal");
+}
+
+// Quit the desktop app (sidebar footer button). The gateway answers first,
+// then quits — the response lands before the process goes away.
+export function quitApp(): Promise<ConfigWriteResult<{ status: string }>> {
+  return sendJSON<ConfigWriteResult<{ status: string }>>("POST", "/app/quit");
+}
+
 export function getSettings(): Promise<SettingsView> {
   return getJSON<SettingsView>("/settings");
 }

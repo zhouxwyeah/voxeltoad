@@ -79,7 +79,7 @@ func Main() {
 		defer logFile.Close()
 		logWriters = append(logWriters, logFile)
 	}
-	logTee := io.MultiWriter(logWriters...)
+	logTee := desktoplog.NewTee(logWriters...)
 	log.SetOutput(logTee)
 	observability.SetLogOutput(logTee)
 
@@ -163,7 +163,8 @@ func Main() {
 	// (or browser) frontend calls the read API on the same origin. The read API
 	// is wrapped in its own access log so UI-driven API activity is visible in
 	// the Logs page too — the data-plane logger only covers /v1/*.
-	apiHandler := desktopapi.WithAccessLog(desktopapi.New(db, cfgPath, dispWatcher, logRing, keyState).Handler())
+	apiServer := desktopapi.New(db, cfgPath, dispWatcher, logRing, keyState)
+	apiHandler := desktopapi.WithAccessLog(apiServer.Handler())
 	staticHandler := desktopapi.Static(*webDist)
 	rootHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -218,6 +219,7 @@ func Main() {
 		cfgPath:      cfgPath,
 		plaintextKey: plaintextKey,
 		keyState:     keyState,
+		apiServer:    apiServer,
 	})
 }
 
@@ -244,7 +246,8 @@ type runMainDeps struct {
 	listenErr    error                // non-nil when the pre-bind failed (port conflict)
 	gatewayAddr  string               // e.g. "127.0.0.1:8787" — for the Wails reverse proxy target
 	onReload     func() error         // dispWatcher.Build (hot-reload, design/desktop.md §7)
-	cfgPath      string               // for the "Open config folder" Wails menu item
+	cfgPath      string               // for the macOS "Open config folder" menu item + /api/v1/config/reveal
 	plaintextKey string               // logged at startup
 	keyState     *desktopapi.KeyState // shared with the read API; backs the "Copy API key" menu item
+	apiServer    *desktopapi.Server   // Wails runner injects App.RequestQuit via SetQuitFunc
 }

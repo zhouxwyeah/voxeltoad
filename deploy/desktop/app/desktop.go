@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -46,7 +44,7 @@ type App struct {
 
 	GatewayURL string // e.g. "http://127.0.0.1:8787" — for the AssetServer reverse proxy
 	OnReload   func() error
-	CfgPath    string // for the "Open config folder" menu item
+	CfgPath    string // for the macOS "Open config folder" menu item + /api/v1/config/reveal
 	// KeyState is shared with the read API: it holds the current plaintext
 	// key so the "复制 API key" menu item copies the REAL key (it previously
 	// copied a hardcoded constant that went stale on env override or
@@ -79,13 +77,28 @@ func (a *App) Run() error {
 		return err
 	}
 
+	// Native menu bar only on macOS, where it lives in the system menu bar at
+	// the top of the screen (and provides the input-field edit shortcuts via
+	// EditMenu). On Windows/Linux it would render INSIDE the window above the
+	// webview — visually disconnected from the SPA's own sidebar layout — so
+	// those platforms get no menu; the same actions (reload config, open
+	// config folder, quit) live in the sidebar footer instead.
+	var appMenu *menu.Menu
+	if runtime.GOOS == "darwin" {
+		appMenu = a.nativeMenu()
+	}
+
 	return wails.Run(&options.App{
 		Title:             "桌面网关助手",
 		Width:             1280,
 		Height:            800,
 		MinWidth:          900,
 		MinHeight:         600,
-		HideWindowOnClose: true, // dock close button → hide (keeps HTTP server alive for Agents)
+		// X hides to the dock on macOS (native hide in windowShouldClose, see
+		// below); a real quit elsewhere — Windows/Linux have no tray to reveal
+		// a hidden window from, so a hidden process would just squat on the
+		// gateway port.
+		HideWindowOnClose: runtime.GOOS == "darwin",
 		// Single instance: double-clicking the .app while it is already running
 		// (possibly hidden to the dock) must not start a second gateway — the
 		// pre-bound port would fail anyway. Focus the existing window instead.
@@ -102,17 +115,18 @@ func (a *App) Run() error {
 			Assets:  assetsFS,
 			Handler: http.HandlerFunc(proxyHandler(proxy)),
 		},
-		Menu:       a.nativeMenu(),
+		Menu:       appMenu,
 		OnStartup:  a.onStartup,
 		OnDomReady: func(ctx context.Context) { /* no-op */ },
 		OnShutdown: a.onShutdown,
 		OnBeforeClose: func(ctx context.Context) bool {
-			// Hide instead of quitting when the window's close button is clicked.
-			// The HTTP server stays up (Agents can keep calling); user quits via
-			// the dock icon or the menu bar → 桌面网关助手 → 退出 (which triggers
-			// OnShutdown through a different path).
-			wailsruntime.WindowHide(ctx)
-			return true // prevent the close
+			// Never veto a quit. Hiding on X is handled NATIVELY via
+			// HideWindowOnClose before this hook is consulted on every
+			// platform, so OnBeforeClose only fires on genuine quit paths
+			// (macOS menu Cmd+Q, window X on Windows/Linux, sidebar 退出应用 →
+			// RequestQuit). Returning true here would silently cancel the quit
+			// and strand a hidden, port-holding process.
+			return false
 		},
 		Bind: []any{a},
 	})
@@ -188,10 +202,22 @@ func (a *App) Reload() string {
 	return "reloaded"
 }
 
+// RequestQuit triggers the normal Wails quit path: runtime.Quit bypasses
+// OnBeforeClose (that hook only intercepts the window's close button), so
+// OnShutdown runs and drains the HTTP server gracefully, then main's defer
+// chain flushes the recorders. Wired into desktopapi via SetQuitFunc — the
+// sidebar 退出应用 button's replacement for the native menu quit.
+func (a *App) RequestQuit() {
+	if a.ctx != nil {
+		wailsruntime.Quit(a.ctx)
+	}
+}
+
 // nativeMenu builds the macOS menu bar: app menu (quit) + Edit + custom
 // "视图" submenu (reload config, open config folder, copy API key). The
 // standard AppMenu and EditMenu come from Wails' menuroles (they wire up
 // the OS-standard Copy/Paste/Quit/Minimize behaviors for free on macOS).
+// Only mounted on darwin — see Run() for why.
 func (a *App) nativeMenu() *menu.Menu {
 	viewMenu := menu.NewMenu()
 	viewMenu.AddText("重载配置", keys.CmdOrCtrl("r"), func(_ *menu.CallbackData) {
@@ -235,20 +261,9 @@ func (a *App) nativeMenu() *menu.Menu {
 	return menu.NewMenuFromItems(menu.AppMenu(), menu.EditMenu(), customView)
 }
 
-// openConfigFolder reveals the YAML config file in the platform's file manager:
-// macOS Finder (`open -R`), Windows Explorer (`explorer.exe /select,`), or the
-// Linux desktop's default folder opener (`xdg-open` on the parent dir).
+// openConfigFolder backs the macOS "打开配置文件位置" menu item. The platform
+// branches live in desktopapi.RevealConfigFile so the HTTP endpoint behind
+// the sidebar button (Windows/Linux, where no menu exists) shares them.
 func (a *App) openConfigFolder() {
-	if a.CfgPath == "" {
-		return
-	}
-	switch runtime.GOOS {
-	case "darwin":
-		_ = exec.Command("open", "-R", a.CfgPath).Run()
-	case "windows":
-		// explorer.exe /select,<path> — backslash separators preferred by Explorer.
-		_ = exec.Command("explorer.exe", "/select,"+filepath.FromSlash(a.CfgPath)).Run()
-	default:
-		_ = exec.Command("xdg-open", filepath.Dir(a.CfgPath)).Run()
-	}
+	_ = desktopapi.RevealConfigFile(a.CfgPath)
 }

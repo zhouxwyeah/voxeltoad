@@ -221,7 +221,7 @@ APIKey (实体, KeyStore, 仅种子 1 个默认)
 
 ### 10.1 技���选型
 - **CLI / 开发模式(`make desktop-web-dev`)**:前端是独立的 Vite + React SPA(顶层 `desktop-ui/`,与 `web/` 并列),由 Go 网关用 `http.FileServer` 同源服务。前端 `fetch` 走相对路径 `/api/v1/*`,生产同源、dev 模式靠 Vite `server.proxy`(见 `desktop-ui/vite.config.ts`)转到网关端口。`cmd/desktop/main.go` 走 `//go:build !desktop` 的 `run_cli.go`。
-- **Wails 打包(已落地,`deploy/desktop/`)**:用 Wails v2 把 Go binary + SPA 包成原生安装包,双平台产物:**macOS `.app`**(darwin/universal)+ **Windows NSIS `.exe`**(amd64,ADR-0043)。打包层 `deploy/desktop/`:`wails.json` + `assets.go`(`//go:embed all:dist`)+ `desktop.go`(app context:菜单栏 + 关闭隐藏到 dock + OnShutdown 优雅停服 + `openConfigFolder` 按 `runtime.GOOS` 分支 Finder/Explorer/xdg-open)+ `build/darwin/Info.plist` + `build/windows/{info.json,icon.ico}`。构建脚本 `scripts/build-desktop.sh` 参数化 TARGET(`darwin`|`windows`|`windows-cross`),Makefile 暴露 `desktop-build` / `desktop-build-windows` / `desktop-build-windows-cross` 三个目标;Windows .exe 有两条构建路径——(A)WSL2/Linux 交叉编译(`apt install mingw-w64 nsis` 后跑 `make desktop-build-windows-cross`,开发者推荐)和(B)Windows 原生(`choco install nsis` 后跑 `make desktop-build-windows`);CI 在 push-to-main 时跑 `desktop-windows-build` job 产出 `.exe` artifact(ADR-0043 supersede ADR-0042 §3 的窄面)。**数据面必须保留独立 `net/http.Server`**:第三方 Agent 用 `base_url` 打 `/v1/*` 且依赖 `WriteTimeout:0` 的 SSE 流式,不可走 Wails AssetServer;Wails webview 里的 SPA 通过 AssetServer.Handler 反向代理打到本地 HTTP server 的 `/api/v1/*` + `/v1/*`。`cmd/desktop/main.go` 按 `//go:build desktop` 分两文件复用同一装配链。
+- **Wails 打包(已落地,`deploy/desktop/`)**:用 Wails v2 把 Go binary + SPA 包成原生安装包,双平台产物:**macOS `.app`**(darwin/universal)+ **Windows NSIS `.exe`**(amd64,ADR-0043)。打包层 `deploy/desktop/`:`wails.json` + `assets.go`(`//go:embed all:dist`)+ `desktop.go`(app context:原生菜单仅 macOS 挂载——Windows/Linux 菜单栏渲染在窗口内与 SPA 布局不协调,对应动作收进侧边栏底部按钮[重载配置 Ctrl+R/打开配置位置/退出应用]+ `POST /api/v1/app/quit` → `RequestQuit` 走 OnShutdown 优雅停服;关闭按钮 macOS 隐藏到 dock、Win/Linux 直接退出——`HideWindowOnClose` 平台化,`OnBeforeClose` 不否决退出,避免残留隐藏进程占用端口)+ `build/darwin/Info.plist` + `build/windows/{info.json,icon.ico}`。构建脚本 `scripts/build-desktop.sh` 参数化 TARGET(`darwin`|`windows`|`windows-cross`),Makefile 暴露 `desktop-build` / `desktop-build-windows` / `desktop-build-windows-cross` 三个目标;Windows .exe 有两条构建路径——(A)WSL2/Linux 交叉编译(`apt install mingw-w64 nsis` 后跑 `make desktop-build-windows-cross`,开发者推荐)和(B)Windows 原生(`choco install nsis` 后跑 `make desktop-build-windows`);CI 在 push-to-main 时跑 `desktop-windows-build` job 产出 `.exe` artifact(ADR-0043 supersede ADR-0042 §3 的窄面)。**数据面必须保留独立 `net/http.Server`**:第三方 Agent 用 `base_url` 打 `/v1/*` 且依赖 `WriteTimeout:0` 的 SSE 流式,不可走 Wails AssetServer;Wails webview 里的 SPA 通过 AssetServer.Handler 反向代理打到本地 HTTP server 的 `/api/v1/*` + `/v1/*`。`cmd/desktop/main.go` 按 `//go:build desktop` 分两文件复用同一装配链。
 - 前端**复用 `web/` 的 TSX 组件形态**，但端点自管（桌面不构建 admin），用自写的薄客户端 `desktop-ui/src/lib/api.ts`。
 
 ### 10.2 API 端点(读 + 配置 CRUD)
@@ -240,6 +240,8 @@ APIKey (实体, KeyStore, 仅种子 1 个默认)
 - `GET/POST /api/v1/models` + `GET/PUT/DELETE /api/v1/models/{alias}`
 - `GET/POST /api/v1/routes` + `GET/PUT/DELETE /api/v1/routes/{alias}`
 - `POST /api/v1/config/reload` —— 手动强制重读 + rebuild(兜底)
+- `POST /api/v1/config/reveal` —— 在系统文件管理器中定位配置文件(侧边栏底部按钮;`RevealConfigFile` 按 `runtime.GOOS` 分支 Finder/Explorer/xdg-open,macOS 菜单项共用)
+- `POST /api/v1/app/quit` —— 退出应用(侧边栏底部按钮;先应答再经 `SetQuitFunc` 注入的 Wails Quit 走正常 OnShutdown 优雅停服)
 - `GET/PUT /api/v1/settings` —— 网关级设置(gateway.addr/session_headers 重启生效;trace 三项保存即热生效)
 
 **运行与工具端点**:

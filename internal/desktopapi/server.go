@@ -44,6 +44,9 @@ type Server struct {
 	logs       *desktoplog.Ring
 	keyState   *KeyState
 	keys       *desktopstore.KeyStore
+	// quitFn backs POST /api/v1/app/quit; injected via SetQuitFunc once the
+	// desktop shell exists (nil → endpoint 503s).
+	quitFn func()
 }
 
 // New builds the read API server over the given SQLite connection. configPath
@@ -116,6 +119,14 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("GET /api/v1/settings", s.handleGetSettings)
 		mux.HandleFunc("PUT /api/v1/settings", s.handlePutSettings)
 	}
+
+	// App-control endpoints for the sidebar footer buttons (they replace the
+	// native menu items, which only existed on the Windows menu bar). Both
+	// register unconditionally and guard at request time — quit because
+	// SetQuitFunc is called after Handler(), reveal so a config-less server
+	// answers a clean JSON 503 instead of the mux's plain 404.
+	mux.HandleFunc("POST /api/v1/config/reveal", s.handleConfigReveal)
+	mux.HandleFunc("POST /api/v1/app/quit", s.handleAppQuit)
 	return mux
 }
 
@@ -419,7 +430,7 @@ func (s *Server) loadConfig(w http.ResponseWriter) *config.Dynamic {
 // override preserves the bootstrap `gateway:` section (listen addr + session
 // headers, not modeled by config.Dynamic) as-is, while a non-nil override
 // replaces it (settings-editor path) — dropping the section would silently
-// move the gateway back to :8080 on the next restart. Rebuild failure is
+// move the gateway back to :12800 on the next restart. Rebuild failure is
 // logged but NOT returned as an error: the file is already updated, and
 // keeping the last-good dispatcher is the documented behavior
 // (watcher.go:71-73). The API returns 200 with a warning field so the UI can

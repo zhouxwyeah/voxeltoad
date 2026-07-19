@@ -1,5 +1,18 @@
+import { useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { FolderOpen, Power, RefreshCw } from "lucide-react";
 import { cn } from "../../lib/cn";
+import {
+  quitAppWithToast,
+  reloadConfigWithToast,
+  revealConfigFolderWithToast,
+} from "../../lib/app-actions";
+import { ConfirmModal } from "../ui/confirm-modal";
+
+// Shortcut hint matches the platform: macOS keeps the menu's Cmd+R, elsewhere
+// the webview's Ctrl+R listener in App.tsx.
+const isMac = /mac/i.test(navigator.userAgent);
+const reloadShortcut = isMac ? "⌘R" : "Ctrl+R";
 
 // Sidebar — mirrors the admin dashboard sidebar (web/src/app/[locale]/
 // (dashboard)/layout.tsx): w-60 muted rail, logo + two-line brand block,
@@ -59,7 +72,31 @@ function SideNavLink({
   );
 }
 
+/** Icon button for the footer app actions (title doubles as the tooltip). */
+function FooterButton({
+  title,
+  onClick,
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+    >
+      {children}
+    </button>
+  );
+}
+
 export function Sidebar() {
+  const [quitOpen, setQuitOpen] = useState(false);
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-muted">
       {/* Brand mark: same logo + name/subtitle block as the admin console. */}
@@ -80,9 +117,33 @@ export function Sidebar() {
           ))}
         </div>
       </nav>
-      <div className="border-t border-border px-3 py-3">
+      {/* App actions replacing the native menu items (no menu bar on
+          Windows/Linux; macOS keeps its menu in the system bar). */}
+      <div className="flex items-center justify-between border-t border-border px-3 py-3">
         <span className="px-3 text-xs text-muted-foreground">本地代理 · 单用户</span>
+        <div className="flex items-center gap-1">
+          <FooterButton title={`重载配置 (${reloadShortcut})`} onClick={() => void reloadConfigWithToast()}>
+            <RefreshCw className="h-4 w-4" />
+          </FooterButton>
+          <FooterButton title="打开配置文件位置" onClick={() => void revealConfigFolderWithToast()}>
+            <FolderOpen className="h-4 w-4" />
+          </FooterButton>
+          <FooterButton title="退出应用" onClick={() => setQuitOpen(true)}>
+            <Power className="h-4 w-4" />
+          </FooterButton>
+        </div>
       </div>
+      <ConfirmModal
+        open={quitOpen}
+        onCancel={() => setQuitOpen(false)}
+        onConfirm={async () => {
+          setQuitOpen(false);
+          await quitAppWithToast();
+        }}
+        title="退出应用"
+        message="退出后网关将停止，所有 Agent 的调用都会失败。确定退出？"
+        confirmLabel="退出"
+      />
     </aside>
   );
 }

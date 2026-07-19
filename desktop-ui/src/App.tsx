@@ -1,6 +1,8 @@
+import { useEffect } from "react";
 import { Routes, Route } from "react-router-dom";
 import { Sidebar } from "./components/layout/sidebar";
 import { Toaster } from "./components/ui/toaster";
+import { reloadConfigWithToast } from "./lib/app-actions";
 import { Overview } from "./pages/Overview";
 import { Sessions } from "./pages/Sessions";
 import { RequestLogs } from "./pages/RequestLogs";
@@ -14,6 +16,20 @@ import { Playground } from "./pages/Playground";
 import { Prompts } from "./pages/Prompts";
 
 export default function App() {
+  // Global reload-config shortcut, replacing the native menu's Ctrl/Cmd+R
+  // (the menu bar only exists on macOS now). preventDefault so the webview
+  // doesn't also treat it as a page refresh.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r") {
+        e.preventDefault();
+        void reloadConfigWithToast();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
       <Sidebar />

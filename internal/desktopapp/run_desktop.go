@@ -37,6 +37,10 @@ func runMain(d runMainDeps) {
 		CfgPath:    d.cfgPath,
 		KeyState:   d.keyState,
 	}
+	// The sidebar 退出应用 button POSTs /api/v1/app/quit (no native menu on
+	// Windows/Linux); route it into the Wails quit path so OnShutdown drains
+	// the HTTP server and main's defer chain flushes the recorders.
+	d.apiServer.SetQuitFunc(desktopApp.RequestQuit)
 	if err := desktopApp.Run(); err != nil {
 		log.Fatalf("desktop app: %v", err)
 	}
