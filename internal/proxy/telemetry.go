@@ -42,6 +42,7 @@ type telemetryAcc struct {
 	traceID           string // W3C trace id parsed from traceparent (empty if absent/invalid)
 	sessionSource     string // origin label of sessionID (observability only)
 	agentType         string // detected agent/client type (claude-code, codex, …; "" if unknown)
+	ingressProtocol   string // client wire shape that served this request (openai/anthropic, ADR-0045)
 	upstreamRequestID string // provider-assigned id from the successful attempt's response header/body
 
 	// Trace-payload capture (ADR-0039). Populated only by branches that hold the
@@ -275,6 +276,7 @@ func (a *telemetryAcc) emit(ctx context.Context, pc *plugin.Context, audit obser
 		TraceID:            a.traceID,
 		SessionSource:      a.sessionSource,
 		AgentType:          a.agentType,
+		IngressProtocol:    a.ingressProtocol,
 	})
 
 	if audit != nil {

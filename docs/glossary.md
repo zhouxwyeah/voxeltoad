@@ -35,6 +35,14 @@ and refined through `grill-with-docs` sessions.
 - **UpstreamRequest** — transport-neutral description of the request to send
   upstream (Method/URL/Header/Body). Produced by an Adapter; the proxy turns it
   into an `*http.Request`. `internal/adapter.UpstreamRequest`.
+- **Ingress protocol** — the wire protocol clients use to drive the gateway
+  (`openai` for `/v1/chat/completions`, `anthropic` for `/v1/messages`). The
+  ingress protocol is distinct from upstream Adapter: an Anthropic-ingress
+  request can drive an OpenAI-adapter upstream (and vice versa).
+- **Ingress codec** — a pure translator between a client wire format and the
+  unified model on the inbound side (`DecodeRequest`/`EncodeResponse`/
+  `NewStreamEncoder`/`EncodeError`); the inbound dual of Adapter. Values-in/
+  values-out: no HTTP transport. `internal/ingress.Codec`. (See ADR-0045.)
 
 ## Transport & streaming
 

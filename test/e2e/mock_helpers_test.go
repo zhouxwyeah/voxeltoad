@@ -84,13 +84,21 @@ func capturingUpstream(content string, promptTokens, completionTokens int, captu
 		`{"id":"chatcmpl-x","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":%d,"completion_tokens":%d,"total_tokens":%d}}`,
 		content, promptTokens, completionTokens, promptTokens+completionTokens,
 	)
+	return newMockUpstreamCapturing(body, captured)
+}
+
+// newMockUpstreamCapturing returns a mock upstream that replies with a fixed
+// pre-built response body (any OpenAI-shape string) and captures the raw
+// upstream request body. Used by tests that need an exotic upstream reply
+// (e.g. tool_calls) while still asserting what was forwarded.
+func newMockUpstreamCapturing(replyBody string, captured *[]byte) *testsupport.MockUpstream {
 	return testsupport.NewMockUpstream(func(w http.ResponseWriter, r *http.Request) {
 		if captured != nil {
 			b, _ := io.ReadAll(r.Body)
 			*captured = b
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(body))
+		_, _ = w.Write([]byte(replyBody))
 	})
 }
 

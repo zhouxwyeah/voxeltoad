@@ -219,3 +219,37 @@ func TestRecordTelemetry_NoPlaintext(t *testing.T) {
 		}
 	}
 }
+
+// TestRecordTelemetry_IngressProtocolAttribute verifies the client's ingress
+// protocol (openai / anthropic) is recorded on the span so operators can
+// distinguish which wire shape served a request (ADR-0045). The field is
+// low-cardinality (2 values) and observability-only — it is NOT persisted to
+// the audit ledger (request_logs has no ingress_protocol column).
+func TestRecordTelemetry_IngressProtocolAttribute(t *testing.T) {
+	sr := newTestTracing(t)
+	newTestMetrics(t)
+
+	tr := otel.Tracer("test")
+	ctx, span := tr.Start(context.Background(), "chat")
+	RecordTelemetry(ctx, RequestTelemetry{
+		Tenant:          "acme",
+		Provider:        "openai",
+		ModelRequested:  "chat",
+		IngressProtocol: "anthropic",
+	})
+	span.End()
+
+	spans := sr.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+	var got string
+	for _, kv := range spans[0].Attributes() {
+		if string(kv.Key) == AttrIngressProtocol {
+			got = kv.Value.AsString()
+		}
+	}
+	if got != "anthropic" {
+		t.Errorf("%s = %q, want anthropic", AttrIngressProtocol, got)
+	}
+}

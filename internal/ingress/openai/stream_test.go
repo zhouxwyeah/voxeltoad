@@ -1,4 +1,4 @@
-package proxy
+package openai
 
 import (
 	"encoding/json"
@@ -7,6 +7,11 @@ import (
 
 	"voxeltoad/internal/adapter"
 )
+
+// These tests verify the OpenAI chat.completion.chunk wire shape produced by
+// toWireChunk. They were migrated from internal/proxy/stream_test.go when the
+// wire types moved to the ingress codec (the proxy layer no longer owns an
+// inbound wire shape).
 
 // TestToWireChunk_EmptyChunkEnsuresChoicesArray ensures that a usage-only chunk
 // (no delta, no finish reason) emits "choices":[] — not "choices":null. This
@@ -144,8 +149,6 @@ func TestToWireChunk_ToolCalls(t *testing.T) {
 	}
 }
 
-// toJSON marshals v to JSON and returns the raw string. It fails the test if
-// marshaling fails.
 func toJSON(t *testing.T, v any) string {
 	t.Helper()
 	b, err := json.Marshal(v)

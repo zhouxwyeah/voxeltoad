@@ -36,6 +36,7 @@
 | `llm.upstream_request_id` | provider 返回的请求关联 ID（OpenAI `x-request-id` 头、Anthropic `request-id` 头/body 等） | forwarder |
 | `llm.session_id` | 客户端传入的会话 key（`X-Voxeltoad-Session`） | 请求 header |
 | `llm.agent_type` | 调用方 agent 类型（claude-code/codex/…，未知为空；纯可观测性，非治理维度，不作 metric label） | User-Agent / `x-<vendor>-session-id` |
+| `llm.ingress.protocol` | 客户端入站协议（`openai` / `anthropic`，低基数枚举；纯可观测性，ADR-0045） | 路由路径（`/v1/chat/completions` / `/v1/messages`） |
 
 ### request_id 与 session_id 与 upstream_request_id
 
