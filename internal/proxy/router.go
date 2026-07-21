@@ -244,7 +244,22 @@ func chatCompletionsHandler(provider DispatcherProvider, chain *plugin.Chain, ex
 }
 
 func messagesHandler(provider DispatcherProvider, chain *plugin.Chain, extractor sessionKeyExtractor, traceHdrs []string, audit observability.RequestLogRecorder, tracePL observability.TracePayloadRecorder, settings func() *config.GatewaySettings) http.HandlerFunc {
-	return serveChat(ingress.Lookup(ingress.ProtocolAnthropic), provider, chain, extractor, traceHdrs, audit, tracePL, settings)
+	codec := ingress.Lookup(ingress.ProtocolAnthropic)
+	inner := serveChat(codec, provider, chain, extractor, traceHdrs, audit, tracePL, settings)
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Hot-reloadable Anthropic ingress switch (ADR-0048). When disabled
+		// the gateway answers 404 in the Anthropic envelope so clients treat
+		// it as "endpoint absent" (terminal), not 503 "retry later". The zero
+		// value (AnthropicDisabled=false) = enabled — the default. A nil
+		// settings source (tests with Router(nil)) is treated as "all enabled".
+		if settings != nil {
+			if s := settings(); s != nil && s.Ingress.AnthropicDisabled {
+				writeCodecErr(w, codec, http.StatusNotFound, "not_found_error", "anthropic ingress disabled")
+				return
+			}
+		}
+		inner.ServeHTTP(w, r)
+	}
 }
 
 // serveChat is the protocol-agnostic chat handler shared by /v1/chat/completions

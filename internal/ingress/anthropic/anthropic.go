@@ -469,6 +469,8 @@ func mapErrTypeToAnthropic(t string) string {
 		return "rate_limit_error"
 	case "insufficient_quota", "invalid_request_error", "invalid_request_body", "model_not_permitted":
 		return "invalid_request_error"
+	case "not_found_error":
+		return "not_found_error"
 	case "overloaded_error":
 		return "overloaded_error"
 	case "upstream_error", "timeout_error", "api_error":

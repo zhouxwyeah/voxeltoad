@@ -149,6 +149,9 @@ type PluginConfig struct {
 type GatewaySettings struct {
 	// Trace governs the LLM trace-payload capture ledger (ADR-0039).
 	Trace TraceSettings `json:"trace"`
+	// Ingress governs which client ingress protocols are accepted. Hot-applied
+	// per request via the config snapshot (ADR-0048).
+	Ingress IngressSettings `json:"ingress"`
 }
 
 // TraceSettings holds the hot-reloadable trace-capture parameters. All three
@@ -164,4 +167,20 @@ type TraceSettings struct {
 	// RetentionDays is the trace-payload retention window (≤0 = default 7). Read
 	// by the admin plane's daily partition-DROP TTL job (not the data plane).
 	RetentionDays int `json:"retention_days"`
+}
+
+// IngressSettings holds per-ingress-protocol enablement. The zero value
+// (an empty struct from the seeded '{}' spec, or a missing field in a legacy
+// snapshot) means "all protocols enabled" — the gateway's default behavior
+// since ADR-0045. An operator opts out of a protocol by setting its Disabled
+// flag to true.
+//
+// The fields are named "Disabled" (not "Enabled") so the zero value is the
+// permissive default: a fresh deployment or a spec that omits the ingress
+// block entirely accepts all protocols, with no seed/migration needed.
+type IngressSettings struct {
+	// AnthropicDisabled, when true, makes the gateway reject /v1/messages
+	// requests with a 404 in the Anthropic error envelope. The data plane
+	// reads this hot-reloadable flag per request (ADR-0048).
+	AnthropicDisabled bool `json:"anthropic_disabled"`
 }

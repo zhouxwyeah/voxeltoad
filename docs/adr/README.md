@@ -55,3 +55,4 @@ Produced and refined through `grill-with-docs` sessions.
 | [0045](0045-anthropic-ingress-protocol.md) | Anthropic ingress protocol (`/v1/messages`) — inbound codec layer, Claude Code → OpenAI upstreams | Accepted |
 | [0046](0046-ingress-protocol-persistence.md) | Persist `ingress_protocol` to audit ledgers (request_logs + trace_payloads) | Accepted |
 | [0047](0047-protocol-aware-routing.md) | Protocol-aware routing — implicit passthrough via candidate reordering + RawProtocol gating | Accepted |
+| [0048](0048-ingress-toggle.md) | Anthropic ingress global toggle (GatewaySettings.Ingress.AnthropicDisabled, 404 on disable) | Accepted |

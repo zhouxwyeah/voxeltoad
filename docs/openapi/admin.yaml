@@ -2337,6 +2337,22 @@ components:
       properties:
         trace:
           $ref: '#/components/schemas/TraceSettings'
+        ingress:
+          $ref: '#/components/schemas/IngressSettings'
+    IngressSettings:
+      type: object
+      description: >
+        Per-ingress-protocol enablement, hot-reloadable (ADR-0048). The zero
+        value (an empty/absent ingress block) means all protocols enabled —
+        the gateway's default. An operator opts out of a protocol by setting
+        its Disabled flag to true.
+      properties:
+        anthropic_disabled:
+          type: boolean
+          description: >
+            When true, the gateway rejects /v1/messages requests with a 404 in
+            the Anthropic error envelope. Zero value (false) = enabled.
+          default: false
     TraceSettings:
       type: object
       description: Hot-reloadable trace-capture parameters (ADR-0039).
