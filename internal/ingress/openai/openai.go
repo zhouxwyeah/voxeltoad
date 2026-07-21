@@ -47,7 +47,7 @@ func (*codec) DecodeRequest(body []byte) (*adapter.UnifiedRequest, error) {
 // extra choice fields, …). Falls back to re-marshalling the unified response
 // when Raw is nil (e.g. an adapter that does not preserve the original body).
 func (*codec) EncodeResponse(resp *adapter.UnifiedResponse) ([]byte, error) {
-	if len(resp.Raw) > 0 {
+	if len(resp.Raw) > 0 && resp.RawProtocol == "openai" {
 		// Copy so the caller cannot mutate the cached slice via the returned
 		// bytes (Raw is retained by the adapter).
 		out := make([]byte, len(resp.Raw))
@@ -85,7 +85,7 @@ func (*codec) StreamTerminator() []byte {
 type streamEncoder struct{}
 
 func (e *streamEncoder) EncodeChunk(c adapter.Chunk) ([]byte, error) {
-	if len(c.Raw) > 0 {
+	if len(c.Raw) > 0 && c.RawProtocol == "openai" {
 		// The upstream data line is already a complete chat.completion.chunk
 		// JSON; wrap it in an SSE data: frame.
 		return sse.Encode(sse.Event{Data: string(c.Raw)}), nil

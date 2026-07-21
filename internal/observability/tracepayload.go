@@ -39,6 +39,13 @@ type TracePayload struct {
 	// view can render it without decoding the JSONB bodies.
 	AgentType string
 
+	// IngressProtocol records which client wire protocol served the request
+	// ("openai" / "anthropic"). "" for pre-migration rows. Mirrors RequestLog
+	// and the OTel span attribute llm.ingress.protocol (ADR-0045/0046).
+	// Surfaced as a summary dimension so the request-list view can render it
+	// and the passthrough/translated badge without decoding JSONB bodies.
+	IngressProtocol string
+
 	// Summary dimensions surfaced per event so the request-list view can render
 	// a row WITHOUT decoding the large JSONB bodies (mirror reference trace
 	// systems).

@@ -364,6 +364,15 @@ func decodeToolChoice(raw json.RawMessage) any {
 // ---- EncodeResponse (unified → Anthropic) -------------------------------
 
 func (c *codec) EncodeResponse(resp *adapter.UnifiedResponse) ([]byte, error) {
+	// Passthrough (ADR-0047): when Raw holds Anthropic-shaped bytes (set by
+	// the claude adapter), relay verbatim to avoid data loss from a re-encode
+	// round-trip. Gated on RawProtocol so OpenAI-shaped Raw (from an openai
+	// adapter hit via failover) is never mistaken for Anthropic.
+	if len(resp.Raw) > 0 && resp.RawProtocol == "anthropic" {
+		out := make([]byte, len(resp.Raw))
+		copy(out, resp.Raw)
+		return out, nil
+	}
 	// Anthropic Message responses only have ONE content array. A unified
 	// response with multiple choices can't be represented; we take choice[0]
 	// (the OpenAI n=1 case, which is all Claude Code uses).

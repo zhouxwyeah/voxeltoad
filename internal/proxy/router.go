@@ -411,6 +411,11 @@ func serveChat(codec ingress.Codec, provider DispatcherProvider, chain *plugin.C
 		}
 
 		alias := req.Model // the client-facing model name is the routing alias
+		// Carry the ingress protocol on the context so the dispatcher can
+		// prefer providers whose adapter speaks the same wire protocol
+		// (protocol-aware routing, ADR-0047) — passthrough becomes a natural
+		// consequence of routing, not a router-layer special case.
+		r = r.WithContext(withIngressProtocol(r.Context(), string(codec.Protocol())))
 		pc.Ctx = r.Context()
 
 		// Pre phase: rate limit / quota / sensitive-word checks may reject.

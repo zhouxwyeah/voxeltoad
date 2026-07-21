@@ -55,7 +55,34 @@ type streamEncoder struct {
 // EncodeChunk translates one unified Chunk into 0 or more Anthropic SSE event
 // bytes. Returns nil bytes for chunks that map to no Anthropic output (e.g.
 // a usage-only chunk that is folded into message_delta on the next call).
+//
+// Passthrough (ADR-0047): when the hit provider's adapter is claude, Chunk.Raw
+// carries a complete Anthropic SSE frame from the upstream. Relaying it
+// verbatim preserves provider-specific fields and avoids a re-encode round-
+// trip. Raw is only populated by the claude adapter; protocol-aware routing
+// (ADR-0047) prefers claude-adapter providers for anthropic ingress, so Raw
+// reaching here is always the right protocol.
 func (e *streamEncoder) EncodeChunk(c adapter.Chunk) ([]byte, error) {
+	// Passthrough (ADR-0047): relay the upstream's Anthropic frame verbatim,
+	// but only when RawProtocol confirms it's Anthropic-shaped (failover to an
+	// openai provider would set RawProtocol="openai" — we must re-encode those).
+	if len(c.Raw) > 0 && c.RawProtocol == "anthropic" {
+		// Still track state so the encoder's Close/terminator behave
+		// consistently (messageStarted, finish, usage for billing).
+		if !e.messageStarted {
+			e.messageStarted = true
+		}
+		if c.FinishReason != "" && !e.finished {
+			e.finished = true
+		}
+		if c.Usage != nil {
+			e.outputTokens = c.Usage.CompletionTokens
+		}
+		out := make([]byte, len(c.Raw))
+		copy(out, c.Raw)
+		return out, nil
+	}
+
 	var out []byte
 
 	// First chunk: emit message_start. OpenAI's first chunk usually carries

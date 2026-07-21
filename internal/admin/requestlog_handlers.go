@@ -73,19 +73,21 @@ func mountRequestLogs(g *gin.RouterGroup, db *store.DB) {
 		}
 		repo := store.NewRequestLogQueryRepo(db, tenant)
 		filter := store.RequestLogFilter{
-			Provider:       c.Query("provider"),
-			ModelRequested: c.Query("model_requested"),
-			ErrorType:      c.Query("error_type"),
-			BlockedBy:      c.Query("blocked_by"),
-			Tenant:         c.Query("tenant"),
-			GroupName:      c.Query("group_name"),
-			APIKeyID:       c.Query("api_key_id"),
-			Stream:         parseBoolQuery(c, "stream"),
-			Fallback:       parseBoolQuery(c, "fallback"),
-			SessionID:      c.Query("session_id"),
-			RequestID:      c.Query("request_id"),
-			From:           from,
-			To:             to,
+			Provider:        c.Query("provider"),
+			ModelRequested:  c.Query("model_requested"),
+			ErrorType:       c.Query("error_type"),
+			BlockedBy:       c.Query("blocked_by"),
+			Tenant:          c.Query("tenant"),
+			GroupName:       c.Query("group_name"),
+			APIKeyID:        c.Query("api_key_id"),
+			Stream:          parseBoolQuery(c, "stream"),
+			Fallback:        parseBoolQuery(c, "fallback"),
+			AgentType:       c.Query("agent_type"),
+			IngressProtocol: c.Query("ingress_protocol"),
+			SessionID:       c.Query("session_id"),
+			RequestID:       c.Query("request_id"),
+			From:            from,
+			To:              to,
 		}
 		if c.Query("format") == "csv" {
 			rows, _, err := repo.List(c.Request.Context(), filter, "", 2000)
@@ -147,7 +149,7 @@ func exportRequestLogsCSV(c *gin.Context, rows []store.RequestLogRow) {
 		"ttft_ms", "duration_ms", "error_type", "blocked_by", "fallback",
 		"request_id", "session_id", "trace_id", "session_source", "agent_type",
 		"cache_hit", "cache_tier", "cache_source", "cached_prompt_tokens",
-		"created_at"}
+		"ingress_protocol", "created_at"}
 	out := make([][]string, len(rows))
 	for i, r := range rows {
 		out[i] = []string{
@@ -162,6 +164,7 @@ func exportRequestLogsCSV(c *gin.Context, rows []store.RequestLogRow) {
 			r.RequestID, r.SessionID, r.TraceID, r.SessionSource, r.AgentType,
 			fmt.Sprintf("%t", r.CacheHit), r.CacheTier, r.CacheSource,
 			fmt.Sprintf("%d", r.CachedPromptTokens),
+			r.IngressProtocol,
 			r.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		}
 	}

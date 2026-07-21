@@ -306,6 +306,7 @@ func (a *telemetryAcc) emit(ctx context.Context, pc *plugin.Context, audit obser
 			TraceID:            a.traceID,
 			SessionSource:      a.sessionSource,
 			AgentType:          a.agentType,
+			IngressProtocol:    a.ingressProtocol,
 		})
 	}
 
@@ -325,6 +326,7 @@ func (a *telemetryAcc) emit(ctx context.Context, pc *plugin.Context, audit obser
 			ModelRequested: a.modelRequested,
 			Stream:         a.stream,
 			AgentType:      a.agentType,
+			IngressProtocol: a.ingressProtocol,
 			StatusCode:     a.tracePL.statusCode,
 			StopReason:     a.tracePL.stopReason,
 			NMessages:      a.tracePL.nMessages,

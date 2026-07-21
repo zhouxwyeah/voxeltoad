@@ -9,6 +9,7 @@ import (
 
 	"voxeltoad/internal/adapter"
 	"voxeltoad/internal/config"
+	"voxeltoad/internal/ingress"
 )
 
 // DispatcherConfig configures failover behavior.
@@ -107,6 +108,7 @@ func (d *Dispatcher) Forward(ctx context.Context, alias string, req *adapter.Uni
 	if err != nil {
 		return nil, DispatchResult{}, err
 	}
+	candidates = d.preferProtocol(ctx, candidates)
 	var lastErr error
 	configMismatches := 0
 	for i, name := range candidates {
@@ -151,6 +153,7 @@ func (d *Dispatcher) ForwardStream(ctx context.Context, alias string, req *adapt
 	if err != nil {
 		return nil, DispatchResult{}, err
 	}
+	candidates = d.preferProtocol(ctx, candidates)
 	var lastErr error
 	configMismatches := 0
 	for i, name := range candidates {
@@ -209,4 +212,33 @@ func failoverExhausted(last error, configMismatches, total int) error {
 		return fmt.Errorf("proxy: configuration mismatch -- no candidate provider serves this model (check Route.Providers ⊆ Model.Upstreams): %w", last)
 	}
 	return fmt.Errorf("proxy: all providers failed: %w", last)
+}
+
+// preferProtocol stably partitions candidates so that providers whose adapter
+// matches the request's ingress protocol come first, preserving the strategy
+// order within each group. This makes protocol-matched providers the primary
+// path (passthrough — codec Raw-priority applies) and others the failover path
+// (translated — codec re-encodes). See ADR-0047.
+//
+// No-op when:
+//   - the context carries no ingress protocol (unknown / single-provider test
+//     mode), or
+//   - the dispatcher has no preparer (NewSingleProviderDispatcher, no
+//     adapterByPvd map available).
+func (d *Dispatcher) preferProtocol(ctx context.Context, names []string) []string {
+	protocol := ingressProtocolFrom(ctx)
+	if protocol == "" || d.preparer == nil {
+		return names
+	}
+	want := ingress.Protocol(protocol).AdapterName()
+	matched := make([]string, 0, len(names))
+	others := make([]string, 0, len(names))
+	for _, n := range names {
+		if d.preparer.adapterByPvd[n] == want {
+			matched = append(matched, n)
+		} else {
+			others = append(others, n)
+		}
+	}
+	return append(matched, others...)
 }

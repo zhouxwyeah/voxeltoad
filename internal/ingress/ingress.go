@@ -27,6 +27,21 @@ const (
 	ProtocolAnthropic Protocol = "anthropic"
 )
 
+// AdapterName returns the upstream adapter name that speaks the same wire
+// protocol as this ingress protocol. This reconciles the naming asymmetry
+// between the ingress layer ("anthropic", ADR-0045) and the adapter registry
+// ("claude", ADR-0001) in one place. The router uses it to match an ingress
+// protocol against a provider's adapter for protocol-aware routing (ADR-0047).
+//
+// Keeping the mapping next to the enum means adding a new ingress protocol
+// forces the compiler to make you extend this switch.
+func (p Protocol) AdapterName() string {
+	if p == ProtocolAnthropic {
+		return "claude"
+	}
+	return string(p) // "openai" → "openai"
+}
+
 // Codec translates between a client wire format and the unified model. Every
 // method is values-in/values-out so codecs remain testable without an HTTP
 // transport (see the package doc).
