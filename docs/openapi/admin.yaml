@@ -1690,22 +1690,45 @@ components:
       required: [name]
       properties:
         name: { type: string }
-        type: { type: string, description: Descriptive brand (openai/tencent/zhipu/anthropic); does not select adapter. }
-        adapter: { type: string, description: Protocol adapter from the registry (openai|claude). }
-        base_url: { type: string }
-        api_key_ref: { type: string, description: 'Credential ref: env://VAR | db://provider/<name> | plain://literal | bare literal. Masked in responses (env://***). See ADR-0031.' }
-        api_key: { type: string, description: 'Write-only plaintext upstream key. When supplied, encrypted and stored in provider_credentials; api_key_ref is set to db://provider/<name>. Never returned.' }
-        timeouts: { $ref: '#/components/schemas/ProviderTimeouts' }
+        type: { type: string, description: Descriptive brand (openai/tencent/zhipu/anthropic/deepseek); does not select adapter. }
+        endpoints:
+          type: array
+          minItems: 1
+          description: >
+            Non-empty list of (adapter, base_url) pairs the gateway can reach.
+            The runtime picks the endpoint whose adapter matches the ingress
+            protocol (ADR-0049). The first endpoint is the "primary" (used
+            for the providers.adapter column and as protocol-unknown fallback).
+          items: { $ref: '#/components/schemas/ProviderEndpoint' }
+        api_key_ref: { type: string, description: 'SHARED credential ref for all endpoints: env://VAR | db://provider/<name> | plain://literal | bare literal. Masked in responses (env://***). See ADR-0031.' }
+        api_key: { type: string, description: 'Write-only plaintext upstream key shared by all endpoints. When supplied, encrypted and stored in provider_credentials; api_key_ref is set to db://provider/<name>. Never returned.' }
+        timeouts: { $ref: '#/components/schemas/ProviderTimeouts', description: Provider-level default timeouts; each endpoint may override. }
         weight: { type: integer }
+    ProviderEndpoint:
+      type: object
+      required: [adapter, base_url]
+      description: >
+        One upstream protocol endpoint under a provider. A dual-protocol vendor
+        (OpenAI/DeepSeek/Aliyun Bailian) typically has two: adapter=openai and
+        adapter=claude.
+      properties:
+        id: { type: string, description: 'Optional endpoint slug. When empty, derived from adapter: openai→"openai", claude→"anthropic". Must be unique within the provider; explicitly required when two endpoints share an adapter. Used as breaker key component and audit provider_endpoint column.' }
+        adapter: { type: string, description: 'Protocol adapter from the registry (openai|claude). ADR-0001.' }
+        base_url: { type: string }
+        timeouts: { $ref: '#/components/schemas/ProviderTimeouts', description: 'Optional override of the provider-level default. Omitted = inherit.' }
     ProviderPatch:
       type: object
       description: >
         Partial provider update. All fields optional; omitted fields are left
         unchanged (not cleared). At least one field should be provided.
+        `endpoints` is a whole-list replacement (not a merge).
       properties:
         type: { type: string }
-        adapter: { type: string, description: Protocol adapter from the registry (openai|claude). }
-        base_url: { type: string }
+        endpoints:
+          type: array
+          minItems: 1
+          description: Whole-list replacement of the provider's endpoints.
+          items: { $ref: '#/components/schemas/ProviderEndpoint' }
         api_key_ref: { type: string }
         timeouts: { $ref: '#/components/schemas/ProviderTimeouts' }
         weight: { type: integer }
