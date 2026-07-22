@@ -83,8 +83,9 @@ func mountRequestLogs(g *gin.RouterGroup, db *store.DB) {
 			Stream:          parseBoolQuery(c, "stream"),
 			Fallback:        parseBoolQuery(c, "fallback"),
 			AgentType:       c.Query("agent_type"),
-			IngressProtocol: c.Query("ingress_protocol"),
-			SessionID:       c.Query("session_id"),
+			IngressProtocol:  c.Query("ingress_protocol"),
+			ProviderEndpoint: c.Query("provider_endpoint"),
+			SessionID:        c.Query("session_id"),
 			RequestID:       c.Query("request_id"),
 			From:            from,
 			To:              to,
@@ -149,7 +150,7 @@ func exportRequestLogsCSV(c *gin.Context, rows []store.RequestLogRow) {
 		"ttft_ms", "duration_ms", "error_type", "blocked_by", "fallback",
 		"request_id", "session_id", "trace_id", "session_source", "agent_type",
 		"cache_hit", "cache_tier", "cache_source", "cached_prompt_tokens",
-		"ingress_protocol", "created_at"}
+		"ingress_protocol", "provider_endpoint", "created_at"}
 	out := make([][]string, len(rows))
 	for i, r := range rows {
 		out[i] = []string{
@@ -164,7 +165,7 @@ func exportRequestLogsCSV(c *gin.Context, rows []store.RequestLogRow) {
 			r.RequestID, r.SessionID, r.TraceID, r.SessionSource, r.AgentType,
 			fmt.Sprintf("%t", r.CacheHit), r.CacheTier, r.CacheSource,
 			fmt.Sprintf("%d", r.CachedPromptTokens),
-			r.IngressProtocol,
+			r.IngressProtocol, r.ProviderEndpoint,
 			r.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		}
 	}

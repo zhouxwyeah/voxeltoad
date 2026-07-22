@@ -63,6 +63,12 @@ type RequestLog struct {
 	// badge (compared against the hit provider's adapter). Mirrors the OTel
 	// span attribute llm.ingress.protocol (ADR-0045/0046).
 	IngressProtocol string
+	// ProviderEndpoint records which endpoint of the hit provider served the
+	// request (the endpoint slug from ProviderEndpoint.ID or its adapter-
+	// derived default: openai / anthropic). "" for pre-migration rows or when
+	// the gateway runs in single-provider test mode. Enables per-endpoint
+	// cost/usage attribution (ADR-0049).
+	ProviderEndpoint string
 
 	CreatedAt time.Time
 }

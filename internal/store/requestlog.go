@@ -29,14 +29,14 @@ func (r *RequestLogRepo) Record(ctx context.Context, rec observability.RequestLo
 		    ttft_ms, duration_ms, error_type, blocked_by, fallback,
 		    request_id, session_id, trace_id, session_source, agent_type,
 		    cache_hit, cache_tier, cache_source, cached_prompt_tokens,
-		    upstream_request_id, ingress_protocol)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		    upstream_request_id, ingress_protocol, provider_endpoint)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rec.Tenant, rec.Group, rec.APIKeyID, rec.Provider,
 		rec.ModelRequested, rec.ModelResolved, rec.Stream,
 		rec.PromptTokens, rec.CompletionTokens, rec.TotalTokens,
 		rec.TTFTms, rec.Durationms, rec.ErrorType, rec.BlockedBy, rec.Fallback,
 		rec.RequestID, rec.SessionID, rec.TraceID, rec.SessionSource, rec.AgentType,
 		rec.CacheHit, rec.CacheTier, rec.CacheSource, rec.CachedPromptTokens,
-		rec.UpstreamRequestID, rec.IngressProtocol,
+		rec.UpstreamRequestID, rec.IngressProtocol, rec.ProviderEndpoint,
 	).Error
 }

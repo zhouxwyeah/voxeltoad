@@ -5,6 +5,7 @@ import (
 
 	"voxeltoad/internal/adapter"
 	"voxeltoad/internal/config"
+	"voxeltoad/internal/ingress"
 	"voxeltoad/internal/normalize"
 )
 
@@ -38,7 +39,7 @@ func (p *modelPreparer) pickEndpoint(provider, ingressProtocol string) (config.P
 		return config.ProviderEndpoint{}, false
 	}
 	if ingressProtocol != "" {
-		want := ingressAdapterName(ingressProtocol)
+		want := ingress.Protocol(ingressProtocol).AdapterName()
 		for _, ep := range eps {
 			if ep.Adapter == want {
 				return ep, true
@@ -62,17 +63,6 @@ func (p *modelPreparer) adapterFor(provider, endpointID string) string {
 		}
 	}
 	return ""
-}
-
-// ingressAdapterName maps an ingress protocol name to the adapter family that
-// speaks it ("anthropic" → "claude", "openai" → "openai"). Kept local to avoid
-// an import cycle with internal/ingress (proxy → ingress for Codec, but
-// preparer must not depend on the codec registry for a static mapping).
-func ingressAdapterName(ingressProtocol string) string {
-	if ingressProtocol == "anthropic" {
-		return "claude"
-	}
-	return ingressProtocol
 }
 
 // Prepare returns a request ready for the given provider endpoint: alias

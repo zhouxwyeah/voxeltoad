@@ -43,6 +43,7 @@ type telemetryAcc struct {
 	sessionSource     string // origin label of sessionID (observability only)
 	agentType         string // detected agent/client type (claude-code, codex, …; "" if unknown)
 	ingressProtocol   string // client wire shape that served this request (openai/anthropic, ADR-0045)
+	providerEndpoint  string // hit provider's endpoint slug (ADR-0049, provider_endpoint column)
 	upstreamRequestID string // provider-assigned id from the successful attempt's response header/body
 
 	// Trace-payload capture (ADR-0039). Populated only by branches that hold the
@@ -110,6 +111,7 @@ func (a *telemetryAcc) traceSettings() (enabled bool, maxBodyBytes int) {
 // resolved model, fallback/retry facts) and the observed usage for the emit.
 func (a *telemetryAcc) setResult(dr DispatchResult, usage *adapter.Usage) {
 	a.provider = dr.Provider
+	a.providerEndpoint = dr.Endpoint
 	a.modelResolved = dr.ModelResolved
 	a.fallback = dr.Fallback
 	a.retryCount = dr.RetryCount
@@ -307,6 +309,7 @@ func (a *telemetryAcc) emit(ctx context.Context, pc *plugin.Context, audit obser
 			SessionSource:      a.sessionSource,
 			AgentType:          a.agentType,
 			IngressProtocol:    a.ingressProtocol,
+			ProviderEndpoint:   a.providerEndpoint,
 		})
 	}
 
@@ -326,8 +329,9 @@ func (a *telemetryAcc) emit(ctx context.Context, pc *plugin.Context, audit obser
 			ModelRequested: a.modelRequested,
 			Stream:         a.stream,
 			AgentType:      a.agentType,
-			IngressProtocol: a.ingressProtocol,
-			StatusCode:     a.tracePL.statusCode,
+			IngressProtocol:  a.ingressProtocol,
+			ProviderEndpoint: a.providerEndpoint,
+			StatusCode:       a.tracePL.statusCode,
 			StopReason:     a.tracePL.stopReason,
 			NMessages:      a.tracePL.nMessages,
 			NToolUse:       a.tracePL.nToolUse,

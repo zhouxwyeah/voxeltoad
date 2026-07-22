@@ -45,6 +45,10 @@ type TracePayload struct {
 	// Surfaced as a summary dimension so the request-list view can render it
 	// and the passthrough/translated badge without decoding JSONB bodies.
 	IngressProtocol string
+	// ProviderEndpoint records which endpoint of the hit provider served the
+	// request (the endpoint slug, ADR-0049). Surfaced as a summary dimension
+	// for per-endpoint cost/usage attribution in the trace views.
+	ProviderEndpoint string
 
 	// Summary dimensions surfaced per event so the request-list view can render
 	// a row WITHOUT decoding the large JSONB bodies (mirror reference trace

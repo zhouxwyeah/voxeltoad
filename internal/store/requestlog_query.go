@@ -39,6 +39,7 @@ type RequestLogFilter struct {
 	Fallback          *bool
 	AgentType         string
 	IngressProtocol   string // "openai" / "anthropic"; "" = no filter
+	ProviderEndpoint  string // endpoint slug; "" = no filter
 	SessionID         string // session-scoped queries (debug/cost-attribution UIs)
 	RequestID         string // exact per-request lookup (debug/trace drill-down)
 	UpstreamRequestID string // reverse lookup by provider-assigned id (support/reconciliation)
@@ -71,6 +72,7 @@ type RequestLogRow struct {
 	SessionSource      string    `json:"session_source"`
 	AgentType          string    `json:"agent_type"`
 	IngressProtocol    string    `json:"ingress_protocol"`
+	ProviderEndpoint   string    `json:"provider_endpoint"`
 	CacheHit           bool      `json:"cache_hit"`
 	CacheTier          string    `json:"cache_tier"`
 	CacheSource        string    `json:"cache_source"`
@@ -140,6 +142,14 @@ func (r *RequestLogQueryRepo) buildWhere(f RequestLogFilter) (where []string, ar
 		where = append(where, "upstream_request_id = ?")
 		args = append(args, f.UpstreamRequestID)
 	}
+	if f.IngressProtocol != "" {
+		where = append(where, "ingress_protocol = ?")
+		args = append(args, f.IngressProtocol)
+	}
+	if f.ProviderEndpoint != "" {
+		where = append(where, "provider_endpoint = ?")
+		args = append(args, f.ProviderEndpoint)
+	}
 	if !f.From.IsZero() {
 		where = append(where, "created_at >= ?")
 		args = append(args, f.From)
@@ -181,7 +191,7 @@ func (r *RequestLogQueryRepo) List(ctx context.Context, f RequestLogFilter, curs
 	             model_requested, model_resolved, stream,
 	             prompt_tokens, completion_tokens, total_tokens,
 	             ttft_ms, duration_ms, error_type, blocked_by, fallback,
-	             request_id, session_id, trace_id, session_source, agent_type, ingress_protocol,
+	             request_id, session_id, trace_id, session_source, agent_type, ingress_protocol, provider_endpoint,
 	             cache_hit, cache_tier, cache_source, cached_prompt_tokens,
 	             upstream_request_id, created_at
 	      FROM request_logs
@@ -234,7 +244,7 @@ func (r *RequestLogQueryRepo) ListPage(ctx context.Context, f RequestLogFilter, 
 	             model_requested, model_resolved, stream,
 	             prompt_tokens, completion_tokens, total_tokens,
 	             ttft_ms, duration_ms, error_type, blocked_by, fallback,
-	             request_id, session_id, trace_id, session_source, agent_type, ingress_protocol,
+	             request_id, session_id, trace_id, session_source, agent_type, ingress_protocol, provider_endpoint,
 	             cache_hit, cache_tier, cache_source, cached_prompt_tokens,
 	             upstream_request_id, created_at
 	      FROM request_logs
@@ -274,7 +284,7 @@ func (r *RequestLogQueryRepo) ListBySession(ctx context.Context, sessionID strin
 	             model_requested, model_resolved, stream,
 	             prompt_tokens, completion_tokens, total_tokens,
 	             ttft_ms, duration_ms, error_type, blocked_by, fallback,
-	             request_id, session_id, trace_id, session_source, agent_type, ingress_protocol,
+	             request_id, session_id, trace_id, session_source, agent_type, ingress_protocol, provider_endpoint,
 	             cache_hit, cache_tier, cache_source, cached_prompt_tokens,
 	             upstream_request_id, created_at
 	      FROM request_logs

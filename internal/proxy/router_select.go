@@ -95,11 +95,10 @@ func (r *router) Candidates(alias, sessionKey, ingressProtocol string) ([]string
 func (r *router) filterHealthy(names []string, ingressProtocol string) []string {
 	healthy := make([]string, 0, len(names))
 	for _, n := range names {
-		epID, adapter := r.endpointFor(n, ingressProtocol)
+		epID, _ := r.endpointFor(n, ingressProtocol)
 		if r.breaker.Healthy(EndpointKey{Provider: n, Endpoint: epID}) {
 			healthy = append(healthy, n)
 		}
-		_ = adapter
 	}
 	if len(healthy) == 0 {
 		return names
