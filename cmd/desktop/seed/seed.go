@@ -67,29 +67,37 @@ gateway:
 providers:
   - name: 深度求索
     type: deepseek
-    adapter: openai
-    base_url: https://api.deepseek.com
+    endpoints:
+      - id: openai
+        adapter: openai
+        base_url: https://api.deepseek.com
     api_key_ref: "plain://${GATEWAY_SEED_DEEPSEEK_KEY}"
     timeouts: {connect: 5s, first_byte: 2m, overall: 5m}
     weight: 100
   - name: TokenHub
     type: tencent
-    adapter: openai
-    base_url: https://tokenhub.tencentmaas.com/v1
+    endpoints:
+      - id: openai
+        adapter: openai
+        base_url: https://tokenhub.tencentmaas.com/v1
     api_key_ref: "plain://${GATEWAY_SEED_TOKENHUB_KEY}"
     timeouts: {connect: 5s, first_byte: 2m, overall: 5m}
     weight: 100
   - name: Kimi-code
     type: Kimi
-    adapter: openai
-    base_url: https://api.kimi.com/coding/v1
+    endpoints:
+      - id: openai
+        adapter: openai
+        base_url: https://api.kimi.com/coding/v1
     api_key_ref: "plain://${GATEWAY_SEED_KIMI_KEY}"
     timeouts: {connect: 5s, first_byte: 2m, overall: 5m}
     weight: 100
   - name: GLM
     type: zhipu
-    adapter: openai
-    base_url: https://open.bigmodel.cn/api/coding/paas/v4
+    endpoints:
+      - id: openai
+        adapter: openai
+        base_url: https://open.bigmodel.cn/api/coding/paas/v4
     api_key_ref: "plain://${GATEWAY_SEED_GLM_KEY}"
     timeouts: {connect: 5s, first_byte: 2m, overall: 5m}
     weight: 100
