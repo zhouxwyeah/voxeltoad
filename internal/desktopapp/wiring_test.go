@@ -97,8 +97,7 @@ func startDesktopGateway(t *testing.T) (gatewayURL, apiKey string, cleanup func(
 		Providers: []config.Provider{{
 			Name:      "mock",
 			Type:      "openai",
-			Adapter:   "openai",
-			BaseURL:   mu.URL(),
+			Endpoints: []config.ProviderEndpoint{{ID: "openai", Adapter: "openai", BaseURL: mu.URL()}},
 			APIKeyRef: "plain://test-key",
 			Weight:    1,
 		}},

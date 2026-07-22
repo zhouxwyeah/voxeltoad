@@ -225,7 +225,7 @@ func TestConfigWrite_PreservesGatewaySection(t *testing.T) {
 func TestProviders_CreateDuplicate(t *testing.T) {
 	ts, _ := newConfigTestServer(t)
 	code, _ := reqBody(t, "POST", ts.URL, "/api/v1/providers", map[string]any{
-		"name": "p1", "type": "x", "adapter": "openai", "base_url": "u", "api_key_ref": "plain://k", "weight": 1,
+		"name": "p1", "type": "x", "endpoints": [{"id":"openai","adapter":"openai","base_url": "u", "api_key_ref": "plain://k", "weight": 1,
 		"timeouts": map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
 	})
 	if code != 409 {

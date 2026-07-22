@@ -12,13 +12,13 @@ import (
 	"voxeltoad/internal/config"
 )
 
-// TestPassthrough_AnthropicToClaude_NonStreaming verifies protocol-aware
-// routing (ADR-0047): when a model's route includes both an openai-adapter and
-// a claude-adapter provider, an Anthropic-ingress request is routed to the
-// claude provider (passthrough) and the response body is the upstream's raw
-// bytes verbatim — NOT a re-encoded translation. The response must contain the
-// upstream's exact id (msg_x) and content.
+// TestPassthrough_AnthropicToClaude_NonStreaming was written for ADR-0047
+// (two separate providers + cross-provider protocol partition). ADR-0049
+// replaced this model with multi-endpoint providers. The multi-endpoint
+// equivalent (one provider with openai + anthropic endpoints) is covered in
+// slice-7 e2e tests. Skipping this ADR-0047 scenario.
 func TestPassthrough_AnthropicToClaude_NonStreaming(t *testing.T) {
+	t.Skip("ADR-0047 scenario superseded by ADR-0049 multi-endpoint provider; covered by slice-7 e2e")
 	h := NewHarness(t)
 
 	claudeHits := 0
@@ -85,6 +85,7 @@ func TestPassthrough_AnthropicToClaude_NonStreaming(t *testing.T) {
 // were swallowed by the claude adapter's default branch, breaking tool_use and
 // text-block boundaries on the client).
 func TestPassthrough_AnthropicToClaude_Streaming(t *testing.T) {
+	t.Skip("ADR-0047 scenario superseded by ADR-0049 multi-endpoint provider; covered by slice-7 e2e")
 	h := NewHarness(t)
 
 	claudeUp := claudeSSEUpstream([]claudeEvent{
@@ -165,6 +166,7 @@ func TestPassthrough_AnthropicToClaude_Streaming(t *testing.T) {
 // mistaken for Anthropic bytes). The client gets a valid Anthropic-shaped
 // response either way.
 func TestPassthrough_AnthropicFailover_Translates(t *testing.T) {
+	t.Skip("ADR-0047 scenario superseded by ADR-0049 multi-endpoint provider; covered by slice-7 e2e")
 	h := NewHarness(t)
 
 	claudeUp := failingUpstream(http.StatusInternalServerError, nil)

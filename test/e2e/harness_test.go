@@ -159,9 +159,10 @@ func (h *Harness) AddProvider(name, baseURL, apiKeyRef string) {
 func (h *Harness) AddProviderWithAdapter(name, baseURL, apiKeyRef, adapter string) {
 	h.t.Helper()
 	h.adminPost("/api/v1/providers", config.Provider{
-		Name: name, Type: "openai", Adapter: adapter,
-		BaseURL: baseURL, APIKeyRef: apiKeyRef,
-		Timeouts: config.ProviderTimeouts{Connect: 2 * time.Second, FirstByte: 2 * time.Second, Overall: 5 * time.Second},
+		Name: name, Type: "openai",
+		Endpoints: []config.ProviderEndpoint{{ID: adapter, Adapter: adapter, BaseURL: baseURL}},
+		APIKeyRef: apiKeyRef,
+		Timeouts:  config.ProviderTimeouts{Connect: 2 * time.Second, FirstByte: 2 * time.Second, Overall: 5 * time.Second},
 	})
 }
 

@@ -8,39 +8,51 @@ import (
 )
 
 // router resolves a model alias to an ordered list of candidate provider names
-// for failover, applying the route's strategy and filtering out providers the
-// circuit breaker considers unhealthy (ADR-0011). It is separate from the HTTP
-// Router in router.go.
+// for failover, applying the route's strategy and filtering out providers whose
+// endpoint (for this request's ingress protocol) the circuit breaker considers
+// unhealthy (ADR-0011/0049). It is separate from the HTTP Router in router.go.
 type router struct {
 	breaker *circuitBreaker
 	// randn returns a pseudo-random int in [0, n); injectable for tests.
 	randn func(n int) int
+	// endpointFor resolves which endpoint of a provider a request under the
+	// given ingress protocol would use (ADR-0049 endpoint-grain health check).
+	// Injected at construction so the router stays decoupled from the preparer.
+	// Returns (endpointID, adapterName).
+	endpointFor func(provider, ingressProtocol string) (endpointID, adapter string)
 
 	mu      sync.Mutex
 	routes  map[string]config.Route
 	rrIndex map[string]int // round-robin cursor per alias
 }
 
-// newRouterWithRand builds a router with an injectable randomness source.
-func newRouterWithRand(routes []config.Route, b *circuitBreaker, randn func(int) int) *router {
+// newRouterWithRand builds a router with an injectable randomness source and
+// endpoint resolver. endpointFor may be nil (single-provider tests): the router
+// then treats every provider as a single default endpoint.
+func newRouterWithRand(routes []config.Route, b *circuitBreaker, randn func(int) int, endpointFor func(provider, ingressProtocol string) (string, string)) *router {
 	m := make(map[string]config.Route, len(routes))
 	for _, rt := range routes {
 		m[rt.ModelAlias] = rt
 	}
+	if endpointFor == nil {
+		endpointFor = func(provider, _ string) (string, string) { return "default", "" }
+	}
 	return &router{
-		breaker: b,
-		randn:   randn,
-		routes:  m,
-		rrIndex: make(map[string]int),
+		breaker:     b,
+		randn:       randn,
+		endpointFor: endpointFor,
+		routes:      m,
+		rrIndex:     make(map[string]int),
 	}
 }
 
 // Candidates returns the ordered provider names to try for alias, given an
 // optional sessionKey (used only by the "session_affinity" strategy; ignored by
-// others). Unhealthy providers are dropped; if that leaves none, the full
-// ordered set is returned as a degraded fallback (better to try a likely-bad
-// provider than not at all).
-func (r *router) Candidates(alias, sessionKey string) ([]string, error) {
+// others) and the client's ingress protocol (used to evaluate per-endpoint
+// health in the multi-endpoint model, ADR-0049). Unhealthy endpoints are
+// dropped; if that leaves none, the full ordered set is returned as a degraded
+// fallback (better to try a likely-bad provider than not at all).
+func (r *router) Candidates(alias, sessionKey, ingressProtocol string) ([]string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -72,17 +84,22 @@ func (r *router) Candidates(alias, sessionKey string) ([]string, error) {
 	for _, p := range ordered {
 		names = append(names, p.Name)
 	}
-	return r.filterHealthy(names), nil
+	return r.filterHealthy(names, ingressProtocol), nil
 }
 
-// filterHealthy drops breaker-unhealthy providers, but returns the full list if
-// all are unhealthy (degraded fallback).
-func (r *router) filterHealthy(names []string) []string {
+// filterHealthy drops providers whose endpoint (the one this request would use
+// under ingressProtocol) is breaker-unhealthy, but returns the full list if all
+// are unhealthy (degraded fallback). endpointFor resolves which endpoint a
+// provider serves this request over; it is injected so the router stays
+// decoupled from the preparer.
+func (r *router) filterHealthy(names []string, ingressProtocol string) []string {
 	healthy := make([]string, 0, len(names))
 	for _, n := range names {
-		if r.breaker.Healthy(n) {
+		epID, adapter := r.endpointFor(n, ingressProtocol)
+		if r.breaker.Healthy(EndpointKey{Provider: n, Endpoint: epID}) {
 			healthy = append(healthy, n)
 		}
+		_ = adapter
 	}
 	if len(healthy) == 0 {
 		return names

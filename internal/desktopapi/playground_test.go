@@ -22,8 +22,9 @@ func newPlaygroundServer(t *testing.T, upstreamURL string) *httptest.Server {
 	dyn := &config.Dynamic{
 		Version: "test",
 		Providers: []config.Provider{{
-			Name: "mock", Type: "openai", Adapter: "openai",
-			BaseURL: upstreamURL, APIKeyRef: "plain://k", Weight: 1,
+			Name: "mock", Type: "openai",
+			Endpoints: []config.ProviderEndpoint{{ID: "openai", Adapter: "openai", BaseURL: upstreamURL}},
+			APIKeyRef: "plain://k", Weight: 1,
 		}},
 		Models: []config.Model{{
 			Alias:     "m1",
