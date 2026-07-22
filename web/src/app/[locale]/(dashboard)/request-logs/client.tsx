@@ -24,12 +24,14 @@ export function RequestLogsPageClient({
   page,
   pageSize,
   isSuperAdmin,
+  providerAdapters = {},
 }: {
   rows: RequestLogRow[];
   total: number;
   page: number;
   pageSize: number;
   isSuperAdmin: boolean;
+  providerAdapters?: Record<string, string>;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -47,6 +49,7 @@ export function RequestLogsPageClient({
   const currentStream = searchParams.get("stream") ?? "";
   const currentFallback = searchParams.get("fallback") ?? "";
   const currentSessionID = searchParams.get("session_id") ?? "";
+  const currentIngressProtocol = searchParams.get("ingress_protocol") ?? "";
   const hasFilters =
     !!currentFrom ||
     !!currentTo ||
@@ -59,7 +62,8 @@ export function RequestLogsPageClient({
     !!currentBlockedBy ||
     !!currentStream ||
     !!currentFallback ||
-    !!currentSessionID;
+    !!currentSessionID ||
+    !!currentIngressProtocol;
 
   // Push a new URL keeping the current filters but overriding page and/or
   // page_size. Changing page keeps filters; changing a filter resets to 1.
@@ -93,6 +97,7 @@ export function RequestLogsPageClient({
     set("stream", formData.get("stream"));
     set("fallback", formData.get("fallback"));
     set("session_id", formData.get("session_id"));
+    set("ingress_protocol", formData.get("ingress_protocol"));
     router.push(`/request-logs?${params.toString()}`);
   }
 
@@ -223,6 +228,17 @@ export function RequestLogsPageClient({
             className="block h-8 w-32 rounded border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground"
           />
         </FilterField>
+        <FilterField label={t("filters.ingressProtocol")}>
+          <select
+            name="ingress_protocol"
+            defaultValue={currentIngressProtocol}
+            className="block h-8 w-28 rounded border border-border bg-background px-2 text-xs text-foreground"
+          >
+            <option value="">{t("filters.any")}</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+          </select>
+        </FilterField>
         <div className="flex items-end gap-2">
           <Button type="submit" variant="primary" size="sm">
             {t("filters.apply")}
@@ -247,6 +263,7 @@ export function RequestLogsPageClient({
         pageSize={pageSize}
         onPageChange={(p) => pushParams({ page: p })}
         onPageSizeChange={(s) => pushParams({ pageSize: s })}
+        providerAdapters={providerAdapters}
       />
     </div>
   );

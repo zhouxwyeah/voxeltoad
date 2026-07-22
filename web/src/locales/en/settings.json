@@ -24,5 +24,14 @@
       "hot": "Hot"
     }
   },
+  "ingress": {
+    "title": "Ingress Protocols",
+    "description": "Control which client ingress protocols the gateway accepts (ADR-0045/0048). Zero value = all enabled; checking disable returns 404 for that endpoint.",
+    "anthropicDisabled": {
+      "label": "Disable Anthropic Ingress",
+      "help": "When checked, /v1/messages returns 404 — Claude Code and other Anthropic clients cannot connect. Hot-applied per request.",
+      "hot": "Hot"
+    }
+  },
   "error": "Failed to save settings"
 }

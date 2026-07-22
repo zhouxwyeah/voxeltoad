@@ -12,6 +12,9 @@ type GatewaySettings = {
     max_body_kb?: number;
     retention_days?: number;
   };
+  ingress?: {
+    anthropic_disabled?: boolean;
+  };
 };
 
 /**
@@ -24,6 +27,7 @@ export function SettingsClient({ initial }: { initial: GatewaySettings }) {
   const [result, action, pending] = useActionState(updateSettings, null as FormResult | null);
 
   const trace = initial.trace ?? {};
+  const ingress = initial.ingress ?? {};
 
   return (
     <>
@@ -97,6 +101,37 @@ export function SettingsClient({ initial }: { initial: GatewaySettings }) {
             />
             <span className="text-xs text-muted-foreground">
               {t("trace.retentionDays.help")}
+            </span>
+          </label>
+        </section>
+
+        {/* Ingress protocol section */}
+        <section className="flex flex-col gap-4 rounded-lg border border-border p-5">
+          <div className="flex flex-col gap-1">
+            <h2 className="text-sm font-semibold text-foreground">
+              {t("ingress.title")}
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              {t("ingress.description")}
+            </p>
+          </div>
+
+          <label className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              name="anthropic_disabled"
+              value="true"
+              defaultChecked={!!ingress.anthropic_disabled}
+              className="mt-1 h-4 w-4 rounded border-border"
+            />
+            <span className="flex flex-col">
+              <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                {t("ingress.anthropicDisabled.label")}
+                <HotBadge label={t("ingress.anthropicDisabled.hot")} />
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {t("ingress.anthropicDisabled.help")}
+              </span>
             </span>
           </label>
         </section>

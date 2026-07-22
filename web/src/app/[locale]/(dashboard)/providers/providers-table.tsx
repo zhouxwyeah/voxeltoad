@@ -63,7 +63,27 @@ export function ProvidersTable({
     () => [
       { accessorKey: "name", header: tP("columns.name") },
       { accessorKey: "type", header: tP("columns.type") },
-      { accessorKey: "adapter", header: tP("columns.adapter") },
+      {
+        accessorKey: "adapter",
+        header: tP("columns.adapter"),
+        cell: ({ getValue }) => {
+          const v = getValue() as string | undefined;
+          if (!v) return <span className="text-muted-foreground">—</span>;
+          // Render adapter as a protocol badge so operators can see at a
+          // glance which wire protocol each provider speaks (relevant for
+          // protocol-aware routing / passthrough, ADR-0047).
+          const label = v === "claude" ? "Anthropic" : v === "openai" ? "OpenAI" : v;
+          const color =
+            v === "claude"
+              ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
+              : "bg-blue-500/10 text-blue-600 dark:text-blue-400";
+          return (
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${color}`}>
+              {label}
+            </span>
+          );
+        },
+      },
       { accessorKey: "base_url", header: tP("columns.baseUrl") },
     ],
     [tP],

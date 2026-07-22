@@ -24,5 +24,14 @@
       "hot": "热更新"
     }
   },
+  "ingress": {
+    "title": "入站协议",
+    "description": "控制网关接受的客户端入站协议（ADR-0045/0048）。零值=全部启用；勾选禁用某协议后对应端点返回 404。",
+    "anthropicDisabled": {
+      "label": "禁用 Anthropic 入站",
+      "help": "勾选后 /v1/messages 返回 404，Claude Code 等 Anthropic 客户端无法接入。按请求热生效。",
+      "hot": "热更新"
+    }
+  },
   "error": "保存设置失败"
 }
