@@ -166,6 +166,19 @@ func (h *Harness) AddProviderWithAdapter(name, baseURL, apiKeyRef, adapter strin
 	})
 }
 
+// AddMultiEndpointProvider registers a provider with multiple endpoints
+// (ADR-0049), one per (adapter, baseURL) pair. Used by protocol-aware routing
+// e2e tests that exercise the dual-protocol-vendor scenario.
+func (h *Harness) AddMultiEndpointProvider(name, apiKeyRef string, endpoints ...config.ProviderEndpoint) {
+	h.t.Helper()
+	h.adminPost("/api/v1/providers", config.Provider{
+		Name: name, Type: "openai",
+		Endpoints: endpoints,
+		APIKeyRef: apiKeyRef,
+		Timeouts:  config.ProviderTimeouts{Connect: 2 * time.Second, FirstByte: 2 * time.Second, Overall: 5 * time.Second},
+	})
+}
+
 // AddModel registers a model alias served by the given upstreams. Pricing is the
 // same for all upstreams here (per-million-token micro-units).
 func (h *Harness) AddModel(alias string, promptPer1M, completionPer1M int64, upstreams ...config.ModelUpstream) {

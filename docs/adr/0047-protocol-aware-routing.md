@@ -1,8 +1,12 @@
 # ADR-0047: Protocol-aware routing (implicit passthrough)
 
-- Status: Accepted
+- Status: **Superseded by [ADR-0049](0049-multi-endpoint-provider.md)**
 - Date: 2026-07-22
 - Builds on: [ADR-0032](0032-openai-passthrough-fidelity.md) (OpenAI→OpenAI passthrough), [ADR-0045](0045-anthropic-ingress-protocol.md) (Anthropic ingress)
+
+> **Superseded**: The protocol-aware routing insight is preserved, but the
+> granularity moved from provider-level partition to endpoint-level selection
+> (multi-endpoint Provider model). See ADR-0049 for the current design.
 
 ## Context
 
