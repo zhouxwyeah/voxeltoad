@@ -64,23 +64,28 @@ export function ProvidersTable({
       { accessorKey: "name", header: tP("columns.name") },
       { accessorKey: "type", header: tP("columns.type") },
       {
-        accessorKey: "adapter",
+        id: "endpoints",
         header: tP("columns.adapter"),
-        cell: ({ getValue }) => {
-          const v = getValue() as string | undefined;
-          if (!v) return <span className="text-muted-foreground">—</span>;
-          // Render adapter as a protocol badge so operators can see at a
-          // glance which wire protocol each provider speaks (relevant for
-          // protocol-aware routing / passthrough, ADR-0047).
-          const label = v === "claude" ? "Anthropic" : v === "openai" ? "OpenAI" : v;
-          const color =
-            v === "claude"
-              ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
-              : "bg-blue-500/10 text-blue-600 dark:text-blue-400";
+        cell: ({ row }) => {
+          const eps = row.original.endpoints as Array<{ adapter?: string }> | undefined;
+          if (!eps || eps.length === 0)
+            return <span className="text-muted-foreground">—</span>;
           return (
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${color}`}>
-              {label}
-            </span>
+            <div className="flex flex-wrap gap-1">
+              {eps.map((ep, i) => {
+                const v = ep.adapter ?? "";
+                const label = v === "claude" ? "Anthropic" : v === "openai" ? "OpenAI" : v;
+                const color =
+                  v === "claude"
+                    ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
+                    : "bg-blue-500/10 text-blue-600 dark:text-blue-400";
+                return (
+                  <span key={i} className={`rounded-full px-2 py-0.5 text-xs font-medium ${color}`}>
+                    {label}
+                  </span>
+                );
+              })}
+            </div>
           );
         },
       },

@@ -22,14 +22,16 @@ export async function createProvider(
     return { ok: false, error: mapped.fallback, errorKey: mapped.key };
   }
   const body: Record<string, unknown> = { name };
-  for (const key of ["type", "adapter", "base_url", "api_key_ref"] as const) {
-    const v = String(formData.get(key) ?? "").trim();
-    if (v) body[key] = v;
-  }
+  const type = String(formData.get("type") ?? "").trim();
+  if (type) body.type = type;
+  const endpoints = collectEndpoints(formData);
+  if (endpoints.length > 0) body.endpoints = endpoints;
   // api_key is write-only plaintext; when supplied the gateway encrypts and
   // stores it, and api_key_ref is rewritten to db://provider/<name> (ADR-0030).
   const apiKey = String(formData.get("api_key") ?? "").trim();
   if (apiKey) body.api_key = apiKey;
+  const apiKeyRef = String(formData.get("api_key_ref") ?? "").trim();
+  if (apiKeyRef) body.api_key_ref = apiKeyRef;
   const weight = String(formData.get("weight") ?? "").trim();
   if (weight) body.weight = Number(weight);
 
@@ -69,13 +71,15 @@ export async function updateProvider(
   // db://provider/<name>, and the form's api_key_ref field may hold a masked
   // value we must not persist.
   const apiKey = String(formData.get("api_key") ?? "").trim();
-  const refKeys = apiKey
-    ? (["type", "adapter", "base_url"] as const)
-    : (["type", "adapter", "base_url", "api_key_ref"] as const);
   const body: Record<string, unknown> = {};
-  for (const key of refKeys) {
-    const v = String(formData.get(key) ?? "").trim();
-    if (v) body[key] = v;
+  const type = String(formData.get("type") ?? "").trim();
+  if (type) body.type = type;
+  const endpoints = collectEndpoints(formData);
+  if (endpoints.length > 0) body.endpoints = endpoints;
+  // Only send api_key_ref when NOT rotating via plaintext (ADR-0030).
+  if (!apiKey) {
+    const apiKeyRef = String(formData.get("api_key_ref") ?? "").trim();
+    if (apiKeyRef) body.api_key_ref = apiKeyRef;
   }
   const weight = String(formData.get("weight") ?? "").trim();
   if (weight) body.weight = Number(weight);
@@ -225,4 +229,27 @@ export async function testProviderConnection(
     const fe = await toFormError(err);
     return fe.ok ? { ok: false, error: "unexpected error" } : fe;
   }
+}
+
+/**
+ * collectEndpoints reads the parallel arrays `endpoint_adapter` and
+ * `endpoint_base_url` from the form (getAll → DOM order, same pattern as
+ * upstream-row) and assembles them into an endpoints[] array. `endpoint_id` is
+ * optional; when empty the backend derives it from the adapter (ADR-0049).
+ * Rows with an empty adapter are dropped (the user deleted a row but the hidden
+ * inputs remain).
+ */
+function collectEndpoints(formData: FormData): { id?: string; adapter: string; base_url: string }[] {
+  const adapters = formData.getAll("endpoint_adapter");
+  const baseUrls = formData.getAll("endpoint_base_url");
+  const ids = formData.getAll("endpoint_id");
+  const out: { id?: string; adapter: string; base_url: string }[] = [];
+  for (let i = 0; i < adapters.length; i++) {
+    const adapter = String(adapters[i] ?? "").trim();
+    const base_url = String(baseUrls[i] ?? "").trim();
+    if (!adapter && !base_url) continue;
+    const id = String(ids[i] ?? "").trim();
+    out.push({ ...(id ? { id } : {}), adapter, base_url });
+  }
+  return out;
 }
