@@ -57,15 +57,17 @@ type streamEncoder struct {
 // a usage-only chunk that is folded into message_delta on the next call).
 //
 // Passthrough (ADR-0047): when the hit provider's adapter is claude, Chunk.Raw
-// carries a complete Anthropic SSE frame from the upstream. Relaying it
-// verbatim preserves provider-specific fields and avoids a re-encode round-
-// trip. Raw is only populated by the claude adapter; protocol-aware routing
-// (ADR-0047) prefers claude-adapter providers for anthropic ingress, so Raw
-// reaching here is always the right protocol.
+// carries a reassembled Anthropic SSE frame from the upstream. Relaying it
+// preserves provider-specific fields and avoids a re-encode round-trip. Raw is
+// only populated by the claude adapter; protocol-aware routing (ADR-0047)
+// prefers claude-adapter providers for anthropic ingress, so Raw reaching here
+// is always the right protocol.
 func (e *streamEncoder) EncodeChunk(c adapter.Chunk) ([]byte, error) {
-	// Passthrough (ADR-0047): relay the upstream's Anthropic frame verbatim,
-	// but only when RawProtocol confirms it's Anthropic-shaped (failover to an
-	// openai provider would set RawProtocol="openai" — we must re-encode those).
+	// Passthrough (ADR-0047): relay the upstream's Anthropic frame (semantically
+	// lossless — event type, id, data preserved; byte-level formatting may
+	// differ — see ADR-0047 §Fidelity boundary), but only when RawProtocol
+	// confirms it's Anthropic-shaped (failover to an openai provider would set
+	// RawProtocol="openai" — we must re-encode those).
 	if len(c.Raw) > 0 && c.RawProtocol == "anthropic" {
 		// Still track state so the encoder's Close/terminator behave
 		// consistently (messageStarted, finish, usage for billing).

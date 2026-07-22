@@ -341,3 +341,29 @@ func TestParseStream_PassthroughFrames(t *testing.T) {
 		}
 	}
 }
+
+// TestParseStream_PassthroughPreservesID verifies the reassembled Raw frame
+// retains the SSE `id:` field when the upstream sends one (SSE resume /
+// Last-Event-ID semantics, ADR-0047). pkg/sse.Decoder parses id into Event.ID;
+// reassembleSSEFrame must re-emit it, or a passthrough relay silently strips
+// the resume cursor and a reconnecting client replays the whole stream.
+func TestParseStream_PassthroughPreservesID(t *testing.T) {
+	a := newAdapter(t)
+	raw := "event: message_start\nid: evt-42\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"m\",\"content\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n"
+	sr, err := a.ParseStream(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("ParseStream: %v", err)
+	}
+	defer func() { _ = sr.Close() }()
+
+	c, err := sr.Recv()
+	if err != nil {
+		t.Fatalf("Recv: %v", err)
+	}
+	if len(c.Raw) == 0 {
+		t.Fatalf("expected Raw frame on message_start chunk, got none")
+	}
+	if !strings.Contains(string(c.Raw), "id: evt-42\n") {
+		t.Errorf("Raw frame missing 'id: evt-42' (id: field stripped): %q", c.Raw)
+	}
+}

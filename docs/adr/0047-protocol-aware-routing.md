@@ -56,7 +56,14 @@ Option 2 is unsafe (failover exists). **Option 1 is correct**: `UnifiedResponse.
 
 ### Claude adapter: preserve Raw
 
-`ParseResponse` now sets `Raw: body` and `RawProtocol: "anthropic"` (the claude adapter speaks Anthropic wire). `ParseStream`'s `Recv` reassembles complete SSE frames (`event: X\ndata: Y\n\n`) into `Chunk.Raw` (with `RawProtocol: "anthropic"`), because `pkg/sse.Decoder` discards the original frame bytes. This reassembly is the claude adapter's responsibility — the OpenAI adapter stores only `ev.Data` (its codec re-wraps it as `data: ...`); the asymmetry is documented in this ADR.
+`ParseResponse` now sets `Raw: body` and `RawProtocol: "anthropic"` (the claude adapter speaks Anthropic wire). `ParseStream`'s `Recv` reassembles complete SSE frames (`event: X\nid: Y\ndata: Z\n\n`) into `Chunk.Raw` (with `RawProtocol: "anthropic"`), because `pkg/sse.Decoder` discards the original frame bytes. This reassembly is the claude adapter's responsibility — the OpenAI adapter stores only `ev.Data` (its codec re-wraps it as `data: ...`); the asymmetry is documented in this ADR.
+
+**Fidelity boundary (semantic, not byte-for-byte).** `pkg/sse.Decoder` discards raw bytes, so passthrough reassembles frames from decoded fields. The reassembled frame preserves all **semantic** content — event type, `id:` (SSE resume cursor, kept after the critical-#1 fix), and data payload — but NOT byte-level formatting:
+- the leading-space choice after `data:` / `event:` (`data: x` vs `data:x`),
+- comment lines (`:keep-alive`), and
+- unknown SSE fields (ignored per spec).
+
+Comment/keep-alive lines are intentionally not reassembled: the gateway manages connection liveness itself (flushes after every chunk), so a client's keep-alive need is served by the gateway, not by relaying the upstream's comments. These differences are invisible to any spec-compliant SSE client (which parses field/value pairs, not raw bytes), so passthrough is **semantically lossless** even though it is not **byte-for-byte identical**. Earlier wording in this ADR that implied byte-for-byte identity is corrected here.
 
 ### Interaction with routing strategies
 
