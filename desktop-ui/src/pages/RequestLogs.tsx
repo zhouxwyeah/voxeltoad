@@ -209,7 +209,10 @@ export function RequestLogs() {
                         "—"
                       )}
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs text-muted-foreground" title={r.request_id}>
+                    <td
+                      className="px-3 py-2 font-mono text-xs text-muted-foreground"
+                      title={`gateway: ${r.request_id}${r.client_request_id ? `\nclient: ${r.client_request_id}` : ""}${r.upstream_request_id ? `\nupstream: ${r.upstream_request_id}` : ""}`}
+                    >
                       {shortId(r.request_id)}
                     </td>
                   </tr>

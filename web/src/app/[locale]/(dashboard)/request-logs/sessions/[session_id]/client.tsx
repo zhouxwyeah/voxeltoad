@@ -132,7 +132,7 @@ export function SessionTraceClient({
                     const hasError = !!r.error_type || !!r.blocked_by;
                     return (
                       <tr
-                        key={(r.request_id as string) ?? i}
+                        key={(r.id as number | string) ?? i}
                         className="border-b border-border last:border-b-0"
                       >
                         <Td>

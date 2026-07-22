@@ -27,15 +27,15 @@ func (r *RequestLogRepo) Record(ctx context.Context, rec observability.RequestLo
 		    model_requested, model_resolved, stream,
 		    prompt_tokens, completion_tokens, total_tokens,
 		    ttft_ms, duration_ms, error_type, blocked_by, fallback,
-		    request_id, session_id, trace_id, session_source, agent_type,
+		    request_id, client_request_id, session_id, trace_id, session_source, agent_type,
 		    cache_hit, cache_tier, cache_source, cached_prompt_tokens,
 		    upstream_request_id, ingress_protocol)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rec.Tenant, rec.Group, rec.APIKeyID, rec.Provider,
 		rec.ModelRequested, rec.ModelResolved, rec.Stream,
 		rec.PromptTokens, rec.CompletionTokens, rec.TotalTokens,
 		rec.TTFTms, rec.Durationms, rec.ErrorType, rec.BlockedBy, rec.Fallback,
-		rec.RequestID, rec.SessionID, rec.TraceID, rec.SessionSource, rec.AgentType,
+		rec.RequestID, rec.ClientRequestID, rec.SessionID, rec.TraceID, rec.SessionSource, rec.AgentType,
 		rec.CacheHit, rec.CacheTier, rec.CacheSource, rec.CachedPromptTokens,
 		rec.UpstreamRequestID, rec.IngressProtocol,
 	).Error

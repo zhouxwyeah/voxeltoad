@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5/middleware"
 
@@ -32,21 +33,39 @@ func invalidRequestIDFrom(ctx context.Context) (invalidRequestIDInfo, bool) {
 	return v, ok
 }
 
+// clientRequestIDCtxKey carries the client-supplied X-Request-Id header value
+// verbatim (after trim). Empty when the client did not send the header. The
+// gateway persists this separately as client_request_id (ADR-0050) — it is NOT
+// used as the primary correlation key, because some clients reuse the same id
+// across every request in a session.
+type clientRequestIDCtxKey struct{}
+
+func withClientRequestID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, clientRequestIDCtxKey{}, id)
+}
+
+// clientRequestIDFrom returns the original client X-Request-Id value from ctx,
+// or "" when the client did not send one (or sent only whitespace).
+func clientRequestIDFrom(ctx context.Context) string {
+	v, _ := ctx.Value(clientRequestIDCtxKey{}).(string)
+	return v
+}
+
 // requestIDMiddleware replaces chi's middleware.RequestID with a variant that
-// rejects nil/zero client request-ids (normalizeRequestID) and regenerates them
-// gateway-side instead of propagating an unjoinable "0000...0000" value through
-// the access log, request_logs, trace_payloads, and the OTel span.
+// ALWAYS generates a gateway-side request id and never adopts the client value
+// (ADR-0050). The client value is preserved on ctx via withClientRequestID so
+// it can be recorded as client_request_id for cross-system correlation.
 //
-// When the client header is valid it is used as-is (unchanged behavior); when it
-// is absent or a nil-uuid, the header is cleared before delegating to chi's
-// RequestID, which then mints its own "host/random-000001" id — exactly the path
-// a standard OpenAI client (which never sends the header) already takes. So a
-// rejected zero id is restored to the same handling as if it had never been
-// sent, rather than corrupting correlation.
+// Why always regenerate: some agent clients (Claude Code, Codex, …) reuse the
+// same X-Request-Id across every request in a session. Adopting that value
+// produced duplicate request_id rows in request_logs, breaking per-request
+// correlation, UI lists, and any LIMIT 1 lookup. Regenerating gateway-side
+// guarantees uniqueness; the original value survives in client_request_id.
 //
-// A rejected id is logged (Warn, with the raw value + remote) here, and counted
-// (with agent_type + tenant labels) later from the chat handler once those are
-// known — see invalidRequestIDFrom consumers.
+// The nil-uuid detection (normalizeRequestID) stays as a labeled-warning
+// trigger — those clients are almost certainly misconfigured, and operators
+// want to see the metric. But it is now a strict subset of "always regenerate"
+// rather than the only regeneration trigger.
 func requestIDMiddleware(next http.Handler) http.Handler {
 	chiMW := middleware.RequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		next.ServeHTTP(w, r)
@@ -54,24 +73,30 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw := r.Header.Get(middleware.RequestIDHeader)
 		if raw != "" {
-			if id, ok := normalizeRequestID(raw); ok {
-				// Valid: normalize (trim) and pass through to chi unchanged.
-				r.Header.Set(middleware.RequestIDHeader, id)
-			} else {
-				// Nil/zero id: clear the header so chi generates a fresh one,
-				// and stash the rejected value for labeled counting downstream.
-				r.Header.Del(middleware.RequestIDHeader)
-				ctx := withInvalidRequestID(r.Context(), invalidRequestIDInfo{
+			// Preserve the trimmed client value on ctx for separate
+			// persistence as client_request_id (ADR-0050). We do NOT forward
+			// it to chi — chi must always generate a fresh gateway id.
+			clientID := strings.TrimSpace(raw)
+			if clientID != "" {
+				r = r.WithContext(withClientRequestID(r.Context(), clientID))
+			}
+			// Nil/zero id: flag for the labeled warning metric + log. The
+			// header is cleared below regardless (always-regenerate path), so
+			// the flag is purely informational.
+			if _, ok := normalizeRequestID(raw); !ok {
+				r = r.WithContext(withInvalidRequestID(r.Context(), invalidRequestIDInfo{
 					raw:    raw,
 					remote: r.RemoteAddr,
-				})
-				r = r.WithContext(ctx)
-				observability.Logger().Warn("invalid client request_id normalized; generating gateway-side id",
+				}))
+				observability.Logger().Warn("invalid client request_id; generating gateway-side id",
 					"raw", raw,
 					"remote", r.RemoteAddr,
 				)
 			}
 		}
+		// Always clear the header so chi's middleware.RequestID generates its
+		// own "host/random-000001" id rather than forwarding the client value.
+		r.Header.Del(middleware.RequestIDHeader)
 		chiMW.ServeHTTP(w, r)
 	})
 }

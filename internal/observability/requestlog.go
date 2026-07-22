@@ -42,9 +42,13 @@ type RequestLog struct {
 	CacheTier          string
 	CacheSource        string
 
-	RequestID string // gateway-assigned per-request correlation id (ADR-0021 §5)
-	SessionID string // client-supplied session key (X-Voxeltoad-Session header)
-	TraceID   string // W3C trace id from traceparent (empty if absent/invalid)
+	RequestID string // gateway-assigned per-request correlation id (ADR-0021 §5; ADR-0050: always gateway-generated, never the client value)
+	// ClientRequestID is the client-supplied X-Request-Id header value (verbatim
+	// after trim). Preserved for cross-system correlation; empty when the client
+	// sent no header. ADR-0050.
+	ClientRequestID string
+	SessionID       string // client-supplied session key (X-Voxeltoad-Session header)
+	TraceID         string // W3C trace id from traceparent (empty if absent/invalid)
 	// UpstreamRequestID is the provider-assigned request id returned in the
 	// upstream response (OpenAI x-request-id header, Anthropic request-id
 	// header/body, …). Final/successful attempt only. Empty when the provider

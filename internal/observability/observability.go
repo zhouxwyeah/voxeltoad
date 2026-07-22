@@ -46,6 +46,7 @@ const (
 	AttrErrorType          = "llm.error.type"
 	AttrErrorDetail        = "llm.error.detail"
 	AttrRequestID          = "llm.request_id"
+	AttrClientRequestID    = "llm.client_request_id"   // client-supplied request id (X-Request-Id header verbatim; ADR-0050)
 	AttrUpstreamRequestID  = "llm.upstream_request_id" // provider-assigned request id (OpenAI x-request-id, Anthropic request-id, …) for support/reconciliation
 	AttrSessionID          = "llm.session_id"
 	AttrTraceID            = "llm.trace_id"

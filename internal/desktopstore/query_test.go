@@ -16,7 +16,7 @@ func seedTestData(t *testing.T, db *DB) {
 	base := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
 
 	logs := []RequestLogRow{
-		{ID: 1, Tenant: "default", Group: "default", Provider: "openai", ModelRequested: "default", ModelResolved: "gpt-4o-mini", Stream: false, PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30, TTFTms: 100, Durationms: 500, RequestID: "req-1", SessionID: "sess-claude", SessionSource: "header", AgentType: "claude-code", CreatedAt: base},
+		{ID: 1, Tenant: "default", Group: "default", Provider: "openai", ModelRequested: "default", ModelResolved: "gpt-4o-mini", Stream: false, PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30, TTFTms: 100, Durationms: 500, RequestID: "req-1", ClientRequestID: "client-aaa", SessionID: "sess-claude", SessionSource: "header", AgentType: "claude-code", CreatedAt: base},
 		{ID: 2, Tenant: "default", Group: "default", Provider: "openai", ModelRequested: "default", ModelResolved: "gpt-4o-mini", Stream: false, PromptTokens: 12, CompletionTokens: 18, TotalTokens: 30, TTFTms: 120, Durationms: 600, RequestID: "req-2", SessionID: "sess-claude", SessionSource: "header", AgentType: "claude-code", CreatedAt: base.Add(time.Minute)},
 		{ID: 3, Tenant: "default", Group: "default", Provider: "openai", ModelRequested: "default", ModelResolved: "gpt-4o-mini", Stream: false, PromptTokens: 5, CompletionTokens: 0, TotalTokens: 5, TTFTms: 0, Durationms: 50, ErrorType: "upstream_error", RequestID: "req-3", SessionID: "sess-cb-err", SessionSource: "header", AgentType: "codebuddy", CreatedAt: base.Add(2 * time.Minute)},
 		{ID: 4, Tenant: "default", Group: "default", Provider: "openai", ModelRequested: "default", ModelResolved: "gpt-4o-mini", Stream: false, PromptTokens: 8, CompletionTokens: 22, TotalTokens: 30, TTFTms: 90, Durationms: 400, RequestID: "req-4", SessionID: "sess-cb-ok", SessionSource: "header", AgentType: "codebuddy", CreatedAt: base.Add(3 * time.Minute)},
@@ -145,6 +145,28 @@ func TestListRequestLogs(t *testing.T) {
 	}
 	if len(errRows) != 1 || errRows[0].RequestID != "req-3" {
 		t.Errorf("error rows = %+v, want req-3", errRows)
+	}
+
+	// ADR-0050: client_request_id is persisted and returned alongside
+	// request_id. row req-1 (the only row seeded with a client_request_id)
+	// is claude-code so it's in `rows` above; find it and verify.
+	var row1 *RequestLogView
+	for i := range rows {
+		if rows[i].RequestID == "req-1" {
+			row1 = &rows[i]
+			break
+		}
+	}
+	if row1 == nil {
+		t.Fatalf("req-1 not in claude-code rows: %+v", rows)
+	}
+	if row1.ClientRequestID != "client-aaa" {
+		t.Errorf("req-1 client_request_id = %q, want client-aaa", row1.ClientRequestID)
+	}
+	// Rows that had no client_request_id seeded must surface empty (not NULL
+	// — the column has no NOT NULL constraint but the struct zero value is "").
+	if rows[0].RequestID == "req-2" && rows[0].ClientRequestID != "" {
+		t.Errorf("req-2 client_request_id = %q, want empty", rows[0].ClientRequestID)
 	}
 }
 

@@ -57,6 +57,12 @@ type RequestTelemetry struct {
 	RequestID string
 	SessionID string
 	TraceID   string
+	// ClientRequestID is the client-supplied X-Request-Id header value (verbatim
+	// after trim). Persisted separately from RequestID because some agents (Claude
+	// Code, Codex, …) reuse the same id across every request in a session; the
+	// gateway always generates its own RequestID now (ADR-0050). Empty when the
+	// client sent no X-Request-Id header.
+	ClientRequestID string
 	// UpstreamRequestID is the provider-assigned request correlation id
 	// returned in the upstream response (OpenAI's x-request-id header,
 	// Anthropic's request-id header/body, …). Captured for the final/successful
@@ -175,6 +181,7 @@ func recordSpan(ctx context.Context, t RequestTelemetry) {
 		attribute.Bool(AttrFallback, t.Fallback),
 		attribute.String(AttrErrorType, t.ErrorType),
 		attribute.String(AttrRequestID, t.RequestID),
+		attribute.String(AttrClientRequestID, t.ClientRequestID),
 		attribute.String(AttrUpstreamRequestID, t.UpstreamRequestID),
 		attribute.String(AttrSessionID, t.SessionID),
 		attribute.String(AttrTraceID, t.TraceID),

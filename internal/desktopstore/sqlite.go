@@ -106,6 +106,7 @@ type RequestLogRow struct {
 	CacheTier          string    `gorm:"column:cache_tier"`
 	CacheSource        string    `gorm:"column:cache_source"`
 	RequestID          string    `gorm:"column:request_id;index"`
+	ClientRequestID    string    `gorm:"column:client_request_id;index"`
 	SessionID          string    `gorm:"column:session_id;index"`
 	TraceID            string    `gorm:"column:trace_id"`
 	UpstreamRequestID  string    `gorm:"column:upstream_request_id"`
@@ -120,26 +121,27 @@ func (*RequestLogRow) TableName() string { return "request_logs" }
 // messages / request_raw are JSON text; response_raw / error_raw are verbatim
 // text (SSE transcripts are not JSON).
 type TracePayloadRow struct {
-	ID             uint      `gorm:"primaryKey;autoIncrement"`
-	RequestID      string    `gorm:"column:request_id;index"`
-	SessionID      string    `gorm:"column:session_id;index"`
-	TraceID        string    `gorm:"column:trace_id"`
-	Tenant         string    `gorm:"column:tenant"`
-	Group          string    `gorm:"column:group_name"`
-	APIKeyID       string    `gorm:"column:api_key_id"`
-	Provider       string    `gorm:"column:provider"`
-	ModelRequested string    `gorm:"column:model_requested"`
-	Stream         bool      `gorm:"column:stream"`
-	AgentType      string    `gorm:"column:agent_type;index"`
-	StatusCode     int       `gorm:"column:status_code"`
-	StopReason     string    `gorm:"column:stop_reason"`
-	NMessages      int       `gorm:"column:n_messages"`
-	NToolUse       int       `gorm:"column:n_tool_use"`
-	Messages       string    `gorm:"column:messages;type:text"`     // JSON array (adapter.Message[])
-	RequestRaw     string    `gorm:"column:request_raw;type:text"`  // JSON object
-	ResponseRaw    string    `gorm:"column:response_raw;type:text"` // TEXT (SSE transcript)
-	ErrorRaw       string    `gorm:"column:error_raw;type:text"`
-	CreatedAt      time.Time `gorm:"column:created_at;index"`
+	ID              uint      `gorm:"primaryKey;autoIncrement"`
+	RequestID       string    `gorm:"column:request_id;index"`
+	ClientRequestID string    `gorm:"column:client_request_id;index"`
+	SessionID       string    `gorm:"column:session_id;index"`
+	TraceID         string    `gorm:"column:trace_id"`
+	Tenant          string    `gorm:"column:tenant"`
+	Group           string    `gorm:"column:group_name"`
+	APIKeyID        string    `gorm:"column:api_key_id"`
+	Provider        string    `gorm:"column:provider"`
+	ModelRequested  string    `gorm:"column:model_requested"`
+	Stream          bool      `gorm:"column:stream"`
+	AgentType       string    `gorm:"column:agent_type;index"`
+	StatusCode      int       `gorm:"column:status_code"`
+	StopReason      string    `gorm:"column:stop_reason"`
+	NMessages       int       `gorm:"column:n_messages"`
+	NToolUse        int       `gorm:"column:n_tool_use"`
+	Messages        string    `gorm:"column:messages;type:text"`     // JSON array (adapter.Message[])
+	RequestRaw      string    `gorm:"column:request_raw;type:text"`  // JSON object
+	ResponseRaw     string    `gorm:"column:response_raw;type:text"` // TEXT (SSE transcript)
+	ErrorRaw        string    `gorm:"column:error_raw;type:text"`
+	CreatedAt       time.Time `gorm:"column:created_at;index"`
 }
 
 func (*TracePayloadRow) TableName() string { return "trace_payloads" }

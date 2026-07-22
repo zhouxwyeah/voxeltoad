@@ -28,12 +28,12 @@ func NewTracePayloadRepo(db *DB) *TracePayloadRepo { return &TracePayloadRepo{db
 func (r *TracePayloadRepo) Record(ctx context.Context, p observability.TracePayload) error {
 	return r.db.WithContext(ctx).Exec(
 		`INSERT INTO trace_payloads
-		   (request_id, session_id, trace_id, tenant, group_name, api_key_id,
+		   (request_id, client_request_id, session_id, trace_id, tenant, group_name, api_key_id,
 		    provider, model_requested, stream, agent_type, ingress_protocol,
 		    status_code, stop_reason, n_messages, n_tool_use,
 		    messages, request_raw, response_raw, error_raw)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.RequestID, p.SessionID, p.TraceID, p.Tenant, p.Group, p.APIKeyID,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.RequestID, p.ClientRequestID, p.SessionID, p.TraceID, p.Tenant, p.Group, p.APIKeyID,
 		p.Provider, p.ModelRequested, p.Stream, p.AgentType, p.IngressProtocol,
 		p.StatusCode, p.StopReason, p.NMessages, p.NToolUse,
 		jsonBody(p.Messages, "[]"), jsonBody(p.RequestRaw, "{}"),

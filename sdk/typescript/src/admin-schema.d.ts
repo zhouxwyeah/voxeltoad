@@ -1655,8 +1655,12 @@ export interface paths {
                     fallback?: boolean;
                     /** @description Filter to requests belonging to a single session (X-Voxeltoad-Session header value). */
                     session_id?: string;
-                    /** @description Filter to a single request by its gateway-assigned correlation id (exact lookup, debug/trace drill-down). */
+                    /** @description Filter to a single request by its gateway-assigned correlation id (exact lookup, debug/trace drill-down). ADR-0050: always gateway-generated, unique per request. */
                     request_id?: string;
+                    /** @description Reverse lookup by client-supplied X-Request-Id header value (support: trace a client-side id to a gateway request). Empty matches rows where the client sent no header. */
+                    client_request_id?: string;
+                    /** @description Reverse lookup by provider-assigned id (support/reconciliation against vendor records). */
+                    upstream_request_id?: string;
                     /** @description Filter by detected calling agent (claude-code/codex/codebuddy/workbuddy/opencode). */
                     agent_type?: string;
                     /** @description Filter by client wire protocol that served the request (ADR-0045/0046). */
@@ -3062,8 +3066,10 @@ export interface components {
             blocked_by?: string;
             /** @description Whether the request failed over across candidates before succeeding. */
             fallback?: boolean;
-            /** @description Gateway-assigned per-request correlation id (sourced from the X-Request-Id/X-Trace-Id/traceparent header when present, otherwise chi-generated). */
+            /** @description Gateway-assigned per-request correlation id (ADR-0050: always gateway-generated via chi middleware, unique per request; never the client-supplied value). */
             request_id?: string;
+            /** @description Client-supplied X-Request-Id header value (verbatim after trim). Preserved for cross-system correlation (ADR-0050); empty when the client sent no header. Some agents (Claude Code, Codex) reuse the same id across every request in a session, which is why it is NOT used as the primary correlation key. */
+            client_request_id?: string;
             /** @description Provider-assigned request id from the upstream response (OpenAI x-request-id header, Anthropic request-id header/body, …). Final/successful attempt only; empty when no upstream call succeeded or the provider returned no id. */
             upstream_request_id?: string;
             /** @description Client-supplied session key from X-Voxeltoad-Session header. */
@@ -3197,6 +3203,8 @@ export interface components {
             /** Format: int64 */
             id?: number;
             request_id?: string;
+            /** @description Client-supplied X-Request-Id header value (ADR-0050); empty when the client sent no header. */
+            client_request_id?: string;
             session_id?: string;
             trace_id?: string;
             tenant?: string;

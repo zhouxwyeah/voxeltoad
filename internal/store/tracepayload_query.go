@@ -32,20 +32,21 @@ func NewTracePayloadQueryRepo(db *DB, tenant string) *TracePayloadQueryRepo {
 // session/request list render rows cheaply; the bodies are fetched on demand via
 // GetByRequestID when an operator drills into a single request.
 type TracePayloadSummaryRow struct {
-	ID             int64     `json:"id"`
-	RequestID      string    `json:"request_id"`
-	SessionID      string    `json:"session_id"`
-	TraceID        string    `json:"trace_id"`
-	Tenant         string    `json:"tenant"`
-	Provider       string    `json:"provider"`
-	ModelRequested string    `json:"model_requested"`
-	Stream         bool      `json:"stream"`
-	AgentType      string    `json:"agent_type"`
-	StatusCode     int       `json:"status_code"`
-	StopReason     string    `json:"stop_reason"`
-	NMessages      int       `json:"n_messages"`
-	NToolUse       int       `json:"n_tool_use"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID              int64     `json:"id"`
+	RequestID       string    `json:"request_id"`
+	ClientRequestID string    `json:"client_request_id"`
+	SessionID       string    `json:"session_id"`
+	TraceID         string    `json:"trace_id"`
+	Tenant          string    `json:"tenant"`
+	Provider        string    `json:"provider"`
+	ModelRequested  string    `json:"model_requested"`
+	Stream          bool      `json:"stream"`
+	AgentType       string    `json:"agent_type"`
+	StatusCode      int       `json:"status_code"`
+	StopReason      string    `json:"stop_reason"`
+	NMessages       int       `json:"n_messages"`
+	NToolUse        int       `json:"n_tool_use"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // TracePayloadDetail is the full payload for a single request: the message +
@@ -63,7 +64,7 @@ type TracePayloadDetail struct {
 
 // summaryCols lists the columns fetched for a summary row (no JSONB), shared by
 // ListBySession and the summary projection of GetByRequestID.
-const traceSummaryCols = `id, request_id, session_id, trace_id, tenant,
+const traceSummaryCols = `id, request_id, client_request_id, session_id, trace_id, tenant,
        provider, model_requested, stream, agent_type,
        status_code, stop_reason, n_messages, n_tool_use, created_at`
 

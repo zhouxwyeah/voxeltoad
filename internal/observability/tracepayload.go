@@ -24,11 +24,15 @@ type TracePayload struct {
 	// without a mandatory join, and so session/tenant queries hit this table's
 	// own indexes).
 	RequestID string
-	SessionID string
-	TraceID   string
-	Tenant    string
-	Group     string
-	APIKeyID  string
+	// ClientRequestID mirrors RequestLog.ClientRequestID: the client's
+	// X-Request-Id header value, preserved for cross-system correlation.
+	// Empty when the client sent no header. ADR-0050.
+	ClientRequestID string
+	SessionID       string
+	TraceID         string
+	Tenant          string
+	Group           string
+	APIKeyID        string
 
 	Provider       string
 	ModelRequested string
