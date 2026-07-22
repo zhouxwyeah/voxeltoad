@@ -65,6 +65,8 @@ Option 2 is unsafe (failover exists). **Option 1 is correct**: `UnifiedResponse.
 
 Comment/keep-alive lines are intentionally not reassembled: the gateway manages connection liveness itself (flushes after every chunk), so a client's keep-alive need is served by the gateway, not by relaying the upstream's comments. These differences are invisible to any spec-compliant SSE client (which parses field/value pairs, not raw bytes), so passthrough is **semantically lossless** even though it is not **byte-for-byte identical**. Earlier wording in this ADR that implied byte-for-byte identity is corrected here.
 
+**Stream-truncation behavior.** If the upstream drops mid-stream (before its terminal `message_delta`), the ingress codec's `Close()` emits a synthetic `message_delta` with stop_reason `end_turn` so the client sees a well-formed stream end. The `output_tokens` in that synthetic event comes from the **last usage chunk the gateway saw**, not the upstream's final tally — for a clean truncation this is the usage of the chunk before the drop, which may undercount the true completion. Billing is unaffected (it uses the unified `Usage` accumulated by the proxy, which reflects what was actually relayed), but a client that displays the trailing usage should treat a truncated stream's `output_tokens` as approximate. The gateway logs the upstream failure server-side (see `stream.go` error paths), so this case is diagnosable from logs even though the client stream looks clean.
+
 ### Interaction with routing strategies
 
 The stable partition preserves strategy order **within** each protocol group. Cross-group order is overridden by protocol match:
