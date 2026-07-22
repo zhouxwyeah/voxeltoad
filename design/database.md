@@ -3,7 +3,7 @@
 > 管理面 PostgreSQL schema 的可视化与集中清单。ADR-0014 是决策源，本文件是单一事实来源（可视化 + 完整表清单 + 软引用关系 + 设计决定说明）。
 > **适用对象**：修改 schema、新增表、调整跨表引用关系时，先读本文件对齐全貌，再查相关 ADR 看决策背景。
 
-Schema 形状由 `internal/store/migrations/` 下的 24 个 goose 迁移定义（`00001`-`00025`，缺 `00018`）；本文件与之保持同步。其中 `00018` 因 trace 迁移重命名而跳过（见 git log `856613d`）。
+Schema 形状由 `internal/store/migrations/` 下的 25 个 goose 迁移定义（`00001`-`00026`，缺 `00018`）；本文件与之保持同步。其中 `00018` 因 trace 迁移重命名而跳过（见 git log `856613d`）。
 
 > **同步规则（门禁）**：任何 PR 若新增/修改/删除表、列、索引或约束（即触碰 `internal/store/migrations/` 下的 SQL 文件），**必须同步更新本文件**。检查清单：
 > - §1 表分类矩阵：新表归入正确分类，业务表计数同步
@@ -283,6 +283,7 @@ erDiagram
         varchar agent_type "claude-code/codex/... (00023)"
         text    upstream_request_id "provider 返回的请求 ID (00024)"
         varchar ingress_protocol "openai|anthropic (00025)"
+        varchar provider_endpoint "provider 内端点 slug (00026)"
         timestamptz created_at "PARTITION BY RANGE"
     }
 
@@ -299,6 +300,7 @@ erDiagram
         boolean stream
         varchar agent_type "claude-code/codex/... (00023)"
         varchar ingress_protocol "openai|anthropic (00025)"
+        varchar provider_endpoint "provider 内端点 slug (00026)"
         integer status_code "上游 HTTP 状态"
         varchar stop_reason "finish/stop reason"
         integer n_messages
@@ -341,6 +343,7 @@ erDiagram
 | `agent_type` | 检测到的调用 agent（claude-code/codex/codebuddy/workbuddy/opencode；空=未识别） | agent 检测中间件（00023） |
 | `upstream_request_id` | provider 返回的请求关联 ID（OpenAI `x-request-id` 头、Anthropic `request-id` 头/body 等），仅最终成功尝试 | Forwarder 从 `resp.Header` 提取（00024） |
 | `ingress_protocol` | 客户端入站协议（`openai` / `anthropic`；空=迁移前历史行），驱动管理面协议筛选与直通/转换 badge | 数据面 codec.Protocol()（00025） |
+| `provider_endpoint` | 命中 provider 内的端点 slug（`openai`/`anthropic`/自定义 id；空=迁移前历史行），多端点 provider 的用量归因（ADR-0049） | 数据面 DispatchResult.Endpoint（00026） |
 
 **如何关联链路**: `GET /api/v1/request-logs?session_id=X` 查询同一 session 的所有请求；`request_id` 用于精确定位单次请求并与 OTel trace 串联；`upstream_request_id` 用于售后/对账时定位到 provider 侧的请求记录（按上游 ID 反查网关请求，见索引自 `idx_request_logs_upstream_request_id`）。
 
@@ -396,6 +399,7 @@ erDiagram
 | `status_code` / `stop_reason` / `n_messages` / `n_tool_use` | summary 维度，让列表视图不解析大 JSON 就能渲染 |
 | `agent_type` | 检测到的调用 agent（00023 后加） |
 | `ingress_protocol` | 客户端入站协议（00025 后加，`openai`/`anthropic`/空） |
+| `provider_endpoint` | 命中 provider 内的端点 slug（00026 后加，ADR-0049） |
 | `request_id` / `session_id` / `trace_id` / `tenant` / `group_name` / `api_key_id` | 与 `request_logs` 相同的关联身份串（应用层配对） |
 
 **捕获开关**：默认**关**（`gateway_settings.trace.capture_payload_enabled`），热重载（~5s 生效，无需重启）。关闭时捕获方法短路，零成本（不拷贝 body、不 marshal）。

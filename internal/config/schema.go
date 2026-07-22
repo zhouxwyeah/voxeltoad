@@ -1,6 +1,9 @@
 package config
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // This file defines the dynamic configuration schema: the typed shape of the
 // providers, models, routes, and plugin configs the admin plane owns and the
@@ -8,32 +11,103 @@ import "time"
 // feature steps populate these types but should not reshape them (see the plan
 // and design/architecture.md).
 
-// Provider is an upstream LLM provider endpoint.
+// Provider is a multi-endpoint upstream LLM provider instance. It carries the
+// brand (Type), the shared credential (APIKeyRef), and one or more Endpoints —
+// each endpoint is one (Adapter, BaseURL) pair the gateway can reach. The
+// runtime picks the endpoint whose adapter matches the ingress protocol
+// (ADR-0049); cross-endpoint failover is graceful degradation.
 type Provider struct {
 	// Name is the unique provider identifier / instance name (e.g.
-	// "openai-prod", "tencent-hunyuan").
+	// "openai-prod", "deepseek-prod").
 	Name string `json:"name"`
 	// Type is the provider brand (e.g. "openai", "tencent", "zhipu",
-	// "anthropic"). It is descriptive/observability-facing and does NOT select
-	// the adapter — Adapter does. See ADR-0001.
+	// "anthropic", "deepseek"). It is descriptive/observability-facing and does
+	// NOT select the adapter — the endpoint's Adapter does. See ADR-0001.
 	Type string `json:"type"`
-	// Adapter selects the protocol adapter from the registry ("openai" or
-	// "claude"). Multiple brands share one adapter: tencent/zhipu/compatible
-	// providers all use adapter "openai". See ADR-0001.
-	Adapter string `json:"adapter"`
-	// BaseURL is the upstream API base URL.
-	BaseURL string `json:"base_url"`
-	// APIKeyRef references the upstream credential. Supported forms (ADR-0003/0030):
+	// Endpoints is the non-empty list of (Adapter, BaseURL) pairs (at least
+	// one). The FIRST endpoint is the "primary" used for the providers.adapter
+	// promoted column and as the fallback when no ingress protocol is known.
+	Endpoints []ProviderEndpoint `json:"endpoints"`
+	// APIKeyRef references the SHARED upstream credential for all endpoints
+	// (ADR-0003/0030/0031). Supported forms:
 	//   "env://VAR_NAME" — resolved from the named environment variable;
 	//   "db://provider/<name>" — resolved from the encrypted provider_credentials table;
 	//   "plain://literal" or a bare literal — used as-is (dev/test only).
-	// A SecretResolver extension point allows future schemes (e.g. vault://).
 	// The resolved plaintext key MUST never be logged (see design/observability.md).
 	APIKeyRef string `json:"api_key_ref"`
-	// Timeouts configures the proxy's layered timeouts for this provider.
+	// Timeouts is the provider-level default for the layered timeouts. Each
+	// endpoint may override (see ProviderEndpoint.Timeouts).
 	Timeouts ProviderTimeouts `json:"timeouts"`
 	// Weight is the relative load-balancing weight (used by routing).
 	Weight int `json:"weight"`
+}
+
+// ProviderEndpoint is one upstream protocol endpoint under a provider. A
+// dual-protocol vendor (OpenAI/DeepSeek/百炼) typically has two: one
+// adapter=openai + one adapter=claude.
+type ProviderEndpoint struct {
+	// ID identifies the endpoint within the provider. Optional: when empty it
+	// is derived from Adapter at CRUD time ("openai" → "openai", "claude" →
+	// "anthropic"). Must be unique within the provider; explicitly required
+	// when two endpoints share an adapter. Used as the breaker key component,
+	// the provider_endpoint audit column, and DispatchResult.Endpoint.
+	ID string `json:"id,omitempty"`
+	// Adapter selects the protocol adapter from the registry ("openai" or
+	// "claude"). Multiple brands share one adapter (ADR-0001).
+	Adapter string `json:"adapter"`
+	// BaseURL is the upstream API base URL for this endpoint.
+	BaseURL string `json:"base_url"`
+	// Timeouts optionally overrides Provider.Timeouts for this endpoint
+	// (nil = inherit the provider default).
+	Timeouts *ProviderTimeouts `json:"timeouts,omitempty"`
+}
+
+// PrimaryAdapter returns the adapter of the first endpoint (the provider's
+// primary protocol). Used for the providers.adapter promoted column and as the
+// fallback protocol when no ingress protocol is known. "" when no endpoints.
+func (p *Provider) PrimaryAdapter() string {
+	if len(p.Endpoints) == 0 {
+		return ""
+	}
+	return p.Endpoints[0].Adapter
+}
+
+// EndpointID returns the effective ID for an endpoint: the explicit ID, or a
+// derived one from the adapter when empty ("openai" → "openai", "claude" →
+// "anthropic", anything else → the adapter itself).
+func (e ProviderEndpoint) EndpointID() string {
+	if e.ID != "" {
+		return e.ID
+	}
+	if e.Adapter == "claude" {
+		return "anthropic"
+	}
+	return e.Adapter
+}
+
+// ValidateProvider checks a provider's structural invariants: at least one
+// endpoint, known adapters, non-empty base_urls, and unique (derived or
+// explicit) endpoint IDs. Used by the admin CRUD layer; returns the first
+// violation found.
+func ValidateProvider(p *Provider) error {
+	if len(p.Endpoints) == 0 {
+		return fmt.Errorf("provider %q: at least one endpoint is required", p.Name)
+	}
+	seen := make(map[string]bool, len(p.Endpoints))
+	for i, ep := range p.Endpoints {
+		if ep.Adapter != "openai" && ep.Adapter != "claude" {
+			return fmt.Errorf("provider %q endpoint[%d]: unknown adapter %q", p.Name, i, ep.Adapter)
+		}
+		if ep.BaseURL == "" {
+			return fmt.Errorf("provider %q endpoint[%d]: base_url is required", p.Name, i)
+		}
+		id := ep.EndpointID()
+		if seen[id] {
+			return fmt.Errorf("provider %q: duplicate endpoint id %q (give each endpoint sharing an adapter an explicit id)", p.Name, id)
+		}
+		seen[id] = true
+	}
+	return nil
 }
 
 // ProviderTimeouts holds the three distinct timeouts that must be configured

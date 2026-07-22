@@ -15,10 +15,11 @@ func TestDynamicSchema_JSONRoundTrip(t *testing.T) {
 	orig := Dynamic{
 		Version: "v42",
 		Providers: []Provider{{
-			Name:      "openai-prod",
-			Type:      "openai",
-			Adapter:   "openai",
-			BaseURL:   "https://api.openai.com/v1",
+			Name: "openai-prod",
+			Type: "openai",
+			Endpoints: []ProviderEndpoint{{
+				ID: "openai", Adapter: "openai", BaseURL: "https://api.openai.com/v1",
+			}},
 			APIKeyRef: "env://OPENAI_KEY",
 			Timeouts:  ProviderTimeouts{Connect: 2 * time.Second, FirstByte: 10 * time.Second, Overall: 5 * time.Minute},
 			Weight:    10,
