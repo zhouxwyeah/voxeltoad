@@ -293,8 +293,22 @@ func (s *streamReader) Recv() (adapter.Chunk, error) {
 			// passthrough modes).
 			return adapter.Chunk{}, io.EOF
 
+		case "content_block_start", "content_block_stop":
+			// Block-boundary events carry no unified semantics (the translating
+			// ingress codec synthesizes its own start/stop from DeltaContent /
+			// DeltaToolCalls), but passthrough mode (ADR-0047) MUST relay them
+			// verbatim or the client's Anthropic stream is missing the block
+			// boundaries — tool_use blocks become unparseable. Return a Chunk
+			// whose only payload is the reassembled Raw frame; the translating
+			// encoder ignores Raw-free semantic fields (empty DeltaContent etc.)
+			// while the passthrough encoder relays Raw as-is.
+			return adapter.Chunk{
+				Raw:         reassembleSSEFrame(ev.Event, ev.Data),
+				RawProtocol: "anthropic",
+			}, nil
+
 		default:
-			// message_start's content_block_start/stop, ping, etc. — ignore.
+			// ping, unknown event types, etc. — ignore.
 		}
 	}
 }

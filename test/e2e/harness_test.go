@@ -150,8 +150,16 @@ func NewHarness(t *testing.T, opts ...HarnessOption) *Harness {
 // AddProvider registers a provider pointing at the given upstream base URL.
 func (h *Harness) AddProvider(name, baseURL, apiKeyRef string) {
 	h.t.Helper()
+	h.AddProviderWithAdapter(name, baseURL, apiKeyRef, "openai")
+}
+
+// AddProviderWithAdapter is AddProvider with an explicit adapter name
+// ("openai" / "claude"). Used by protocol-aware-routing tests (ADR-0047) that
+// need a claude-adapter provider to exercise the Anthropic passthrough path.
+func (h *Harness) AddProviderWithAdapter(name, baseURL, apiKeyRef, adapter string) {
+	h.t.Helper()
 	h.adminPost("/api/v1/providers", config.Provider{
-		Name: name, Type: "openai", Adapter: "openai",
+		Name: name, Type: "openai", Adapter: adapter,
 		BaseURL: baseURL, APIKeyRef: apiKeyRef,
 		Timeouts: config.ProviderTimeouts{Connect: 2 * time.Second, FirstByte: 2 * time.Second, Overall: 5 * time.Second},
 	})

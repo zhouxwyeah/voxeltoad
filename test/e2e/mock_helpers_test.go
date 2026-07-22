@@ -131,3 +131,50 @@ func sseToolCallUpstream(toolChunkLines []string, promptTokens, completionTokens
 		emit("[DONE]")
 	})
 }
+
+// claudeJSONUpstream returns a mock Anthropic-protocol upstream that replies
+// with a fixed Messages API non-streaming response. Used by protocol-aware
+// passthrough e2e tests (ADR-0047): the gateway's claude adapter parses this
+// and preserves Raw for the anthropic ingress codec to relay verbatim.
+func claudeJSONUpstream(text string, inputTokens, outputTokens int, hits *int) *testsupport.MockUpstream {
+	body := fmt.Sprintf(
+		`{"id":"msg_x","type":"message","role":"assistant","model":"claude-opus-4-5","content":[{"type":"text","text":%q}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":%d,"output_tokens":%d}}`,
+		text, inputTokens, outputTokens,
+	)
+	return testsupport.NewMockUpstream(func(w http.ResponseWriter, _ *http.Request) {
+		if hits != nil {
+			*hits++
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("anthropic-version", "2023-06-01")
+		_, _ = w.Write([]byte(body))
+	})
+}
+
+// claudeSSEUpstream streams an Anthropic Messages SSE sequence: message_start,
+// content_block_start, content_block_delta(s), content_block_stop,
+// message_delta, message_stop. Each line in events is a complete SSE frame body
+// (the JSON after "data: "); the helper wraps each in event:/data: lines using
+// the type field inside the JSON.
+func claudeSSEUpstream(events []claudeEvent, hits *int) *testsupport.MockUpstream {
+	return testsupport.NewMockUpstream(func(w http.ResponseWriter, _ *http.Request) {
+		if hits != nil {
+			*hits++
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("anthropic-version", "2023-06-01")
+		fl, _ := w.(http.Flusher)
+		for _, ev := range events {
+			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, ev.Data)
+			if fl != nil {
+				fl.Flush()
+			}
+		}
+	})
+}
+
+// claudeEvent is one Anthropic SSE event for the claudeSSEUpstream mock.
+type claudeEvent struct {
+	Type string // SSE event: field (message_start / content_block_delta / …)
+	Data string // JSON payload
+}

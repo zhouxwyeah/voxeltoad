@@ -282,3 +282,62 @@ func TestParseStream_PromptCache(t *testing.T) {
 		t.Errorf("CachedPromptTokens = %d, want 50", lastUsage.CachedPromptTokens)
 	}
 }
+
+// TestParseStream_PassthroughFrames verifies that content_block_start and
+// content_block_stop events ALSO produce Raw-carrying chunks (not just
+// content_block_delta). Passthrough mode (ADR-0047) relays every upstream
+// frame verbatim to the client; if start/stop are swallowed by the default
+// branch, the client's Anthropic stream is missing the block boundaries and
+// tool_use blocks are unparseable — a protocol violation.
+//
+// This is a regression test for the bug where the default branch ignored
+// content_block_start/stop (safe for the translating path, which synthesizes
+// its own start/stop, but fatal for passthrough).
+func TestParseStream_PassthroughFrames(t *testing.T) {
+	a := newAdapter(t)
+	sr, err := a.ParseStream(strings.NewReader(string(readTestdata(t, "messages_stream.txt"))))
+	if err != nil {
+		t.Fatalf("ParseStream: %v", err)
+	}
+	defer func() { _ = sr.Close() }()
+
+	var frames []string
+	for {
+		c, err := sr.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Recv: %v", err)
+		}
+		if len(c.Raw) == 0 {
+			continue
+		}
+		// Extract the event type from the reassembled Raw frame.
+		raw := string(c.Raw)
+		if strings.HasPrefix(raw, "event: ") {
+			frames = append(frames, strings.SplitN(strings.TrimPrefix(raw, "event: "), "\n", 2)[0])
+		}
+	}
+
+	// Every upstream event must surface as a Raw frame for passthrough:
+	// message_start, content_block_start, 2× content_block_delta,
+	// content_block_stop, message_delta. (message_stop terminates via EOF, not
+	// a chunk.) Before the fix, content_block_start/stop were missing.
+	want := []string{
+		"message_start",
+		"content_block_start",
+		"content_block_delta",
+		"content_block_delta",
+		"content_block_stop",
+		"message_delta",
+	}
+	if len(frames) != len(want) {
+		t.Fatalf("Raw frame count = %d (%v), want %d (%v)", len(frames), frames, len(want), want)
+	}
+	for i, w := range want {
+		if frames[i] != w {
+			t.Errorf("frames[%d] = %q, want %q", i, frames[i], w)
+		}
+	}
+}
