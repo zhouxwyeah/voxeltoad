@@ -69,10 +69,14 @@ func (e *streamEncoder) EncodeChunk(c adapter.Chunk) ([]byte, error) {
 	// confirms it's Anthropic-shaped (failover to an openai provider would set
 	// RawProtocol="openai" — we must re-encode those).
 	if len(c.Raw) > 0 && c.RawProtocol == "anthropic" {
-		// Still track state so the encoder's Close/terminator behave
-		// consistently (messageStarted, finish, usage for billing).
+		// Track the same state the translating path tracks, so a mid-stream
+		// transition (failover landing on a non-claude provider, or a mixed
+		// Raw/non-Raw sequence) never hits emitMessageStart with an empty
+		// ID/model, and Close/terminator behave consistently.
 		if !e.messageStarted {
 			e.messageStarted = true
+			e.messageID = c.ID
+			e.model = c.Model
 		}
 		if c.FinishReason != "" && !e.finished {
 			e.finished = true

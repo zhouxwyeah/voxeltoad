@@ -70,8 +70,14 @@ export function RequestLogsTable({
         cell: ({ row }) => {
           const proto = row.original.ingress_protocol as string | undefined;
           if (!proto) return <span className="text-muted-foreground">—</span>;
-          // Passthrough/translated badge: compare ingress_protocol against the
-          // hit provider's adapter. anthropic↔claude or openai↔openai = passthrough.
+          // Protocol-match badge: the hit provider's adapter speaks the same
+          // wire protocol as the ingress. This is an APPROXIMATION of
+          // passthrough — protocol-aware routing prefers matched providers, so
+          // a match usually means passthrough, but a request the adapter can't
+          // fully express (e.g. Anthropic tool_use before the claude adapter
+          // supports tools, ADR-0032 §5) may still be translated even on a
+          // protocol match. The badge shows the routing fact, not the encoding
+          // fact (which the gateway doesn't record per-request).
           const provider = row.original.provider as string | undefined;
           const adapter = provider
             ? (providerAdapters as Record<string, string>)[provider]
@@ -87,6 +93,11 @@ export function RequestLogsTable({
               <span className="text-foreground">{proto}</span>
               {passthrough !== null && (
                 <span
+                  title={t(
+                    passthrough
+                      ? "badges.passthroughHint"
+                      : "badges.translatedHint",
+                  )}
                   className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
                     passthrough
                       ? "bg-success/10 text-success"

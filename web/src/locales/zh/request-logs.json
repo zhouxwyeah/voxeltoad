@@ -50,7 +50,9 @@
   },
   "badges": {
     "passthrough": "直通",
-    "translated": "转换"
+    "translated": "转换",
+    "passthroughHint": "命中 provider 的协议与入站协议匹配（协议感知路由通常直通；带 tools 的 Anthropic 请求在 claude adapter 完整支持 tools 前可能仍为转换）",
+    "translatedHint": "命中 provider 的协议与入站协议不同，经 unified 模型转换"
   },
   "actions": {
     "emptyState": "暂无请求日志，尝试调整时间范围或筛选条件。"

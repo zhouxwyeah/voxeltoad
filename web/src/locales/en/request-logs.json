@@ -50,7 +50,9 @@
   },
   "badges": {
     "passthrough": "Passthrough",
-    "translated": "Translated"
+    "translated": "Translated",
+    "passthroughHint": "The hit provider's protocol matches the ingress protocol (protocol-aware routing usually passes through; Anthropic requests with tools may still be translated until the claude adapter fully supports tools)",
+    "translatedHint": "The hit provider's protocol differs from the ingress protocol — translated via the unified model"
   },
   "actions": {
     "emptyState": "No request logs found. Try adjusting the time range or filters."
