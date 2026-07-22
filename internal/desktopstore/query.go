@@ -347,9 +347,31 @@ func toTraceDetail(s traceDetailScan) *TraceDetail {
 // encoding/json fail the entire TraceDetail marshal — surfacing in the desktop
 // trace viewer as "Unexpected end of JSON input". Map empty → "null" so the
 // API always emits a valid JSON document.
+//
+// A non-empty but invalid JSON value (truncated capture, older binary writing
+// raw bytes, encoding glitch) triggers the same failure path. Rather than
+// silently degrading to null and losing the evidence, wrap the raw text in a
+// sentinel object {"_invalid": <original>} so the desktop trace viewer can
+// surface the original payload for debugging while still emitting valid JSON.
+//
+// Only Messages / RequestRaw go through this helper. ResponseRaw / ErrorRaw
+// are declared as plain `string` on TraceDetail, so encoding/json emits them
+// as JSON string literals — arbitrary bytes (including invalid JSON text)
+// marshal cleanly without any normalization. The asymmetry is intentional:
+// it preserves the original payload for debugging in the trace viewer,
+// whereas Messages / RequestRaw must be parseable JSON for the structured
+// view to render, so unparseable content degrades to the sentinel there.
 func rawMessageOrNull(s string) json.RawMessage {
 	if s == "" {
 		return json.RawMessage("null")
+	}
+	if !json.Valid([]byte(s)) {
+		wrapped, err := json.Marshal(map[string]string{"_invalid": s})
+		if err != nil {
+			// json.Marshal on map[string]string cannot fail; defensive.
+			return json.RawMessage("null")
+		}
+		return json.RawMessage(wrapped)
 	}
 	return json.RawMessage(s)
 }
