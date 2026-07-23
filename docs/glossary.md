@@ -20,14 +20,21 @@ and refined through `grill-with-docs` sessions.
 
 ## Providers & adapters
 
-- **Provider** — a configured upstream endpoint instance (Name, brand Type,
-  Adapter, BaseURL, credential ref, timeouts, weight). `internal/config.Provider`.
+- **Provider** — a configured upstream LLM vendor instance (Name, brand Type,
+  Endpoints, shared credential ref, timeouts, weight). A provider can carry
+  multiple endpoints (ADR-0049) — e.g. a dual-protocol vendor with both an
+  OpenAI-compatible and an Anthropic-compatible endpoint.
+  `internal/config.Provider`.
+- **Endpoint (provider endpoint)** — one (Adapter, BaseURL) pair under a
+  provider (ADR-0049). The runtime selects the endpoint whose adapter matches
+  the ingress protocol. Identified by `EndpointKey{Provider, Endpoint}` for
+  breaker/audit purposes. `internal/config.ProviderEndpoint`.
 - **Type (provider brand)** — descriptive brand label (`openai`, `tencent`,
   `zhipu`, `anthropic`). Does **not** select behavior; observability-facing.
   (See ADR-0001.)
-- **Adapter (field)** — the protocol adapter key used to look the adapter up in
-  the registry: `openai` (shared by openai/tencent/zhipu/compatible) or
-  `claude`. (See ADR-0001.)
+- **Adapter (field)** — the protocol adapter key on a ProviderEndpoint:
+  `openai` (shared by openai/tencent/zhipu/compatible) or `claude`.
+  (See ADR-0001/0049.)
 - **Adapter (component)** — a pure translator between the unified model and a
   provider's native protocol. Values-in/values-out: `BuildRequest →
   UpstreamRequest`, `ParseResponse([]byte)`, `ParseStream(io.Reader)`. Performs
@@ -35,6 +42,14 @@ and refined through `grill-with-docs` sessions.
 - **UpstreamRequest** — transport-neutral description of the request to send
   upstream (Method/URL/Header/Body). Produced by an Adapter; the proxy turns it
   into an `*http.Request`. `internal/adapter.UpstreamRequest`.
+- **Ingress protocol** — the wire protocol clients use to drive the gateway
+  (`openai` for `/v1/chat/completions`, `anthropic` for `/v1/messages`). The
+  ingress protocol is distinct from upstream Adapter: an Anthropic-ingress
+  request can drive an OpenAI-adapter upstream (and vice versa).
+- **Ingress codec** — a pure translator between a client wire format and the
+  unified model on the inbound side (`DecodeRequest`/`EncodeResponse`/
+  `NewStreamEncoder`/`EncodeError`); the inbound dual of Adapter. Values-in/
+  values-out: no HTTP transport. `internal/ingress.Codec`. (See ADR-0045.)
 
 ## Transport & streaming
 

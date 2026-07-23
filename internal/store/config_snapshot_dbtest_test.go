@@ -57,7 +57,7 @@ func TestSnapshotRepo_SaveAndGet(t *testing.T) {
 	snap, repo := freshSnapshotRepo(t)
 
 	if err := repo.UpsertProvider(ctx, config.Provider{
-		Name: "p", Type: "openai", Adapter: "openai", BaseURL: "https://api.example.com",
+		Name: "p", Type: "openai", Endpoints: []config.ProviderEndpoint{{Adapter: "openai", BaseURL: "https://api.example.com"}},
 	}); err != nil {
 		t.Fatalf("UpsertProvider: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestSnapshotRepo_SaveIdempotent(t *testing.T) {
 	ctx := context.Background()
 	snap, repo := freshSnapshotRepo(t)
 
-	_ = repo.UpsertProvider(ctx, config.Provider{Name: "a", Type: "openai", Adapter: "openai"})
+	_ = repo.UpsertProvider(ctx, config.Provider{Name: "a", Type: "openai", Endpoints: []config.ProviderEndpoint{{Adapter: "openai"}}})
 	d := waitSnapshot(t, snap, 1)
 
 	// Save again with same version.
@@ -119,9 +119,9 @@ func TestSnapshotRepo_ListDescending(t *testing.T) {
 	ctx := context.Background()
 	snap, repo := freshSnapshotRepo(t)
 
-	_ = repo.UpsertProvider(ctx, config.Provider{Name: "a", Type: "openai", Adapter: "openai"})
+	_ = repo.UpsertProvider(ctx, config.Provider{Name: "a", Type: "openai", Endpoints: []config.ProviderEndpoint{{Adapter: "openai"}}})
 	waitSnapshot(t, snap, 1)
-	_ = repo.UpsertProvider(ctx, config.Provider{Name: "b", Type: "openai", Adapter: "openai"})
+	_ = repo.UpsertProvider(ctx, config.Provider{Name: "b", Type: "openai", Endpoints: []config.ProviderEndpoint{{Adapter: "openai"}}})
 	waitSnapshot(t, snap, 2)
 
 	rows, _, err := snap.ListSnapshots(ctx, "", 10)
@@ -142,7 +142,7 @@ func TestSnapshotRepo_Diff(t *testing.T) {
 	ctx := context.Background()
 	snap, repo := freshSnapshotRepo(t)
 
-	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p1", Type: "openai", Adapter: "openai"})
+	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p1", Type: "openai", Endpoints: []config.ProviderEndpoint{{Adapter: "openai"}}})
 	waitSnapshot(t, snap, 1)
 	_ = repo.DeleteProvider(ctx, "p1")
 	waitSnapshot(t, snap, 2)
@@ -165,10 +165,10 @@ func TestSnapshotRepo_Rollback(t *testing.T) {
 	snap, repo := freshSnapshotRepo(t)
 
 	// v1: create p1
-	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p1", Type: "openai", Adapter: "openai"})
+	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p1", Type: "openai", Endpoints: []config.ProviderEndpoint{{Adapter: "openai"}}})
 	waitSnapshot(t, snap, 1)
 	// v2: create p2
-	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p2", Type: "claude", Adapter: "claude"})
+	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p2", Type: "claude", Endpoints: []config.ProviderEndpoint{{Adapter: "claude"}}})
 	waitSnapshot(t, snap, 2)
 
 	// Rollback to v1 (should have only p1).
@@ -195,7 +195,7 @@ func TestSnapshotRepo_RollbackWithAllResources(t *testing.T) {
 	snap, repo := freshSnapshotRepo(t)
 
 	// v1: create provider + model + route + plugin
-	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p", Type: "openai", Adapter: "openai"})
+	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p", Type: "openai", Endpoints: []config.ProviderEndpoint{{Adapter: "openai"}}})
 	_ = repo.UpsertModel(ctx, config.Model{
 		Alias: "chat", Upstreams: []config.ModelUpstream{{Provider: "p", UpstreamModel: "gpt-4o"}},
 	})
@@ -290,14 +290,14 @@ func TestSnapshotRepo_Diff_AllResources(t *testing.T) {
 	snap, repo := freshSnapshotRepo(t)
 
 	// v1: baseline with one of each
-	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p1", Type: "openai", Adapter: "openai"})
+	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p1", Type: "openai", Endpoints: []config.ProviderEndpoint{{Adapter: "openai"}}})
 	_ = repo.UpsertModel(ctx, config.Model{
 		Alias: "m1", Upstreams: []config.ModelUpstream{{Provider: "p1", UpstreamModel: "gpt-4o"}},
 	})
 	waitSnapshot(t, snap, 2)
 
 	// v3: add p2 and m2, create route, add plugin
-	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p2", Type: "claude", Adapter: "claude"})
+	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p2", Type: "claude", Endpoints: []config.ProviderEndpoint{{Adapter: "claude"}}})
 	_ = repo.UpsertModel(ctx, config.Model{
 		Alias: "m2", Upstreams: []config.ModelUpstream{{Provider: "p1", UpstreamModel: "gpt-3.5"}},
 	})

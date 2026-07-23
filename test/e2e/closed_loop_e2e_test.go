@@ -64,9 +64,10 @@ func TestClosedLoop_ChatCompletion(t *testing.T) {
 
 	// Seed config through the admin REST API (the real management path).
 	adminPost(t, adminSrv.URL, adminToken, "/api/v1/providers", config.Provider{
-		Name: "mock-openai", Type: "openai", Adapter: "openai",
-		BaseURL: mock.URL(), APIKeyRef: "plain://sk-upstream",
-		Timeouts: config.ProviderTimeouts{Connect: 2 * time.Second, FirstByte: 2 * time.Second, Overall: 5 * time.Second},
+		Name: "mock-openai", Type: "openai",
+		Endpoints: []config.ProviderEndpoint{{ID: "openai", Adapter: "openai", BaseURL: mock.URL()}},
+		APIKeyRef: "plain://sk-upstream",
+		Timeouts:  config.ProviderTimeouts{Connect: 2 * time.Second, FirstByte: 2 * time.Second, Overall: 5 * time.Second},
 	})
 	adminPost(t, adminSrv.URL, adminToken, "/api/v1/models", config.Model{
 		Alias: "chat",

@@ -1657,6 +1657,10 @@ export interface paths {
                     session_id?: string;
                     /** @description Filter to a single request by its gateway-assigned correlation id (exact lookup, debug/trace drill-down). */
                     request_id?: string;
+                    /** @description Filter by detected calling agent (claude-code/codex/codebuddy/workbuddy/opencode). */
+                    agent_type?: string;
+                    /** @description Filter by client wire protocol that served the request (ADR-0045/0046). */
+                    ingress_protocol?: "openai" | "anthropic";
                     /** @description Set to "csv" to export as CSV instead of JSON (2000-row cap, mirrors usage/audit CSV endpoints per ADR-0028). */
                     format?: "csv";
                 };
@@ -2669,24 +2673,33 @@ export interface components {
         };
         Provider: {
             name: string;
-            /** @description Descriptive brand (openai/tencent/zhipu/anthropic); does not select adapter. */
+            /** @description Descriptive brand (openai/tencent/zhipu/anthropic/deepseek); does not select adapter. */
             type?: string;
-            /** @description Protocol adapter from the registry (openai|claude). */
-            adapter?: string;
-            base_url?: string;
-            /** @description Credential ref: env://VAR | db://provider/<name> | plain://literal | bare literal. Masked in responses (env://***). See ADR-0031. */
+            /** @description Non-empty list of (adapter, base_url) pairs the gateway can reach. The runtime picks the endpoint whose adapter matches the ingress protocol (ADR-0049). The first endpoint is the "primary" (used for the providers.adapter column and as protocol-unknown fallback). */
+            endpoints?: components["schemas"]["ProviderEndpoint"][];
+            /** @description SHARED credential ref for all endpoints: env://VAR | db://provider/<name> | plain://literal | bare literal. Masked in responses (env://***). See ADR-0031. */
             api_key_ref?: string;
-            /** @description Write-only plaintext upstream key. When supplied, encrypted and stored in provider_credentials; api_key_ref is set to db://provider/<name>. Never returned. */
+            /** @description Write-only plaintext upstream key shared by all endpoints. When supplied, encrypted and stored in provider_credentials; api_key_ref is set to db://provider/<name>. Never returned. */
             api_key?: string;
+            /** @description Provider-level default timeouts; each endpoint may override. */
             timeouts?: components["schemas"]["ProviderTimeouts"];
             weight?: number;
         };
-        /** @description Partial provider update. All fields optional; omitted fields are left unchanged (not cleared). At least one field should be provided. */
+        /** @description One upstream protocol endpoint under a provider. A dual-protocol vendor (OpenAI/DeepSeek/Aliyun Bailian) typically has two: adapter=openai and adapter=claude. */
+        ProviderEndpoint: {
+            /** @description Optional endpoint slug. When empty, derived from adapter: openai→"openai", claude→"anthropic". Must be unique within the provider; explicitly required when two endpoints share an adapter. Used as breaker key component and audit provider_endpoint column. */
+            id?: string;
+            /** @description Protocol adapter from the registry (openai|claude). ADR-0001. */
+            adapter: string;
+            base_url: string;
+            /** @description Optional override of the provider-level default. Omitted = inherit. */
+            timeouts?: components["schemas"]["ProviderTimeouts"];
+        };
+        /** @description Partial provider update. All fields optional; omitted fields are left unchanged (not cleared). At least one field should be provided. `endpoints` is a whole-list replacement (not a merge). */
         ProviderPatch: {
             type?: string;
-            /** @description Protocol adapter from the registry (openai|claude). */
-            adapter?: string;
-            base_url?: string;
+            /** @description Whole-list replacement of the provider's endpoints. */
+            endpoints?: components["schemas"]["ProviderEndpoint"][];
             api_key_ref?: string;
             timeouts?: components["schemas"]["ProviderTimeouts"];
             weight?: number;
@@ -3061,6 +3074,11 @@ export interface components {
             session_source?: string;
             /** @description Detected calling agent (claude-code/codex/codebuddy/workbuddy/opencode); empty when unrecognized. */
             agent_type?: string;
+            /**
+             * @description Client wire protocol that served the request (ADR-0045/0046). Empty for pre-migration rows.
+             * @enum {string}
+             */
+            ingress_protocol?: "" | "openai" | "anthropic";
             /** Format: date-time */
             created_at?: string;
         };
@@ -3187,6 +3205,11 @@ export interface components {
             stream?: boolean;
             /** @description Detected calling agent (claude-code/codex/codebuddy/workbuddy/opencode); empty when unrecognized. */
             agent_type?: string;
+            /**
+             * @description Client wire protocol that served the request (ADR-0045/0046). Empty for pre-migration rows.
+             * @enum {string}
+             */
+            ingress_protocol?: "" | "openai" | "anthropic";
             /** @description Upstream HTTP status (0 if unknown). */
             status_code?: number;
             /** @description Completion finish/stop reason. */
@@ -3221,6 +3244,15 @@ export interface components {
         /** @description Gateway-wide behavior parameters, hot-reloadable via the config snapshot. New parameters only need a field here (JSONB-backed, no migration). */
         GatewaySettings: {
             trace?: components["schemas"]["TraceSettings"];
+            ingress?: components["schemas"]["IngressSettings"];
+        };
+        /** @description Per-ingress-protocol enablement, hot-reloadable (ADR-0048). The zero value (an empty/absent ingress block) means all protocols enabled — the gateway's default. An operator opts out of a protocol by setting its Disabled flag to true. */
+        IngressSettings: {
+            /**
+             * @description When true, the gateway rejects /v1/messages requests with a 404 in the Anthropic error envelope. Zero value (false) = enabled.
+             * @default false
+             */
+            anthropic_disabled: boolean;
         };
         /** @description Hot-reloadable trace-capture parameters (ADR-0039). */
         TraceSettings: {

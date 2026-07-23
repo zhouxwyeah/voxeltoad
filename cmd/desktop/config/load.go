@@ -26,13 +26,19 @@ import (
 // json tags, Go would marshal Go-style camelCase names (e.g. "APIKeyRef") that
 // the enterprise structs do not recognize, leaving every field empty.
 type yamlProvider struct {
-	Name      string               `yaml:"name" json:"name"`
-	Type      string               `yaml:"type" json:"type"`
-	Adapter   string               `yaml:"adapter" json:"adapter"`
-	BaseURL   string               `yaml:"base_url" json:"base_url"`
-	APIKeyRef string               `yaml:"api_key_ref" json:"api_key_ref"`
-	Weight    int                  `yaml:"weight" json:"weight"`
-	Timeouts  yamlProviderTimeouts `yaml:"timeouts" json:"timeouts"`
+	Name      string                 `yaml:"name" json:"name"`
+	Type      string                 `yaml:"type" json:"type"`
+	Endpoints []yamlProviderEndpoint `yaml:"endpoints" json:"endpoints"`
+	APIKeyRef string                 `yaml:"api_key_ref" json:"api_key_ref"`
+	Weight    int                    `yaml:"weight" json:"weight"`
+	Timeouts  yamlProviderTimeouts   `yaml:"timeouts" json:"timeouts"`
+}
+
+type yamlProviderEndpoint struct {
+	ID       string              `yaml:"id,omitempty" json:"id,omitempty"`
+	Adapter  string              `yaml:"adapter" json:"adapter"`
+	BaseURL  string              `yaml:"base_url" json:"base_url"`
+	Timeouts *yamlProviderTimeouts `yaml:"timeouts,omitempty" json:"timeouts,omitempty"`
 }
 
 type yamlProviderTimeouts struct {

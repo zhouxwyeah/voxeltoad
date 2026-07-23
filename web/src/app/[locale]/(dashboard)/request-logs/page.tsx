@@ -30,6 +30,8 @@ export default async function RequestLogsPage({
     stream?: string;
     fallback?: string;
     session_id?: string;
+    agent_type?: string;
+    ingress_protocol?: string;
   }>;
 }) {
   const {
@@ -47,6 +49,8 @@ export default async function RequestLogsPage({
     stream,
     fallback,
     session_id,
+    agent_type,
+    ingress_protocol,
   } = await searchParams;
   const session = await getSession();
   const isSuperAdmin = session.role === "super-admin";
@@ -63,6 +67,11 @@ export default async function RequestLogsPage({
   let pageSize = pageSizeParam ? Number(pageSizeParam) : 20;
   if (!Number.isFinite(page) || page < 1) page = 1;
   if (!Number.isFinite(pageSize) || pageSize < 1) pageSize = 20;
+
+  // Providers for the passthrough/translated badge (client-side join on
+  // provider name → adapter, compared against the row's ingress_protocol).
+  // Only super-admins can list providers; tenant-admins see no badge.
+  let providerAdapters: Record<string, string> = {};
   try {
     const client = await serverAdminClient();
     const query: Record<string, string | number | boolean> = {
@@ -81,6 +90,8 @@ export default async function RequestLogsPage({
     if (stream) query.stream = stream;
     if (fallback) query.fallback = fallback;
     if (session_id) query.session_id = session_id;
+    if (agent_type) query.agent_type = agent_type;
+    if (ingress_protocol) query.ingress_protocol = ingress_protocol;
     const res = unwrap(
       await client.GET("/api/v1/request-logs", { params: { query } }),
     ) as Record<string, unknown>;
@@ -88,6 +99,16 @@ export default async function RequestLogsPage({
     total = (res as { total?: number }).total ?? 0;
     page = (res as { page?: number }).page ?? page;
     pageSize = (res as { page_size?: number }).page_size ?? pageSize;
+
+    if (isSuperAdmin) {
+      const pRes = unwrap(
+        await client.GET("/api/v1/providers", { params: { query: { limit: 1000 } } }),
+      ) as Record<string, unknown>;
+      const providers = (pRes.data ?? []) as Array<Record<string, unknown>>;
+      providerAdapters = Object.fromEntries(
+        providers.map((p) => [p.name as string, p.adapter as string]),
+      );
+    }
   } catch (err) {
     await onAuthExpired(err);
   }
@@ -100,6 +121,7 @@ export default async function RequestLogsPage({
         page={page}
         pageSize={pageSize}
         isSuperAdmin={isSuperAdmin}
+        providerAdapters={providerAdapters}
       />
     </div>
   );

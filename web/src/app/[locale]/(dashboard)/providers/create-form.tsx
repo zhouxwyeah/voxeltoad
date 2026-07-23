@@ -26,13 +26,18 @@ const DB_PROVIDER_REF_PREFIX = "db://provider/";
 /** Credential input modes — mutually exclusive by construction (single Select). */
 type CredMode = "ref" | "key";
 
+/** One row of the endpoints dynamic array. */
+type EndpointRow = { id: string; adapter: string; base_url: string };
+
 /**
  * Provider form. Used inside a Modal for both create and edit (POST upsert
  * with defaultValue pre-fill).
  *
- * adapter is a two-value select (openai|claude).  type is a brand select
- * with a "Custom…" option that reveals a free-text input; submission uses a
- * hidden <input name="type"> so the server action always reads formData.get("type").
+ * Endpoints is a dynamic array of (adapter, base_url) pairs (ADR-0049). type is
+ * a brand select with a "Custom…" option. Submission uses parallel hidden
+ * inputs named endpoint_adapter / endpoint_base_url / endpoint_id so the server
+ * action reads them via FormData.getAll (same DOM-order zip pattern as the
+ * upstream-row form).
  */
 export function ProviderForm({
   defaultValues,
@@ -66,14 +71,25 @@ export function ProviderForm({
   const typeValue = selectedType !== "" ? selectedType : customType;
   const [success, setSuccess] = useState(false);
 
-  // ----- adapter: two-value select -----
-  const dvAdapter = defaultValues?.adapter ? String(defaultValues.adapter) : "";
-  const [adapter, setAdapter] = useState(dvAdapter);
+  // ----- endpoints: dynamic array -----
+  const dvEndpoints: EndpointRow[] = defaultValues?.endpoints
+    ? (defaultValues.endpoints as EndpointRow[]).map((ep) => ({
+        id: ep.id ?? "",
+        adapter: ep.adapter ?? "",
+        base_url: ep.base_url ?? "",
+      }))
+    : [];
+  const initialEndpoints = dvEndpoints.length > 0 ? dvEndpoints : [{ id: "", adapter: "openai", base_url: "" }];
+  const [endpoints, setEndpoints] = useState<EndpointRow[]>(initialEndpoints);
 
-  // ----- credential: ref vs plaintext, mutually exclusive (single Select).
-  // On edit, if the stored ref points at the encrypted credential store
-  // (db://provider/<name>), default to "key" mode since that provider's
-  // credential is gateway-managed; otherwise default to "ref". -----
+  function addEndpoint() {
+    setEndpoints((eps) => [...eps, { id: "", adapter: "openai", base_url: "" }]);
+  }
+  function removeEndpoint(index: number) {
+    setEndpoints((eps) => eps.filter((_, i) => i !== index));
+  }
+
+  // ----- credential: ref vs plaintext, mutually exclusive (single Select). -----
   const dvApiKeyRef = defaultValues?.api_key_ref ? String(defaultValues.api_key_ref) : "";
   const [credMode, setCredMode] = useState<CredMode>(
     dvApiKeyRef.startsWith(DB_PROVIDER_REF_PREFIX) ? "key" : "ref",
@@ -86,15 +102,17 @@ export function ProviderForm({
   async function runFormTest() {
     if (!formRef.current) return;
     const fd = new FormData(formRef.current);
-    const adapterValue = String(fd.get("adapter") ?? "").trim();
-    const baseUrl = String(fd.get("base_url") ?? "").trim();
+    // Test against the first endpoint (the "primary"). A per-endpoint test is
+    // a follow-up; the primary is the operator-facing "does this vendor respond".
+    const adapters = fd.getAll("endpoint_adapter");
+    const baseUrls = fd.getAll("endpoint_base_url");
+    const adapterValue = String(adapters[0] ?? "").trim();
+    const baseUrl = String(baseUrls[0] ?? "").trim();
     if (!adapterValue || !baseUrl) {
       setTestOutcome({ ok: false, error: t("test.missingFields") });
       return;
     }
     const spec: ProviderTestSpec = { adapter: adapterValue, baseUrl };
-    // On edit, send the name so the backend can fall back to the stored
-    // credential when no new credential material is provided.
     if (isEdit) {
       spec.name = String(fd.get("name") ?? "").trim() || undefined;
     }
@@ -103,8 +121,6 @@ export function ProviderForm({
       if (key) spec.apiKey = key;
     } else {
       const ref = String(fd.get("api_key_ref") ?? "").trim();
-      // Masked placeholders ("env://***", "***") are not real refs — the
-      // backend ignores them and falls back to the stored credential.
       if (ref && ref !== "***" && !ref.endsWith("://***")) {
         spec.apiKeyRef = ref;
       }
@@ -118,11 +134,10 @@ export function ProviderForm({
   useEffect(() => {
     if (state?.ok && !success) {
       formRef.current?.reset();
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedType("");
       setCustomType("");
       setShowCustom(false);
-      setAdapter("");
+      setEndpoints([{ id: "", adapter: "openai", base_url: "" }]);
       setCredMode("ref");
       setSuccess(true);
       toast.success(t(isEdit ? "form.successUpdated" : "form.successCreated"));
@@ -187,38 +202,77 @@ export function ProviderForm({
       )}
       <input type="hidden" name="type" value={typeValue} />
 
-      {/* Adapter: two-value select */}
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium text-foreground">
-          {t("form.adapter.label")}
+      {/* Endpoints: dynamic array (ADR-0049) */}
+      <div className="flex flex-col gap-2">
+        <span className="font-medium text-foreground text-sm">
+          {t("form.endpoints.label")}
         </span>
-        <Select
-          name="adapter"
-          value={adapter}
-          onValueChange={setAdapter}
-          placeholder={t("form.adapter.placeholder")}
-          options={[
-            { value: "openai", label: "openai" },
-            { value: "claude", label: "claude" },
-          ]}
-          className="h-9"
-        />
-      </label>
+        <p className="text-xs text-muted-foreground -mt-1">
+          {t("form.endpoints.help")}
+        </p>
+        {endpoints.map((ep, i) => (
+          <div key={i} className="flex items-start gap-2 rounded-md border border-border p-2">
+            {/* endpoint_id: optional slug input */}
+            <input
+              type="hidden"
+              name="endpoint_id"
+              value={ep.id}
+            />
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="text-muted-foreground">{t("form.endpoints.adapter")}</span>
+              <Select
+                name="endpoint_adapter"
+                value={ep.adapter}
+                onValueChange={(v) => {
+                  setEndpoints((eps) => eps.map((e, j) => j === i ? { ...e, adapter: v } : e));
+                }}
+                options={[
+                  { value: "openai", label: "openai" },
+                  { value: "claude", label: "claude" },
+                ]}
+                className="h-8 w-28"
+              />
+            </label>
+            <label className="flex flex-1 flex-col gap-1 text-xs">
+              <span className="text-muted-foreground">{t("form.endpoints.baseUrl")}</span>
+              <input
+                name="endpoint_base_url"
+                type="url"
+                required
+                value={ep.base_url}
+                onChange={(e) => {
+                  setEndpoints((eps) => eps.map((ee, j) => j === i ? { ...ee, base_url: e.target.value } : ee));
+                }}
+                placeholder={t("form.endpoints.baseUrlPlaceholder")}
+                className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground"
+              />
+            </label>
+            {endpoints.length > 1 && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="mt-5 h-8 px-2 text-destructive"
+                onClick={() => removeEndpoint(i)}
+              >
+                ✕
+              </Button>
+            )}
+          </div>
+        ))}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={addEndpoint}
+          className="w-fit"
+        >
+          + {t("form.endpoints.add")}
+        </Button>
+      </div>
 
-      <Input
-        name="base_url"
-        type="url"
-        required
-        label={t("form.baseUrl.label")}
-        placeholder={t("form.baseUrl.placeholder")}
-        defaultValue={defaultValues?.base_url ? String(defaultValues.base_url) : ""}
-      />
       {/* Credential: a single Select chooses between two mutually exclusive
-          inputs, so the two never submit together. "Reference" sends
-          api_key_ref (env://…); "Plaintext" sends api_key, which the gateway
-          encrypts and stores, rewriting the ref to db://provider/<name>
-          (ADR-0030). On edit, plaintext is write-only — blank means "leave
-          unchanged". */}
+          inputs, so the two never submit together. */}
       <label className="flex flex-col gap-1 text-sm">
         <span className="font-medium text-foreground">
           {t("form.credMode.label")}

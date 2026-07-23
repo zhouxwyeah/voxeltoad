@@ -73,7 +73,15 @@ func mountProviderConnTest(g *gin.RouterGroup, repo *store.ConfigRepo, credServi
 			c.JSON(http.StatusOK, providerConnResult{OK: false, Error: "resolve credential: " + err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, probeProvider(c.Request.Context(), p.Adapter, p.BaseURL, key))
+		// Test connectivity against the provider's primary endpoint. In the
+		// multi-endpoint model (ADR-0049) a per-endpoint test is a follow-up;
+		// the primary is the operator-facing "does this vendor respond" signal.
+		if len(p.Endpoints) == 0 {
+			c.JSON(http.StatusOK, providerConnResult{OK: false, Error: "provider has no endpoints"})
+			return
+		}
+		primary := p.Endpoints[0]
+		c.JSON(http.StatusOK, probeProvider(c.Request.Context(), primary.Adapter, primary.BaseURL, key))
 	})
 
 	g.POST("/provider-tests", func(c *gin.Context) {

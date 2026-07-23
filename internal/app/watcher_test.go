@@ -16,9 +16,10 @@ func dispDyn(version, upstreamURL string) *config.Dynamic {
 	return &config.Dynamic{
 		Version: version,
 		Providers: []config.Provider{{
-			Name: "p1", Type: "openai", Adapter: "openai",
-			BaseURL: upstreamURL, APIKeyRef: "plain://k",
-			Timeouts: config.ProviderTimeouts{Connect: 2 * time.Second, FirstByte: 2 * time.Second, Overall: 5 * time.Second},
+			Name: "p1", Type: "openai",
+			Endpoints: []config.ProviderEndpoint{{ID: "openai", Adapter: "openai", BaseURL: upstreamURL}},
+			APIKeyRef: "plain://k",
+			Timeouts:  config.ProviderTimeouts{Connect: 2 * time.Second, FirstByte: 2 * time.Second, Overall: 5 * time.Second},
 		}},
 		Models: []config.Model{{Alias: "chat", Upstreams: []config.ModelUpstream{{Provider: "p1", UpstreamModel: "gpt-4o"}}}},
 		Routes: []config.Route{{ModelAlias: "chat", Providers: []config.RouteProvider{{Name: "p1"}}, Strategy: "priority"}},

@@ -138,7 +138,7 @@ func (r *ConfigSnapshotRepo) Rollback(ctx context.Context, version int64) error 
 			if err := tx.Exec(
 				`INSERT INTO providers (name, type, adapter, enabled, spec, updated_at)
 				 VALUES (?, ?, ?, true, ?, now())`,
-				p.Name, p.Type, p.Adapter, spec,
+				p.Name, p.Type, p.PrimaryAdapter(), spec,
 			).Error; err != nil {
 				return err
 			}

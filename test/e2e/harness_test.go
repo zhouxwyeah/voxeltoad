@@ -150,10 +150,32 @@ func NewHarness(t *testing.T, opts ...HarnessOption) *Harness {
 // AddProvider registers a provider pointing at the given upstream base URL.
 func (h *Harness) AddProvider(name, baseURL, apiKeyRef string) {
 	h.t.Helper()
+	h.AddProviderWithAdapter(name, baseURL, apiKeyRef, "openai")
+}
+
+// AddProviderWithAdapter is AddProvider with an explicit adapter name
+// ("openai" / "claude"). Used by protocol-aware-routing tests (ADR-0047) that
+// need a claude-adapter provider to exercise the Anthropic passthrough path.
+func (h *Harness) AddProviderWithAdapter(name, baseURL, apiKeyRef, adapter string) {
+	h.t.Helper()
 	h.adminPost("/api/v1/providers", config.Provider{
-		Name: name, Type: "openai", Adapter: "openai",
-		BaseURL: baseURL, APIKeyRef: apiKeyRef,
-		Timeouts: config.ProviderTimeouts{Connect: 2 * time.Second, FirstByte: 2 * time.Second, Overall: 5 * time.Second},
+		Name: name, Type: "openai",
+		Endpoints: []config.ProviderEndpoint{{ID: adapter, Adapter: adapter, BaseURL: baseURL}},
+		APIKeyRef: apiKeyRef,
+		Timeouts:  config.ProviderTimeouts{Connect: 2 * time.Second, FirstByte: 2 * time.Second, Overall: 5 * time.Second},
+	})
+}
+
+// AddMultiEndpointProvider registers a provider with multiple endpoints
+// (ADR-0049), one per (adapter, baseURL) pair. Used by protocol-aware routing
+// e2e tests that exercise the dual-protocol-vendor scenario.
+func (h *Harness) AddMultiEndpointProvider(name, apiKeyRef string, endpoints ...config.ProviderEndpoint) {
+	h.t.Helper()
+	h.adminPost("/api/v1/providers", config.Provider{
+		Name: name, Type: "openai",
+		Endpoints: endpoints,
+		APIKeyRef: apiKeyRef,
+		Timeouts:  config.ProviderTimeouts{Connect: 2 * time.Second, FirstByte: 2 * time.Second, Overall: 5 * time.Second},
 	})
 }
 

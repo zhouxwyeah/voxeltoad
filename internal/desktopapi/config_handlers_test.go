@@ -40,8 +40,10 @@ func newConfigTestServer(t *testing.T) (*httptest.Server, string) {
 providers:
   - name: p1
     type: openai
-    adapter: openai
-    base_url: http://127.0.0.1:1
+    endpoints:
+      - id: openai
+        adapter: openai
+        base_url: http://127.0.0.1:1
     api_key_ref: "plain://k1"
     timeouts: {connect: 1s, first_byte: 1s, overall: 1s}
     weight: 1
@@ -132,10 +134,10 @@ func TestProviders_CRUD(t *testing.T) {
 
 	// Create p2.
 	code, b = reqBody(t, "POST", ts.URL, "/api/v1/providers", map[string]any{
-		"name": "p2", "type": "openai", "adapter": "openai",
-		"base_url": "http://127.0.0.1:2", "api_key_ref": "plain://k2", "weight": 1,
-		// time.Duration over JSON = nanoseconds as integer (1s = 1e9).
-		"timeouts": map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
+		"name": "p2", "type": "openai",
+		"endpoints": []map[string]any{{"id": "openai", "adapter": "openai", "base_url": "http://127.0.0.1:2"}},
+		"api_key_ref": "plain://k2", "weight": 1,
+		"timeouts":    map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
 	})
 	if code != 201 {
 		t.Fatalf("create p2: %d %s", code, b)
@@ -149,8 +151,9 @@ func TestProviders_CRUD(t *testing.T) {
 
 	// Update p2's weight.
 	code, b = reqBody(t, "PUT", ts.URL, "/api/v1/providers/p2", map[string]any{
-		"type": "openai", "adapter": "openai",
-		"base_url": "http://127.0.0.1:2", "api_key_ref": "plain://k2", "weight": 99,
+		"type": "openai",
+		"endpoints": []map[string]any{{"id": "openai", "adapter": "openai", "base_url": "http://127.0.0.1:2"}},
+		"api_key_ref": "plain://k2", "weight": 99,
 		"timeouts": map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
 	})
 	if code != 200 {
@@ -202,9 +205,10 @@ func TestConfigWrite_PreservesGatewaySection(t *testing.T) {
 	ts, cfgPath := newConfigTestServer(t)
 
 	code, b := reqBody(t, "POST", ts.URL, "/api/v1/providers", map[string]any{
-		"name": "p2", "type": "openai", "adapter": "openai",
-		"base_url": "http://127.0.0.1:2", "api_key_ref": "plain://k2", "weight": 1,
-		"timeouts": map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
+		"name": "p2", "type": "openai",
+		"endpoints": []map[string]any{{"id": "openai", "adapter": "openai", "base_url": "http://127.0.0.1:2"}},
+		"api_key_ref": "plain://k2", "weight": 1,
+		"timeouts":    map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
 	})
 	if code != 201 {
 		t.Fatalf("create p2: %d %s", code, b)
@@ -225,8 +229,10 @@ func TestConfigWrite_PreservesGatewaySection(t *testing.T) {
 func TestProviders_CreateDuplicate(t *testing.T) {
 	ts, _ := newConfigTestServer(t)
 	code, _ := reqBody(t, "POST", ts.URL, "/api/v1/providers", map[string]any{
-		"name": "p1", "type": "x", "adapter": "openai", "base_url": "u", "api_key_ref": "plain://k", "weight": 1,
-		"timeouts": map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
+		"name": "p1", "type": "x",
+		"endpoints": []map[string]any{{"id": "openai", "adapter": "openai", "base_url": "u"}},
+		"api_key_ref": "plain://k", "weight": 1,
+		"timeouts":    map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
 	})
 	if code != 409 {
 		t.Errorf("duplicate create: %d, want 409", code)
@@ -354,8 +360,9 @@ func TestConfig_HotReloadNewProviderUsable(t *testing.T) {
 
 	// Add a new provider + model + route via CRUD.
 	code, b := reqBody(t, "POST", ts.URL, "/api/v1/providers", map[string]any{
-		"name": "p-new", "type": "openai", "adapter": "openai",
-		"base_url": "http://127.0.0.1:9", "api_key_ref": "plain://k", "weight": 1,
+		"name": "p-new", "type": "openai",
+		"endpoints": []map[string]any{{"id": "openai", "adapter": "openai", "base_url": "http://127.0.0.1:9"}},
+		"api_key_ref": "plain://k", "weight": 1,
 		"timeouts": map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
 	})
 	if code != 201 {

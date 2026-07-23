@@ -17,12 +17,16 @@ export async function updateSettings(
   const captureEnabled = formData.get("capture_enabled") === "true";
   const maxBodyKB = Number(formData.get("max_body_kb") ?? 0) || 0;
   const retentionDays = Number(formData.get("retention_days") ?? 7) || 0;
+  const anthropicDisabled = formData.get("anthropic_disabled") === "true";
 
   const body = {
     trace: {
       capture_payload_enabled: captureEnabled,
       max_body_kb: maxBodyKB,
       retention_days: retentionDays,
+    },
+    ingress: {
+      anthropic_disabled: anthropicDisabled,
     },
   };
 

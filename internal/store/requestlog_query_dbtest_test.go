@@ -21,8 +21,13 @@ func seedRequestLogAt(t *testing.T, db *store.DB, tenant, provider, errorType st
 		    model_requested, model_resolved, stream,
 		    prompt_tokens, completion_tokens, total_tokens,
 		    ttft_ms, duration_ms, error_type, blocked_by, fallback,
-		    request_id, session_id, created_at)
-		 VALUES (?, '', 'k', ?, 'chat', 'gpt-4o', false, 10, 20, 30, 50, 100, ?, '', false, 'req-1', 'sess-1', ?)`,
+		    request_id, session_id, trace_id, session_source, agent_type,
+		    cache_hit, cache_tier, cache_source, cached_prompt_tokens,
+		    upstream_request_id, ingress_protocol, provider_endpoint, created_at)
+		 VALUES (?, '', 'k', ?, 'chat', 'gpt-4o', false, 10, 20, 30, 50, 100, ?, '', false,
+		         'req-1', 'sess-1', '', '', '',
+		         false, '', '', 0,
+		         '', '', '', ?)`,
 		tenant, provider, errorType, at,
 	).Error; err != nil {
 		t.Fatalf("seed request_logs: %v", err)

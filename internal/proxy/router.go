@@ -18,6 +18,9 @@ import (
 	"voxeltoad/internal/apperr"
 	"voxeltoad/internal/auth"
 	"voxeltoad/internal/config"
+	"voxeltoad/internal/ingress"
+	_ "voxeltoad/internal/ingress/anthropic" // register Anthropic ingress codec (/v1/messages)
+	_ "voxeltoad/internal/ingress/openai"    // register OpenAI ingress codec (/v1/chat/completions)
 	"voxeltoad/internal/observability"
 	"voxeltoad/internal/plugin"
 )
@@ -217,6 +220,7 @@ func Router(disp *Dispatcher, opts ...Option) http.Handler {
 			r.Use(authMiddleware(cfg.authn))
 		}
 		r.Post("/chat/completions", chatCompletionsHandler(provider, cfg.plugins, extractor, traceHdrs, cfg.auditRecorder, tracePL, settingsSource))
+		r.Post("/messages", messagesHandler(provider, cfg.plugins, extractor, traceHdrs, cfg.auditRecorder, tracePL, settingsSource))
 		r.Get("/models", notImplemented)
 	})
 
@@ -236,6 +240,40 @@ func newPluginContext(r *http.Request, req *adapter.UnifiedRequest) *plugin.Cont
 }
 
 func chatCompletionsHandler(provider DispatcherProvider, chain *plugin.Chain, extractor sessionKeyExtractor, traceHdrs []string, audit observability.RequestLogRecorder, tracePL observability.TracePayloadRecorder, settings func() *config.GatewaySettings) http.HandlerFunc {
+	return serveChat(ingress.Lookup(ingress.ProtocolOpenAI), provider, chain, extractor, traceHdrs, audit, tracePL, settings)
+}
+
+func messagesHandler(provider DispatcherProvider, chain *plugin.Chain, extractor sessionKeyExtractor, traceHdrs []string, audit observability.RequestLogRecorder, tracePL observability.TracePayloadRecorder, settings func() *config.GatewaySettings) http.HandlerFunc {
+	codec := ingress.Lookup(ingress.ProtocolAnthropic)
+	inner := serveChat(codec, provider, chain, extractor, traceHdrs, audit, tracePL, settings)
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Hot-reloadable Anthropic ingress switch (ADR-0048). When disabled
+		// the gateway answers 404 in the Anthropic envelope so clients treat
+		// it as "endpoint absent" (terminal), not 503 "retry later". The zero
+		// value (AnthropicDisabled=false) = enabled — the default. A nil
+		// settings source (tests with Router(nil)) is treated as "all enabled".
+		if settings != nil {
+			if s := settings(); s != nil && s.Ingress.AnthropicDisabled {
+				writeCodecErr(w, codec, http.StatusNotFound, "not_found_error", "anthropic ingress disabled")
+				return
+			}
+		}
+		inner.ServeHTTP(w, r)
+	}
+}
+
+// serveChat is the protocol-agnostic chat handler shared by /v1/chat/completions
+// and /v1/messages. The ingress codec owns the inbound wire translation
+// (request decoding, response encoding, error envelope, SSE frame shape);
+// everything else — auth, agent detection, session routing, plugins,
+// dispatcher, telemetry/audit/billing — is identical across protocols.
+//
+// Per-request agent detection and affinity extraction remain in the handler
+// body because they inspect the raw request (headers, body) before the codec
+// decodes it. Everything from body decode onwards is delegated here so a new
+// ingress protocol wires up by registering a codec and pointing its route at
+// serveChat with that codec.
+func serveChat(codec ingress.Codec, provider DispatcherProvider, chain *plugin.Chain, extractor sessionKeyExtractor, traceHdrs []string, audit observability.RequestLogRecorder, tracePL observability.TracePayloadRecorder, settings func() *config.GatewaySettings) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Detect the calling agent (claude-code, codex, …) from the User-Agent /
 		// x-<vendor>-session-id headers once, so every exit path's telemetry
@@ -255,21 +293,25 @@ func chatCompletionsHandler(provider DispatcherProvider, chain *plugin.Chain, ex
 			acc.agentType = agentType
 			defer func() { acc.emit(r.Context(), nil, audit, tracePL) }()
 			acc.errType = apperr.InvalidRequestBody.Code
-			writeAppErrMsg(w, apperr.InvalidRequestBody, err.Error())
+			writeAppErrCodec(w, codec, apperr.InvalidRequestBody, err.Error())
 			return
 		}
 
-		var req adapter.UnifiedRequest
-		if err := json.Unmarshal(rawBody, &req); err != nil {
+		// The ingress codec owns the inbound wire shape: it translates the
+		// client's protocol (OpenAI for /v1/chat/completions, Anthropic for
+		// /v1/messages) into the unified request model. Everything downstream
+		// (normalize / plugins / dispatcher / adapter) is protocol-agnostic
+		// and sees the same unified shape regardless of how the request came in.
+		req, err := codec.DecodeRequest(rawBody)
+		if err != nil {
 			rid, sid, tid := requestAndSessionIDs(r, traceHdrs, extractor, nil)
 			acc := newTelemetryAcc("", false, rid, sid, tid, settings)
 			acc.agentType = agentType
 			defer func() { acc.emit(r.Context(), nil, audit, tracePL) }()
 			acc.errType = apperr.InvalidRequestBody.Code
-			writeAppErrMsg(w, apperr.InvalidRequestBody, err.Error())
+			writeAppErrCodec(w, codec, apperr.InvalidRequestBody, err.Error())
 			return
 		}
-
 		// Decode affinity fields separately to avoid the promoted
 		// UnmarshalJSON issue. session_id (top-level) and metadata.session_id
 		// are read for multi-source session-key resolution (Cline/OpenRouter
@@ -292,7 +334,7 @@ func chatCompletionsHandler(provider DispatcherProvider, chain *plugin.Chain, ex
 			MetadataSessionID: affinity.Metadata.SessionID,
 			User:              affinity.User,
 		}
-		sessKey, sessSource := extractor.key(r, &req, affinityID)
+		sessKey, sessSource := extractor.key(r, req, affinityID)
 		r = r.WithContext(withSessionKey(r.Context(), sessKey))
 		r = r.WithContext(withSessionSource(r.Context(), sessSource))
 
@@ -308,7 +350,7 @@ func chatCompletionsHandler(provider DispatcherProvider, chain *plugin.Chain, ex
 		// Resolve request-id (chi middleware), session-id (X-Voxeltoad-Session
 		// header), and the W3C trace-id (parsed from traceparent) for tracing and
 		// the audit ledger.
-		rid, sid, tid := requestAndSessionIDs(r, traceHdrs, extractor, &req)
+		rid, sid, tid := requestAndSessionIDs(r, traceHdrs, extractor, req)
 		sessSrc := sessionSourceFrom(r.Context())
 
 		// Echo correlation ids on every response (success, error, or stream) so
@@ -322,7 +364,8 @@ func chatCompletionsHandler(provider DispatcherProvider, chain *plugin.Chain, ex
 		acc := newTelemetryAcc("", false, rid, sid, tid, settings)
 		acc.sessionSource = sessSrc
 		acc.agentType = agentType
-		pc := newPluginContext(r, &req)
+		acc.ingressProtocol = string(codec.Protocol()) // llm.ingress.protocol (ADR-0045)
+		pc := newPluginContext(r, req)
 		pc.RequestID = rid
 		pc.SessionID = sid
 		pc.TraceID = tid
@@ -335,7 +378,7 @@ func chatCompletionsHandler(provider DispatcherProvider, chain *plugin.Chain, ex
 		// Capture the request-side trace payload (raw client body + normalized
 		// message array) once the body is parsed. Best-effort and a no-op when
 		// capture is disabled (ADR-0039).
-		acc.captureRequest(rawBody, &req)
+		acc.captureRequest(rawBody, req)
 
 		// Mirror the outcome onto the access-log entry (when the access logger is
 		// installed) so the single access line is self-explanatory: agent, model,
@@ -371,7 +414,7 @@ func chatCompletionsHandler(provider DispatcherProvider, chain *plugin.Chain, ex
 		// of backend availability, so it precedes the dispatcher check.
 		if rec, ok := identityFrom(r.Context()); ok && !modelAllowed(rec, req.Model) {
 			acc.errType = apperr.ModelNotPermitted.Code
-			writeAppErrMsg(w, apperr.ModelNotPermitted, "model "+req.Model)
+			writeAppErrCodec(w, codec, apperr.ModelNotPermitted, "model "+req.Model)
 			return
 		}
 
@@ -383,62 +426,63 @@ func chatCompletionsHandler(provider DispatcherProvider, chain *plugin.Chain, ex
 		}
 
 		alias := req.Model // the client-facing model name is the routing alias
+		// Carry the ingress protocol on the context so the dispatcher can
+		// prefer providers whose adapter speaks the same wire protocol
+		// (protocol-aware routing, ADR-0047) — passthrough becomes a natural
+		// consequence of routing, not a router-layer special case.
+		r = r.WithContext(withIngressProtocol(r.Context(), string(codec.Protocol())))
 		pc.Ctx = r.Context()
 
 		// Pre phase: rate limit / quota / sensitive-word checks may reject.
 		if chain != nil {
 			if err := chain.Run(pc, plugin.PhasePre); err != nil {
 				acc.errType = apperr.Unexpected.Code
-				writeAppErrMsg(w, apperr.Unexpected, err.Error())
+				writeAppErrCodec(w, codec, apperr.Unexpected, err.Error())
 				return
 			}
 			if pc.Stop {
 				status, typ := rejectStatus(pc)
 				acc.errType = typ
-				writeError(w, status, typ, "request blocked by "+pc.BlockedBy)
+				writeCodecErr(w, codec, status, typ, "request blocked by "+pc.BlockedBy)
 				return
 			}
 		}
 
 		if req.Stream {
-			streamChatCompletions(w, r, disp, alias, &req, chain, pc, acc)
+			streamChatCompletions(w, r, disp, alias, req, chain, pc, acc, codec)
 			return
 		}
 
-		resp, dr, err := disp.Forward(r.Context(), alias, &req)
+		resp, dr, err := disp.Forward(r.Context(), alias, req)
 		if err != nil {
 			// Run Post even on failure so the Pre reservation (e.g. billing's
 			// quota pre-debit) is reconciled/refunded — no usage ⇒ full refund
 			// (ADR-0013/0016). dr.Provider is the last attempted upstream.
-			runPost(chain, pc, &adapter.UnifiedResponse{Model: req.Model}, dr.Provider)
+			runPost(chain, pc, &adapter.UnifiedResponse{Model: req.Model}, dr)
 			status, typ := mapForwardError(err)
 			acc.errType = typ
 			acc.errMsg = truncate([]byte(err.Error()), 256)
 			acc.setResult(dr, nil)
 			acc.captureError(status, upstreamErrorBody(err))
 			logForwardFailure(r, rid, sid, req.Model, dr.Provider, typ, err)
-			writeError(w, status, typ, err.Error())
+			writeCodecErr(w, codec, status, typ, err.Error())
 			return
 		}
 
 		// Completion hook: Post phase (billing/quota debit, audit) — ADR-0012.
-		runPost(chain, pc, resp, dr.Provider)
+		runPost(chain, pc, resp, dr)
 		acc.setResult(dr, resp.Usage)
 		acc.captureResponse(resp, http.StatusOK)
 
-		// Prefer the original upstream response body when available, avoiding
-		// data loss from a re-encode round-trip (system_fingerprint, logprobs,
-		// extra choice fields, etc.). Fall back to re-marshalling when Raw is nil
-		// (e.g., adapter that does not preserve original body).
-		body := []byte(resp.Raw)
-		if len(body) == 0 {
-			var err error
-			body, err = json.Marshal(resp)
-			if err != nil {
-				acc.errType = "api_error"
-				writeError(w, http.StatusInternalServerError, "api_error", "failed to encode response")
-				return
-			}
+		// Prefer the original upstream response body when available (codec
+		// EncodeResponse returns resp.Raw verbatim), avoiding data loss from a
+		// re-encode round-trip (system_fingerprint, logprobs, extra choice
+		// fields, etc.). Falls back to re-marshalling when Raw is nil.
+		body, err := codec.EncodeResponse(resp)
+		if err != nil {
+			acc.errType = "api_error"
+			writeCodecErr(w, codec, http.StatusInternalServerError, "api_error", "failed to encode response")
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -446,14 +490,16 @@ func chatCompletionsHandler(provider DispatcherProvider, chain *plugin.Chain, ex
 	}
 }
 
-// runPost populates the plugin Context with the completed response + hit
-// provider and runs the Post phase (the completion hook). Safe with a nil chain.
-func runPost(chain *plugin.Chain, pc *plugin.Context, resp *adapter.UnifiedResponse, provider string) {
+// runPost populates the plugin Context with the completed response, hit
+// provider + endpoint and runs the Post phase (the completion hook). Safe with
+// a nil chain.
+func runPost(chain *plugin.Chain, pc *plugin.Context, resp *adapter.UnifiedResponse, dr DispatchResult) {
 	if chain == nil {
 		return
 	}
 	pc.Response = resp
-	pc.Provider = provider
+	pc.Provider = dr.Provider
+	pc.ProviderEndpoint = dr.Endpoint
 	_ = chain.Run(pc, plugin.PhasePost)
 }
 
@@ -491,15 +537,20 @@ func mapForwardError(err error) (status int, errType string) {
 }
 
 // writeError emits an OpenAI-compatible error envelope: {"error":{...}}.
+// It delegates to the OpenAI ingress codec so the wire shape lives in one
+// place. For protocol-aware error responses (e.g. Anthropic inbound), use
+// writeCodecErr with the request's ingress codec.
 func writeError(w http.ResponseWriter, status int, errType, message string) {
+	writeCodecErr(w, ingress.Lookup(ingress.ProtocolOpenAI), status, errType, message)
+}
+
+// writeCodecErr emits an error body in the codec's wire format and writes the
+// HTTP status. Used by handlers and middleware that know the inbound protocol
+// (e.g. /v1/messages → anthropic codec).
+func writeCodecErr(w http.ResponseWriter, codec ingress.Codec, status int, errType, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"error": map[string]any{
-			"message": message,
-			"type":    errType,
-		},
-	})
+	_, _ = w.Write(codec.EncodeError(status, errType, message))
 }
 
 // logForwardFailure emits a server-side error-level log line for an upstream
@@ -526,19 +577,26 @@ func logForwardFailure(r *http.Request, rid, sid, model, provider, errType strin
 // writeAppErr emits the same envelope as writeError, driven by an apperr.Error.
 // The message is the i18n key (the client resolves it); the type is the stable
 // code. Use this in favor of inline writeError(...) so each domain lives in its
-// own apperr file.
+// own apperr file. Uses the OpenAI envelope by default.
 func writeAppErr(w http.ResponseWriter, e *apperr.Error) {
-	writeError(w, e.Status, e.Code, e.I18n)
+	writeAppErrCodec(w, ingress.Lookup(ingress.ProtocolOpenAI), e, "")
 }
 
 // writeAppErrMsg is writeAppErr when the handler needs to append runtime context
 // to the message (e.g. the underlying cause).
 func writeAppErrMsg(w http.ResponseWriter, e *apperr.Error, ctx string) {
+	writeAppErrCodec(w, ingress.Lookup(ingress.ProtocolOpenAI), e, ctx)
+}
+
+// writeAppErrCodec is the protocol-aware variant: it uses codec's envelope
+// shape (Anthropic on /v1/messages, OpenAI elsewhere). Used by handlers that
+// carry an ingress codec (chatCompletionsHandler / messagesHandler).
+func writeAppErrCodec(w http.ResponseWriter, codec ingress.Codec, e *apperr.Error, ctx string) {
 	msg := e.I18n
 	if ctx != "" {
 		msg = msg + ": " + ctx
 	}
-	writeError(w, e.Status, e.Code, msg)
+	writeCodecErr(w, codec, e.Status, e.Code, msg)
 }
 
 func notImplemented(w http.ResponseWriter, _ *http.Request) {

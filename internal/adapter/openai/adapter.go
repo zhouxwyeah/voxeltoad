@@ -150,6 +150,7 @@ func (a *Adapter) ParseResponse(body []byte) (*adapter.UnifiedResponse, error) {
 		return nil, fmt.Errorf("openai: parse response: %w", err)
 	}
 	resp.Raw = body
+	resp.RawProtocol = "openai"
 	// Decode nested cache details separately (adapter.Usage is flat by design).
 	if resp.Usage != nil {
 		var env wireUsageEnvelope
@@ -231,7 +232,7 @@ func (s *streamReader) Recv() (adapter.Chunk, error) {
 		return adapter.Chunk{}, fmt.Errorf("openai: parse stream chunk: %w", err)
 	}
 
-	c := adapter.Chunk{ID: wc.ID, Model: wc.Model, Raw: json.RawMessage(ev.Data)}
+	c := adapter.Chunk{ID: wc.ID, Model: wc.Model, Raw: json.RawMessage(ev.Data), RawProtocol: "openai"}
 	if wc.Usage != nil {
 		u := &adapter.Usage{
 			PromptTokens:     wc.Usage.PromptTokens,

@@ -25,6 +25,7 @@ export function RequestLogsTable({
   pageSize,
   onPageChange,
   onPageSizeChange,
+  providerAdapters = {},
 }: {
   rows: RequestLogRow[];
   total: number;
@@ -32,6 +33,7 @@ export function RequestLogsTable({
   pageSize: number;
   onPageChange: (page: number) => void;
   onPageSizeChange: (size: number) => void;
+  providerAdapters?: Record<string, string>;
 }) {
   const t = useTranslations("request-logs");
 
@@ -60,6 +62,55 @@ export function RequestLogsTable({
         cell: ({ getValue }) => {
           const v = getValue() as string | undefined;
           return v ?? <span className="text-muted-foreground">—</span>;
+        },
+      },
+      {
+        accessorKey: "ingress_protocol",
+        header: t("columns.ingressProtocol"),
+        cell: ({ row }) => {
+          const proto = row.original.ingress_protocol as string | undefined;
+          if (!proto) return <span className="text-muted-foreground">—</span>;
+          // Protocol-match badge: the hit provider's adapter speaks the same
+          // wire protocol as the ingress. This is an APPROXIMATION of
+          // passthrough — protocol-aware routing prefers matched providers, so
+          // a match usually means passthrough, but a request the adapter can't
+          // fully express (e.g. Anthropic tool_use before the claude adapter
+          // supports tools, ADR-0032 §5) may still be translated even on a
+          // protocol match. The badge shows the routing fact, not the encoding
+          // fact (which the gateway doesn't record per-request).
+          const provider = row.original.provider as string | undefined;
+          const adapter = provider
+            ? (providerAdapters as Record<string, string>)[provider]
+            : undefined;
+          let passthrough: boolean | null = null;
+          if (adapter) {
+            passthrough =
+              (proto === "anthropic" && adapter === "claude") ||
+              (proto === "openai" && adapter === "openai");
+          }
+          return (
+            <span className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className="text-foreground">{proto}</span>
+              {passthrough !== null && (
+                <span
+                  title={t(
+                    passthrough
+                      ? "badges.passthroughHint"
+                      : "badges.translatedHint",
+                  )}
+                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                    passthrough
+                      ? "bg-success/10 text-success"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {passthrough
+                    ? t("badges.passthrough")
+                    : t("badges.translated")}
+                </span>
+              )}
+            </span>
+          );
         },
       },
       {

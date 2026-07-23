@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"voxeltoad/internal/adapter"
 	"voxeltoad/pkg/sse"
@@ -150,6 +151,8 @@ func (a *Adapter) ParseResponse(body []byte) (*adapter.UnifiedResponse, error) {
 		}},
 		Usage:             usageOf(wr.Usage.InputTokens, wr.Usage.CacheCreationInputTokens, wr.Usage.CacheReadInputTokens, wr.Usage.OutputTokens),
 		UpstreamRequestID: wr.RequestID, // body fallback; Forwarder overrides with the response header when present
+		Raw:               body, // preserved for passthrough (ADR-0047): when the client's ingress protocol is anthropic and this claude adapter was hit, the anthropic codec emits Raw verbatim.
+		RawProtocol:       "anthropic",
 	}, nil
 }
 
@@ -236,7 +239,19 @@ func (s *streamReader) Recv() (adapter.Chunk, error) {
 			s.cacheCreationToks = p.Message.Usage.CacheCreationInputTokens
 			s.cacheReadToks = p.Message.Usage.CacheReadInputTokens
 			s.haveInput = true
-			// No content yet; continue to the next event.
+			// Return a chunk so: (a) the translating path's streamEncoder fires
+			// its messageStarted state on the first chunk it sees; (b) the
+			// passthrough path can replay the original message_start frame from
+			// Raw (ADR-0047). DeltaRole carries no content but signals "this is
+			// the opening chunk" — the ingress anthropic encoder starts the
+			// message on the first non-empty chunk it receives.
+			return adapter.Chunk{
+				ID:          p.Message.ID,
+				Model:       p.Message.Model,
+				DeltaRole:   adapter.RoleAssistant,
+				Raw:         reassembleSSEFrame(ev.Event, ev.ID, ev.Data),
+				RawProtocol: "anthropic",
+			}, nil
 
 		case "content_block_delta":
 			var p struct {
@@ -247,7 +262,7 @@ func (s *streamReader) Recv() (adapter.Chunk, error) {
 			if err := json.Unmarshal([]byte(ev.Data), &p); err != nil {
 				return adapter.Chunk{}, fmt.Errorf("claude: parse content_block_delta: %w", err)
 			}
-			return adapter.Chunk{DeltaContent: p.Delta.Text}, nil
+			return adapter.Chunk{DeltaContent: p.Delta.Text, Raw: reassembleSSEFrame(ev.Event, ev.ID, ev.Data), RawProtocol: "anthropic"}, nil
 
 		case "message_delta":
 			var p struct {
@@ -261,19 +276,70 @@ func (s *streamReader) Recv() (adapter.Chunk, error) {
 			if err := json.Unmarshal([]byte(ev.Data), &p); err != nil {
 				return adapter.Chunk{}, fmt.Errorf("claude: parse message_delta: %w", err)
 			}
-			// Trailing chunk: finish reason + assembled usage.
+			// Trailing chunk: finish reason + assembled usage. Raw carries the
+			// original message_delta frame for passthrough (ADR-0047).
 			return adapter.Chunk{
 				FinishReason: mapStopReason(p.Delta.StopReason),
 				Usage:        usageOf(s.inputToks, s.cacheCreationToks, s.cacheReadToks, p.Usage.OutputTokens),
+				Raw:          reassembleSSEFrame(ev.Event, ev.ID, ev.Data),
+				RawProtocol:  "anthropic",
 			}, nil
 
 		case "message_stop":
+			// message_stop has no payload beyond the event type. The ingress
+			// anthropic codec's StreamTerminator emits the client-facing
+			// message_stop; we don't need to relay it as a Chunk (the codec's
+			// Close/terminator handles stream end in both translating and
+			// passthrough modes).
 			return adapter.Chunk{}, io.EOF
 
+		case "content_block_start", "content_block_stop":
+			// Block-boundary events carry no unified semantics (the translating
+			// ingress codec synthesizes its own start/stop from DeltaContent /
+			// DeltaToolCalls), but passthrough mode (ADR-0047) MUST relay them
+			// verbatim or the client's Anthropic stream is missing the block
+			// boundaries — tool_use blocks become unparseable. Return a Chunk
+			// whose only payload is the reassembled Raw frame; the translating
+			// encoder ignores Raw-free semantic fields (empty DeltaContent etc.)
+			// while the passthrough encoder relays Raw as-is.
+			return adapter.Chunk{
+				Raw:         reassembleSSEFrame(ev.Event, ev.ID, ev.Data),
+				RawProtocol: "anthropic",
+			}, nil
+
 		default:
-			// message_start's content_block_start/stop, ping, etc. — ignore.
+			// ping, unknown event types, etc. — ignore.
 		}
 	}
 }
 
 func (s *streamReader) Close() error { return nil }
+
+// reassembleSSEFrame rebuilds the complete SSE wire frame (event: + id: +
+// data: lines + blank terminator) for a decoded event, so the anthropic
+// ingress codec can relay it in passthrough mode (ADR-0047). pkg/sse.Decoder
+// does not retain the raw bytes, so the frame is reassembled from the decoded
+// fields — this preserves the semantic content (event type, id, data) but not
+// byte-level formatting (leading-space choice, comment lines). Comment /
+// keep-alive lines are intentionally not reassembled: the gateway manages
+// connection liveness itself.
+func reassembleSSEFrame(event, id, data string) []byte {
+	var b []byte
+	if event != "" {
+		b = append(b, "event: "...)
+		b = append(b, event...)
+		b = append(b, '\n')
+	}
+	if id != "" {
+		b = append(b, "id: "...)
+		b = append(b, id...)
+		b = append(b, '\n')
+	}
+	for _, line := range strings.Split(data, "\n") {
+		b = append(b, "data: "...)
+		b = append(b, line...)
+		b = append(b, '\n')
+	}
+	b = append(b, '\n')
+	return b
+}

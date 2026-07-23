@@ -52,3 +52,8 @@ Produced and refined through `grill-with-docs` sessions.
 | [0042](0042-windows-dev-environment-wsl2.md) | Windows 开发者官方环境 = WSL2（脚本保持 POSIX-only，CI 仅 Linux） | Accepted |
 | [0043](0043-windows-desktop-packaging.md) | Desktop Windows 打包 — Wails v2 NSIS + CI Windows runner（supersede ADR-0042 §3/§39 窄面） | Accepted |
 | [0044](0044-merge-model-catalog-into-models.md) | 合并 model-catalog 到 models（单页 + 角色条件渲染） | Accepted |
+| [0045](0045-anthropic-ingress-protocol.md) | Anthropic ingress protocol (`/v1/messages`) — inbound codec layer, Claude Code → OpenAI upstreams | Accepted |
+| [0046](0046-ingress-protocol-persistence.md) | Persist `ingress_protocol` to audit ledgers (request_logs + trace_payloads) | Accepted |
+| [0047](0047-protocol-aware-routing.md) | Protocol-aware routing — implicit passthrough via candidate reordering + RawProtocol gating | **Superseded by [ADR-0049](0049-multi-endpoint-provider.md)** |
+| [0048](0048-ingress-toggle.md) | Anthropic ingress global toggle (GatewaySettings.Ingress.AnthropicDisabled, 404 on disable) | Accepted |
+| [0049](0049-multi-endpoint-provider.md) | Multi-endpoint Provider — protocol-aware routing at endpoint granularity (supersedes ADR-0047) | Accepted |

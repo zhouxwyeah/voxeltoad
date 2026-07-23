@@ -1,9 +1,23 @@
 package proxy
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
+
+// EndpointKey identifies one (provider, endpoint) pair — the unit of
+// forwarding, circuit-breaking, and per-endpoint audit attribution in the
+// multi-endpoint provider model (ADR-0049). Endpoint is the provider's
+// ProviderEndpoint.ID (or its adapter-derived default: openai / anthropic).
+type EndpointKey struct {
+	Provider string
+	Endpoint string
+}
+
+// String renders the key as "<provider>/<endpoint>" for logs, breaker-state
+// views, and admin heartbeat display.
+func (k EndpointKey) String() string { return fmt.Sprintf("%s/%s", k.Provider, k.Endpoint) }
 
 // circuitConfig configures the breaker.
 type circuitConfig struct {
@@ -15,18 +29,22 @@ type circuitConfig struct {
 	Cooldown time.Duration
 }
 
-// breakerState is one provider's failure state.
+// breakerState is one endpoint's failure state.
 type breakerState struct {
 	failures int
 	openedAt time.Time // zero = closed (not open)
 }
 
-// circuitBreaker tracks per-provider health for failover (ADR-0011). It is a
-// classic closed → open → half-open breaker:
+// circuitBreaker tracks per-endpoint health for failover (ADR-0011/0049). It is
+// a classic closed → open → half-open breaker:
 //   - closed: consecutive failures below threshold; healthy.
 //   - open: threshold reached; unhealthy until the cooldown elapses.
 //   - half-open: cooldown elapsed; healthy (one trial allowed) — a failure
 //     re-opens it, a success closes it.
+//
+// Keyed by EndpointKey so a dual-protocol provider's two endpoints trip
+// independently (ADR-0049): an openai-endpoint flap does not take down the
+// same provider's anthropic endpoint.
 //
 // In-memory and therefore per-data-plane-instance in P0 (documented gap, see
 // ADR-0008/0011); a shared store is the multi-instance upgrade.
@@ -34,7 +52,7 @@ type circuitBreaker struct {
 	cfg circuitConfig
 
 	mu     sync.Mutex
-	states map[string]*breakerState
+	states map[EndpointKey]*breakerState
 	now    func() time.Time // injectable for tests
 }
 
@@ -49,18 +67,18 @@ func newCircuitBreaker(cfg circuitConfig) *circuitBreaker {
 	}
 	return &circuitBreaker{
 		cfg:    cfg,
-		states: make(map[string]*breakerState),
+		states: make(map[EndpointKey]*breakerState),
 		now:    time.Now,
 	}
 }
 
-// Healthy reports whether the provider may currently be tried. Unknown
-// providers are healthy. An open breaker becomes healthy again (half-open) once
-// the cooldown has elapsed.
-func (b *circuitBreaker) Healthy(provider string) bool {
+// Healthy reports whether the endpoint may currently be tried. Unknown
+// endpoints are healthy. An open breaker becomes healthy again (half-open)
+// once the cooldown has elapsed.
+func (b *circuitBreaker) Healthy(key EndpointKey) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	s, ok := b.states[provider]
+	s, ok := b.states[key]
 	if !ok || s.openedAt.IsZero() {
 		return true // closed
 	}
@@ -71,10 +89,10 @@ func (b *circuitBreaker) Healthy(provider string) bool {
 // MarkFailure records a failed attempt. It trips the breaker when consecutive
 // failures reach the threshold, and re-opens it (restarting the cooldown) if a
 // failure occurs while half-open.
-func (b *circuitBreaker) MarkFailure(provider string) {
+func (b *circuitBreaker) MarkFailure(key EndpointKey) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	s := b.stateFor(provider)
+	s := b.stateFor(key)
 
 	if !s.openedAt.IsZero() {
 		// Currently open or half-open. If half-open (cooldown elapsed), a
@@ -93,37 +111,38 @@ func (b *circuitBreaker) MarkFailure(provider string) {
 
 // MarkSuccess records a successful attempt, fully closing the breaker and
 // clearing failure state (covers both closed-reset and half-open-close).
-func (b *circuitBreaker) MarkSuccess(provider string) {
+func (b *circuitBreaker) MarkSuccess(key EndpointKey) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	s := b.stateFor(provider)
+	s := b.stateFor(key)
 	s.failures = 0
 	s.openedAt = time.Time{}
 }
 
-func (b *circuitBreaker) stateFor(provider string) *breakerState {
-	s, ok := b.states[provider]
+func (b *circuitBreaker) stateFor(key EndpointKey) *breakerState {
+	s, ok := b.states[key]
 	if !ok {
 		s = &breakerState{}
-		b.states[provider] = s
+		b.states[key] = s
 	}
 	return s
 }
 
 // States returns a snapshot of all known circuit breaker states keyed by
-// provider name. Values: "closed" | "open" | "half-open". Thread-safe.
+// "<provider>/<endpoint>". Values: "closed" | "open" | "half-open". Thread-safe.
 func (b *circuitBreaker) States() map[string]string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	out := make(map[string]string, len(b.states))
 	now := b.now()
-	for name, s := range b.states {
+	for key, s := range b.states {
+		k := key.String()
 		if s.openedAt.IsZero() {
-			out[name] = "closed"
+			out[k] = "closed"
 		} else if now.Sub(s.openedAt) < b.cfg.Cooldown {
-			out[name] = "open"
+			out[k] = "open"
 		} else {
-			out[name] = "half-open"
+			out[k] = "half-open"
 		}
 	}
 	return out

@@ -71,6 +71,10 @@ type RequestTelemetry struct {
 	// AgentType is the detected calling agent (claude-code, codex, …). Attached
 	// to the trace span; never a metric label.
 	AgentType string
+	// IngressProtocol is the client wire shape that served the request (openai
+	// / anthropic). Low-cardinality (2 values), attached to the trace span;
+	// never a metric label, NOT persisted to the audit ledger (ADR-0045).
+	IngressProtocol string
 	// ErrorDetail is the truncated underlying cause (e.g. "upstream returned
 	// 500: ..."), for troubleshooting. It is NOT a classification dimension and
 	// is only attached to the trace span (never used as a metric label, never
@@ -176,6 +180,7 @@ func recordSpan(ctx context.Context, t RequestTelemetry) {
 		attribute.String(AttrTraceID, t.TraceID),
 		attribute.String(AttrSessionSource, t.SessionSource),
 		attribute.String(AttrAgentType, t.AgentType),
+		attribute.String(AttrIngressProtocol, t.IngressProtocol),
 	}
 	if t.ErrorDetail != "" {
 		attrs = append(attrs, attribute.String(AttrErrorDetail, t.ErrorDetail))

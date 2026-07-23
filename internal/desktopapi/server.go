@@ -29,6 +29,7 @@ import (
 	"voxeltoad/internal/config"
 	"voxeltoad/internal/desktoplog"
 	"voxeltoad/internal/desktopstore"
+	"voxeltoad/internal/observability"
 )
 
 // Server wires the read endpoints + config CRUD. The configPath + watcher are
@@ -284,6 +285,10 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 		// Marshal 失败时不能再用原 status：WriteHeader(200) 已写出去会让前端
 		// 拿到 200 + 空 body（desktop trace viewer 的 "Unexpected end of JSON
 		// input" 即来源于此）。改写 500 + 一个合法的 JSON 错误文档。
+		// 记录根因到进程日志（桌面 Logs 页可见）——WithAccessLog 已记录
+		// method+path+status=500，靠时间戳即可关联；否则前端只看到
+		// "response marshal failed" 而无法定位是哪个字段。
+		observability.Logger().Error("desktopapi: response marshal failed", "err", err)
 		body, _ := json.Marshal(map[string]string{"error": "response marshal failed"})
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)

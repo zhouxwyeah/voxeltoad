@@ -297,11 +297,15 @@ type UnifiedResponse struct {
 	UpstreamRequestID string `json:"-"`
 
 	// Raw is the original upstream response body, preserved byte-for-byte.
-	// For OpenAI→OpenAI paths, the proxy may write Raw directly to the client
-	// to avoid data loss from a re-encode round-trip (system_fingerprint,
-	// logprobs, extra choice fields, etc.). Set by ParseResponse; nil when
-	// parsing is not source-preserving.
-	Raw json.RawMessage `json:"-"`
+	// For same-protocol passthrough (OpenAI→OpenAI, Anthropic→Claude with
+	// protocol-aware routing ADR-0047), the proxy may write Raw directly to
+	// the client to avoid data loss from a re-encode round-trip. Set by
+	// ParseResponse; nil when parsing is not source-preserving.
+	// RawProtocol identifies which wire protocol Raw is shaped as (gates
+	// passthrough so an anthropic codec never mistakes openai bytes for its
+	// own — ADR-0047).
+	Raw         json.RawMessage `json:"-"`
+	RawProtocol string          `json:"-"` // "" | "openai" | "anthropic"
 }
 
 // Choice is a single completion choice.
@@ -348,12 +352,14 @@ type Chunk struct {
 	FinishReason   string          `json:"finish_reason,omitempty"`
 	Usage          *Usage          `json:"usage,omitempty"`
 
-	// Raw is the original upstream SSE data line, preserved byte-for-byte.
-	// For OpenAI→OpenAI paths, the proxy may write Raw directly to the
-	// client to avoid data loss from a re-encode round-trip. Set by
-	// streamReader.Recv; nil for adapters that do not preserve raw chunks
-	// (e.g., Claude, which must re-encode into OpenAI chunk format).
-	Raw json.RawMessage `json:"-"`
+	// Raw is the original upstream SSE frame, preserved byte-for-byte. For
+	// same-protocol passthrough (OpenAI→OpenAI, Anthropic→Claude with
+	// protocol-aware routing ADR-0047), the proxy may write Raw directly to
+	// the client. Set by streamReader.Recv; nil when not source-preserving.
+	// RawProtocol identifies which wire protocol Raw is shaped as (gates
+	// passthrough, ADR-0047).
+	Raw         json.RawMessage `json:"-"`
+	RawProtocol string          `json:"-"` // "" | "openai" | "anthropic"
 }
 
 // Usage holds token accounting. Billing MUST prefer the usage returned by the

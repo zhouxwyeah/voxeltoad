@@ -18,7 +18,7 @@ func seedRequestLogRow(t *testing.T, db *store.DB, tenant, provider, errorType s
 
 // seedRequestLogRowWithAgent is seedRequestLogRow with an explicit agent_type.
 // Use this when the test needs to verify per-agent aggregation (e.g. overview
-// AgentStats). Empty agentType matches the legacy default ('').
+// AgentStats). Empty agentType matches the legacy default (”).
 func seedRequestLogRowWithAgent(t *testing.T, db *store.DB, tenant, provider, errorType, agentType string) {
 	t.Helper()
 	if err := db.Exec(

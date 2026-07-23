@@ -34,12 +34,12 @@ func (r *UsageRepo) RecordBatch(ctx context.Context, recs []billing.UsageRecord)
 		for _, rec := range recs {
 			if err := tx.Exec(
 				`INSERT INTO usage_records
-				   (tenant, group_name, api_key_id, provider, model,
+				   (tenant, group_name, api_key_id, provider, provider_endpoint, model,
 				    prompt_tokens, completion_tokens, cost,
 				    request_id, session_id, trace_id,
 				    cached_prompt_tokens, cache_discount_micros)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				rec.Tenant, rec.Group, rec.APIKeyID, rec.Provider, rec.Model,
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				rec.Tenant, rec.Group, rec.APIKeyID, rec.Provider, rec.ProviderEndpoint, rec.Model,
 				rec.PromptTokens, rec.CompletionTokens, rec.Cost,
 				rec.RequestID, rec.SessionID, rec.TraceID,
 				rec.CachedPromptTokens, rec.CacheDiscountMicros,

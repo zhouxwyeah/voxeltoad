@@ -964,6 +964,16 @@ paths:
           required: false
           schema: { type: string }
           description: Filter to a single request by its gateway-assigned correlation id (exact lookup, debug/trace drill-down).
+        - name: agent_type
+          in: query
+          required: false
+          schema: { type: string }
+          description: Filter by detected calling agent (claude-code/codex/codebuddy/workbuddy/opencode).
+        - name: ingress_protocol
+          in: query
+          required: false
+          schema: { type: string, enum: [openai, anthropic] }
+          description: Filter by client wire protocol that served the request (ADR-0045/0046).
         - name: format
           in: query
           required: false
@@ -976,7 +986,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RequestLogPage' }
             text/csv:
-              schema: { type: string, description: "CSV export with headers: id,tenant,group_name,api_key_id,provider,model_requested,model_resolved,stream,prompt_tokens,completion_tokens,total_tokens,ttft_ms,duration_ms,error_type,blocked_by,fallback,request_id,session_id,trace_id,session_source,agent_type,cache_hit,cache_tier,cache_source,cached_prompt_tokens,created_at" }
+              schema: { type: string, description: "CSV export with headers: id,tenant,group_name,api_key_id,provider,model_requested,model_resolved,stream,prompt_tokens,completion_tokens,total_tokens,ttft_ms,duration_ms,error_type,blocked_by,fallback,request_id,session_id,trace_id,session_source,agent_type,cache_hit,cache_tier,cache_source,cached_prompt_tokens,ingress_protocol,created_at" }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
@@ -1680,22 +1690,45 @@ components:
       required: [name]
       properties:
         name: { type: string }
-        type: { type: string, description: Descriptive brand (openai/tencent/zhipu/anthropic); does not select adapter. }
-        adapter: { type: string, description: Protocol adapter from the registry (openai|claude). }
-        base_url: { type: string }
-        api_key_ref: { type: string, description: 'Credential ref: env://VAR | db://provider/<name> | plain://literal | bare literal. Masked in responses (env://***). See ADR-0031.' }
-        api_key: { type: string, description: 'Write-only plaintext upstream key. When supplied, encrypted and stored in provider_credentials; api_key_ref is set to db://provider/<name>. Never returned.' }
-        timeouts: { $ref: '#/components/schemas/ProviderTimeouts' }
+        type: { type: string, description: Descriptive brand (openai/tencent/zhipu/anthropic/deepseek); does not select adapter. }
+        endpoints:
+          type: array
+          minItems: 1
+          description: >
+            Non-empty list of (adapter, base_url) pairs the gateway can reach.
+            The runtime picks the endpoint whose adapter matches the ingress
+            protocol (ADR-0049). The first endpoint is the "primary" (used
+            for the providers.adapter column and as protocol-unknown fallback).
+          items: { $ref: '#/components/schemas/ProviderEndpoint' }
+        api_key_ref: { type: string, description: 'SHARED credential ref for all endpoints: env://VAR | db://provider/<name> | plain://literal | bare literal. Masked in responses (env://***). See ADR-0031.' }
+        api_key: { type: string, description: 'Write-only plaintext upstream key shared by all endpoints. When supplied, encrypted and stored in provider_credentials; api_key_ref is set to db://provider/<name>. Never returned.' }
+        timeouts: { $ref: '#/components/schemas/ProviderTimeouts', description: Provider-level default timeouts; each endpoint may override. }
         weight: { type: integer }
+    ProviderEndpoint:
+      type: object
+      required: [adapter, base_url]
+      description: >
+        One upstream protocol endpoint under a provider. A dual-protocol vendor
+        (OpenAI/DeepSeek/Aliyun Bailian) typically has two: adapter=openai and
+        adapter=claude.
+      properties:
+        id: { type: string, description: 'Optional endpoint slug. When empty, derived from adapter: openai→"openai", claude→"anthropic". Must be unique within the provider; explicitly required when two endpoints share an adapter. Used as breaker key component and audit provider_endpoint column.' }
+        adapter: { type: string, description: 'Protocol adapter from the registry (openai|claude). ADR-0001.' }
+        base_url: { type: string }
+        timeouts: { $ref: '#/components/schemas/ProviderTimeouts', description: 'Optional override of the provider-level default. Omitted = inherit.' }
     ProviderPatch:
       type: object
       description: >
         Partial provider update. All fields optional; omitted fields are left
         unchanged (not cleared). At least one field should be provided.
+        `endpoints` is a whole-list replacement (not a merge).
       properties:
         type: { type: string }
-        adapter: { type: string, description: Protocol adapter from the registry (openai|claude). }
-        base_url: { type: string }
+        endpoints:
+          type: array
+          minItems: 1
+          description: Whole-list replacement of the provider's endpoints.
+          items: { $ref: '#/components/schemas/ProviderEndpoint' }
         api_key_ref: { type: string }
         timeouts: { $ref: '#/components/schemas/ProviderTimeouts' }
         weight: { type: integer }
@@ -2120,6 +2153,7 @@ components:
         trace_id: { type: string, description: "W3C trace id parsed from the traceparent header (empty if absent/invalid)." }
         session_source: { type: string, description: "Which mechanism supplied the session key (header-config, header-generic, body-session, body-metadata, body-user, prefix, or empty)." }
         agent_type: { type: string, description: "Detected calling agent (claude-code/codex/codebuddy/workbuddy/opencode); empty when unrecognized." }
+        ingress_protocol: { type: string, enum: ["", openai, anthropic], description: "Client wire protocol that served the request (ADR-0045/0046). Empty for pre-migration rows." }
         created_at: { type: string, format: date-time }
 
     # --- Typed list envelopes (data item types pinned) ---
@@ -2271,6 +2305,7 @@ components:
         model_requested: { type: string }
         stream: { type: boolean }
         agent_type: { type: string, description: Detected calling agent (claude-code/codex/codebuddy/workbuddy/opencode); empty when unrecognized. }
+        ingress_protocol: { type: string, enum: ["", openai, anthropic], description: "Client wire protocol that served the request (ADR-0045/0046). Empty for pre-migration rows." }
         status_code: { type: integer, description: Upstream HTTP status (0 if unknown). }
         stop_reason: { type: string, description: Completion finish/stop reason. }
         n_messages: { type: integer, description: Number of messages in the request. }
@@ -2325,6 +2360,22 @@ components:
       properties:
         trace:
           $ref: '#/components/schemas/TraceSettings'
+        ingress:
+          $ref: '#/components/schemas/IngressSettings'
+    IngressSettings:
+      type: object
+      description: >
+        Per-ingress-protocol enablement, hot-reloadable (ADR-0048). The zero
+        value (an empty/absent ingress block) means all protocols enabled —
+        the gateway's default. An operator opts out of a protocol by setting
+        its Disabled flag to true.
+      properties:
+        anthropic_disabled:
+          type: boolean
+          description: >
+            When true, the gateway rejects /v1/messages requests with a 404 in
+            the Anthropic error envelope. Zero value (false) = enabled.
+          default: false
     TraceSettings:
       type: object
       description: Hot-reloadable trace-capture parameters (ADR-0039).

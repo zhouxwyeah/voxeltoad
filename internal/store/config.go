@@ -65,13 +65,13 @@ func (r *ConfigRepo) UpsertProvider(ctx context.Context, p config.Provider) erro
 	if err != nil {
 		return err
 	}
-	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(
 			`INSERT INTO providers (name, type, adapter, enabled, spec, updated_at)
 			 VALUES (?, ?, ?, true, ?, now())
 			 ON CONFLICT (name) DO UPDATE SET type = EXCLUDED.type,
 			     adapter = EXCLUDED.adapter, spec = EXCLUDED.spec, updated_at = now()`,
-			p.Name, p.Type, p.Adapter, spec,
+			p.Name, p.Type, p.PrimaryAdapter(), spec,
 		).Error; err != nil {
 			return err
 		}
@@ -87,12 +87,11 @@ func (r *ConfigRepo) UpsertProvider(ctx context.Context, p config.Provider) erro
 // same provider serialize rather than lost-update. Returns (zero, false, nil)
 // when the named provider does not exist; the caller maps that to a 404.
 type ProviderPatch struct {
-	Type      *string                  `json:"type,omitempty"`
-	Adapter   *string                  `json:"adapter,omitempty"`
-	BaseURL   *string                  `json:"base_url,omitempty"`
-	APIKeyRef *string                  `json:"api_key_ref,omitempty"`
-	Timeouts  *config.ProviderTimeouts `json:"timeouts,omitempty"`
-	Weight    *int                     `json:"weight,omitempty"`
+	Type      *string                    `json:"type,omitempty"`
+	Endpoints *[]config.ProviderEndpoint `json:"endpoints,omitempty"`
+	APIKeyRef *string                    `json:"api_key_ref,omitempty"`
+	Timeouts  *config.ProviderTimeouts   `json:"timeouts,omitempty"`
+	Weight    *int                       `json:"weight,omitempty"`
 }
 
 // PatchProvider applies a partial update to the named provider.
@@ -116,11 +115,8 @@ func (r *ConfigRepo) PatchProvider(ctx context.Context, name string, patch Provi
 		if patch.Type != nil {
 			p.Type = *patch.Type
 		}
-		if patch.Adapter != nil {
-			p.Adapter = *patch.Adapter
-		}
-		if patch.BaseURL != nil {
-			p.BaseURL = *patch.BaseURL
+		if patch.Endpoints != nil {
+			p.Endpoints = *patch.Endpoints
 		}
 		if patch.APIKeyRef != nil {
 			p.APIKeyRef = *patch.APIKeyRef
@@ -137,7 +133,7 @@ func (r *ConfigRepo) PatchProvider(ctx context.Context, name string, patch Provi
 		}
 		if err := tx.Exec(
 			`UPDATE providers SET type = ?, adapter = ?, spec = ?, updated_at = now() WHERE name = ?`,
-			p.Type, p.Adapter, newSpec, name,
+			p.Type, p.PrimaryAdapter(), newSpec, name,
 		).Error; err != nil {
 			return err
 		}

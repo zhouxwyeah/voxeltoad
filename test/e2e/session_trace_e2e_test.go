@@ -148,8 +148,8 @@ func TestTrace_AgentDetectionAndRequestID(t *testing.T) {
 
 	// A request that identifies as claude-code AND sends a nil-UUID request id.
 	resp := h.ChatWithHeaders("sk-agent", "chat", false, map[string]string{
-		"User-Agent":    "claude-cli/1.0.83 (external, cli)",
-		"X-Request-Id":  "00000000000000000000000000000000",
+		"User-Agent":          "claude-cli/1.0.83 (external, cli)",
+		"X-Request-Id":        "00000000000000000000000000000000",
 		"X-Voxeltoad-Session": "sess-agent-001",
 	})
 	// The echoed request id must NOT be the all-zero value the client sent —

@@ -34,7 +34,7 @@ const PRESET_BRANDS = [
   "bedrock",
 ];
 const CUSTOM_TYPE = "_custom_";
-const DEFAULT_TIMEOUTS = { connect: 2_000_000_000, first_byte: 5_000_000_000, overall: 30_000_000_000 };
+const DEFAULT_TIMEOUTS = { connect: 5_000_000_000, first_byte: 120_000_000_000, overall: 300_000_000_000 };
 const DEFAULT_WEIGHT = 100;
 
 /** Prefix of a literal (plaintext) credential stored in the local YAML. */

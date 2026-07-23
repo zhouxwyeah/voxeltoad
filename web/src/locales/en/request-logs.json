@@ -16,7 +16,8 @@
     "errorType": "Error",
     "blockedBy": "Blocked By",
     "fallback": "Fallback",
-    "session": "Session"
+    "session": "Session",
+    "ingressProtocol": "Ingress"
   },
   "filters": {
     "from": "From",
@@ -32,6 +33,7 @@
     "stream": "Stream",
     "fallback": "Fallback",
     "sessionId": "Session ID",
+    "ingressProtocol": "Ingress Protocol",
     "any": "Any",
     "streamTrue": "Stream",
     "streamFalse": "Non-stream",
@@ -45,6 +47,12 @@
     "success": "OK",
     "yes": "Yes",
     "no": "No"
+  },
+  "badges": {
+    "passthrough": "Passthrough",
+    "translated": "Translated",
+    "passthroughHint": "The hit provider's protocol matches the ingress protocol (protocol-aware routing usually passes through; Anthropic requests with tools may still be translated until the claude adapter fully supports tools)",
+    "translatedHint": "The hit provider's protocol differs from the ingress protocol — translated via the unified model"
   },
   "actions": {
     "emptyState": "No request logs found. Try adjusting the time range or filters."

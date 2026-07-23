@@ -21,6 +21,14 @@
       "label": "Adapter",
       "placeholder": "Select adapter"
     },
+    "endpoints": {
+      "label": "Endpoints",
+      "help": "Configure one or more (adapter, base URL) endpoints. The runtime auto-selects the endpoint matching the client's ingress protocol (ADR-0049). Dual-protocol vendors (DeepSeek/Aliyun Bailian) configure two endpoints.",
+      "adapter": "Protocol",
+      "baseUrl": "Base URL",
+      "baseUrlPlaceholder": "https://…",
+      "add": "Add endpoint"
+    },
     "baseUrl": {
       "label": "Base URL",
       "placeholder": "https://…"

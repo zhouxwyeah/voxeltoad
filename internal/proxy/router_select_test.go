@@ -13,12 +13,12 @@ func rp(name string, weight int) config.RouteProvider {
 }
 
 func newRouter(routes []config.Route, b *circuitBreaker) *router {
-	return newRouterWithRand(routes, b, func(int) int { return 0 })
+	return newRouterWithRand(routes, b, func(int) int { return 0 }, nil)
 }
 
 func TestRouter_UnknownAliasErrors(t *testing.T) {
 	r := newRouter(nil, newCircuitBreaker(circuitConfig{}))
-	if _, err := r.Candidates("nope", ""); err == nil {
+	if _, err := r.Candidates("nope", "", ""); err == nil {
 		t.Error("unknown alias should error")
 	}
 }
@@ -30,7 +30,7 @@ func TestRouter_Priority_ConfigOrder(t *testing.T) {
 		Providers:  []config.RouteProvider{rp("a", 0), rp("b", 0), rp("c", 0)},
 	}}
 	r := newRouter(routes, newCircuitBreaker(circuitConfig{}))
-	got, err := r.Candidates("chat", "")
+	got, err := r.Candidates("chat", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,10 +46,10 @@ func TestRouter_FiltersUnhealthy(t *testing.T) {
 		Providers:  []config.RouteProvider{rp("a", 0), rp("b", 0), rp("c", 0)},
 	}}
 	b := newCircuitBreaker(circuitConfig{FailureThreshold: 1, Cooldown: time.Hour})
-	b.MarkFailure("b") // trip b open
+	b.MarkFailure(ep("b")) // trip b open
 	r := newRouter(routes, b)
 
-	got, _ := r.Candidates("chat", "")
+	got, _ := r.Candidates("chat", "", "")
 	if !reflect.DeepEqual(got, []string{"a", "c"}) {
 		t.Errorf("got %v, want [a c] (b filtered)", got)
 	}
@@ -65,11 +65,11 @@ func TestRouter_AllUnhealthy_ReturnsAll(t *testing.T) {
 		Providers:  []config.RouteProvider{rp("a", 0), rp("b", 0)},
 	}}
 	b := newCircuitBreaker(circuitConfig{FailureThreshold: 1, Cooldown: time.Hour})
-	b.MarkFailure("a")
-	b.MarkFailure("b")
+	b.MarkFailure(ep("a"))
+	b.MarkFailure(ep("b"))
 	r := newRouter(routes, b)
 
-	got, _ := r.Candidates("chat", "")
+	got, _ := r.Candidates("chat", "", "")
 	if len(got) != 2 {
 		t.Errorf("got %v, want both as a degraded fallback", got)
 	}
@@ -83,9 +83,9 @@ func TestRouter_RoundRobin_RotatesAcrossCalls(t *testing.T) {
 	}}
 	r := newRouter(routes, newCircuitBreaker(circuitConfig{}))
 
-	first, _ := r.Candidates("chat", "")
-	second, _ := r.Candidates("chat", "")
-	third, _ := r.Candidates("chat", "")
+	first, _ := r.Candidates("chat", "", "")
+	second, _ := r.Candidates("chat", "", "")
+	third, _ := r.Candidates("chat", "", "")
 
 	if first[0] != "a" || second[0] != "b" || third[0] != "c" {
 		t.Errorf("round-robin heads = %q/%q/%q, want a/b/c", first[0], second[0], third[0])
@@ -112,8 +112,8 @@ func TestRouter_Weighted_DeterministicWithInjectedRand(t *testing.T) {
 			return 5 // 5 >= a's 1 → falls in b
 		}
 		return 0
-	})
-	got, _ := r.Candidates("chat", "")
+	}, nil)
+	got, _ := r.Candidates("chat", "", "")
 	if got[0] != "b" {
 		t.Errorf("weighted head = %q, want b (rand landed in b's band)", got[0])
 	}
@@ -129,7 +129,7 @@ func TestRouter_Weighted_ZeroWeightsTreatedAsEqual(t *testing.T) {
 		Providers:  []config.RouteProvider{rp("a", 0), rp("b", 0)},
 	}}
 	r := newRouter(routes, newCircuitBreaker(circuitConfig{})) // rand → 0
-	got, err := r.Candidates("chat", "")
+	got, err := r.Candidates("chat", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestRouter_UnknownStrategy_DefaultsToPriority(t *testing.T) {
 		Providers:  []config.RouteProvider{rp("a", 0), rp("b", 0)},
 	}}
 	r := newRouter(routes, newCircuitBreaker(circuitConfig{}))
-	got, _ := r.Candidates("chat", "")
+	got, _ := r.Candidates("chat", "", "")
 	if !reflect.DeepEqual(got, []string{"a", "b"}) {
 		t.Errorf("got %v, want config order [a b]", got)
 	}

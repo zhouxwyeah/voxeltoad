@@ -198,4 +198,51 @@ func TestTraceQueries(t *testing.T) {
 	if string(d3.RequestRaw) != "null" {
 		t.Errorf("empty request_raw = %q, want \"null\"", string(d3.RequestRaw))
 	}
+
+	// Regression: non-empty but invalid JSON stored in messages/request_raw
+	// (truncated capture, older binary writing raw bytes, encoding glitch)
+	// must surface as a sentinel {"_invalid":<original>} — not bare "null"
+	// (which would silently swallow evidence) and not bare invalid JSON
+	// (which would fail the whole TraceDetail marshal). Verify both fields
+	// independently.
+	{
+		db := openTestDB(t)
+		seedTestData(t, db)
+		// Overwrite row 5's messages with invalid JSON text.
+		if err := db.Exec(`UPDATE trace_payloads SET messages = ? WHERE id = 5`, "{broken").Error; err != nil {
+			t.Fatalf("seed invalid messages: %v", err)
+		}
+		repo := NewQueryRepo(db)
+		d, ok, err := repo.GetTraceByRowID(context.Background(), 5)
+		if err != nil || !ok {
+			t.Fatalf("GetTraceByRowID(5 invalid messages) = %+v ok=%v err=%v", d, ok, err)
+		}
+		want := `{"_invalid":"{broken"}`
+		if string(d.Messages) != want {
+			t.Errorf("invalid messages = %q, want %q", string(d.Messages), want)
+		}
+		// And the whole TraceDetail must marshal cleanly.
+		if _, err := json.Marshal(d); err != nil {
+			t.Errorf("TraceDetail marshal with invalid messages: %v", err)
+		}
+	}
+	{
+		db := openTestDB(t)
+		seedTestData(t, db)
+		if err := db.Exec(`UPDATE trace_payloads SET request_raw = ? WHERE id = 5`, "{not json").Error; err != nil {
+			t.Fatalf("seed invalid request_raw: %v", err)
+		}
+		repo := NewQueryRepo(db)
+		d, ok, err := repo.GetTraceByRowID(context.Background(), 5)
+		if err != nil || !ok {
+			t.Fatalf("GetTraceByRowID(5 invalid request_raw) = %+v ok=%v err=%v", d, ok, err)
+		}
+		want := `{"_invalid":"{not json"}`
+		if string(d.RequestRaw) != want {
+			t.Errorf("invalid request_raw = %q, want %q", string(d.RequestRaw), want)
+		}
+		if _, err := json.Marshal(d); err != nil {
+			t.Errorf("TraceDetail marshal with invalid request_raw: %v", err)
+		}
+	}
 }

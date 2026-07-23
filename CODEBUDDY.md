@@ -18,6 +18,12 @@ voxeltoad —— 企业级大模型网关。Go 同构（数据面 + 管理面）
 
 **门禁约束**：任何 PR 若新增/删除/修改 `cmd/` 入口或顶层目录（含前端工程），**必须同步更新 `design/architecture.md`**（Layer Model L4 + Directory Layout + §三入口依赖矩阵）。architecture.md 自称是分层与依赖的单一事实来源——保持同步是 PR 作者的责任，不是 reviewer 的责任。`make check-docs` 会校验 architecture.md Directory Layout 与实际目录一致、backtick 路径存在。
 
+## Ingress Protocols (客户端入站协议)
+
+客户端入站协议（OpenAI `/v1/chat/completions`、Anthropic `/v1/messages`）由 `internal/ingress/` 层（L2，与 `internal/adapter/` 对偶）翻译为 unified 模型，使数据面 dispatcher/billing/telemetry 不感知入站协议。新增入站协议改哪些文件见 architecture.md 的 Common Tasks 表，设计决策见 [ADR-0045](docs/adr/0045-anthropic-ingress-protocol.md)。
+
+**门禁约束**：任何 PR 若新增 ingress codec 子目录（`internal/ingress/<name>/`）、修改 `Codec` 接口签名、或新增客户端路由（`r.Post(...)`），**必须同步更新 `design/architecture.md`**（L2 Layer Model + Directory Layout + Common Tasks 表）和 `docs/glossary.md`（新术语）。architecture.md 自称是分层与依赖的单一事实来源——保持同步是 PR 作者的责任，不是 reviewer 的责任。`make check-docs` 会校验 architecture.md Directory Layout 与实际目录一致。
+
 ## Unit Tests
 
 测什么、不测什么、Go 测试模式（表驱动 / 协议适配 / 计费 / 限流），遵循 [design/unit-test.md](design/unit-test.md)。

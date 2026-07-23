@@ -18,45 +18,52 @@ type DispatcherConfig struct {
 	Cooldown         time.Duration
 }
 
-// Dispatcher orchestrates routing and failover above the single-provider
-// Forwarders (ADR-0011): it resolves a model alias to ordered candidates, tries
-// each in turn (retrying only retryable failures), tracks per-provider circuit
-// health, and reports the provider actually hit (for billing / llm.provider).
+// Dispatcher orchestrates routing and failover above the single-endpoint
+// Forwarders (ADR-0011/0049): it resolves a model alias to ordered candidates,
+// expands each provider to the endpoint matching the ingress protocol, tries
+// each (provider, endpoint) in turn (retrying only retryable failures), tracks
+// per-endpoint circuit health, and reports the endpoint actually hit (for
+// billing / llm.provider / provider_endpoint).
 type Dispatcher struct {
 	router     *router
 	breaker    *circuitBreaker
-	forwarders map[string]*Forwarder
+	forwarders map[EndpointKey]*Forwarder
 	preparer   *modelPreparer // optional; nil = pass the request through unchanged
 }
 
-// NewDispatcher builds a Dispatcher from routes, a provider→Forwarder map, and
-// failover config. The forwarder map is rebuilt on config change (P0: built
-// once at wiring).
-func NewDispatcher(routes []config.Route, forwarders map[string]*Forwarder, cfg DispatcherConfig) *Dispatcher {
+// NewDispatcher builds a Dispatcher from routes, an EndpointKey→Forwarder map,
+// and failover config. The forwarder map is rebuilt on config change (P0:
+// built once at wiring). router's endpoint-health resolution is wired to the
+// preparer's endpoint selection once WithModelPreparation is called.
+func NewDispatcher(routes []config.Route, forwarders map[EndpointKey]*Forwarder, cfg DispatcherConfig) *Dispatcher {
 	breaker := newCircuitBreaker(circuitConfig(cfg))
 	rnd := rand.New(rand.NewSource(rand.Int63())) //nolint:gosec // load-balancing, not security
+	d := &Dispatcher{breaker: breaker, forwarders: forwarders}
 	r := newRouterWithRand(routes, breaker, func(n int) int {
 		if n <= 0 {
 			return 0
 		}
 		return rnd.Intn(n)
-	})
-	return &Dispatcher{router: r, breaker: breaker, forwarders: forwarders}
+	}, d.endpointFor)
+	d.router = r
+	return d
 }
 
 // NewSingleProviderDispatcher builds a Dispatcher that always forwards to one
-// provider with no routing or failover. It is the simplest deployment shape
-// (one upstream) and is convenient for tests. Any model alias resolves to this
-// single provider.
+// provider's default endpoint with no routing or failover. It is the simplest
+// deployment shape (one upstream) and is convenient for tests. Any model alias
+// resolves to this single endpoint.
 func NewSingleProviderDispatcher(fwd *Forwarder) *Dispatcher {
 	const only = "default"
 	breaker := newCircuitBreaker(circuitConfig{})
-	r := newRouterWithRand(
+	d := &Dispatcher{breaker: breaker, forwarders: map[EndpointKey]*Forwarder{{Provider: only, Endpoint: "default"}: fwd}}
+	d.router = newRouterWithRand(
 		[]config.Route{{ModelAlias: wildcardAlias, Providers: []config.RouteProvider{{Name: only}}}},
 		breaker,
 		func(int) int { return 0 },
+		d.endpointFor,
 	)
-	return &Dispatcher{router: r, breaker: breaker, forwarders: map[string]*Forwarder{only: fwd}}
+	return d
 }
 
 // wildcardAlias is the route key matched when no exact route exists (single
@@ -64,32 +71,49 @@ func NewSingleProviderDispatcher(fwd *Forwarder) *Dispatcher {
 const wildcardAlias = "*"
 
 // WithModelPreparation enables per-candidate request preparation (alias →
-// provider-native upstream model + protocol normalization, ADR-0002/0009) using
-// the given dynamic config. Without it, the Dispatcher forwards the request
-// as-is (used in tests that target a single mock upstream).
+// endpoint-native upstream model + protocol normalization, ADR-0002/0009/0049)
+// using the given dynamic config. Without it, the Dispatcher forwards the
+// request as-is (used in tests that target a single mock upstream).
 func (d *Dispatcher) WithModelPreparation(dyn *config.Dynamic) *Dispatcher {
 	d.preparer = newModelPreparer(dyn)
 	return d
 }
 
-// prepare returns the request to send to the named provider: prepared
+// endpointFor resolves which endpoint of a provider a request under the given
+// ingress protocol would use (ADR-0049). Returns (endpointID, adapterName).
+// Falls back to ("default", "") when no preparer is configured (single-
+// provider test mode) or the provider is unknown.
+func (d *Dispatcher) endpointFor(provider, ingressProtocol string) (string, string) {
+	if d.preparer == nil {
+		return "default", ""
+	}
+	ep, ok := d.preparer.pickEndpoint(provider, ingressProtocol)
+	if !ok {
+		return "default", ""
+	}
+	return ep.EndpointID(), ep.Adapter
+}
+
+// prepare returns the request to send to the given provider endpoint: prepared
 // (resolved + normalized) when a preparer is configured, else the original.
-func (d *Dispatcher) prepare(req *adapter.UnifiedRequest, provider string) (*adapter.UnifiedRequest, error) {
+func (d *Dispatcher) prepare(req *adapter.UnifiedRequest, key EndpointKey) (*adapter.UnifiedRequest, error) {
 	if d.preparer == nil {
 		return req, nil
 	}
-	return d.preparer.Prepare(req, provider)
+	return d.preparer.Prepare(req, key.Provider, key.Endpoint)
 }
 
 // DispatchResult carries the routing-layer facts an emit()/billing caller needs
-// beyond the response body itself: which provider was actually hit, what
-// upstream model name was resolved to (ADR-0002; equals the requested alias
-// when no preparer is configured), whether a fallback across candidates
+// beyond the response body itself: which provider endpoint was actually hit,
+// what upstream model name was resolved to (ADR-0002; equals the requested
+// alias when no preparer is configured), whether a fallback across candidates
 // occurred, and how many candidates were tried before the outcome (success or
 // final failure). These mirror the mandatory llm.model.resolved / llm.fallback
-// / llm.retry.count fields (design/observability.md).
+// / llm.retry.count fields (design/observability.md) plus the multi-endpoint
+// provider_endpoint attribution (ADR-0049).
 type DispatchResult struct {
 	Provider      string
+	Endpoint      string
 	ModelResolved string
 	Fallback      bool
 	RetryCount    int
@@ -99,23 +123,40 @@ type DispatchResult struct {
 	UpstreamRequestID string
 }
 
+// expandCandidates resolves each candidate provider to the endpoint this
+// request should use under its ingress protocol (ADR-0049): the endpoint whose
+// adapter matches the protocol, else the provider's primary endpoint. Provider
+// order is preserved (strategy-driven, ADR-0011); there is NO cross-provider
+// protocol partition anymore because each multi-endpoint provider natively
+// speaks the client's protocol via its matching endpoint.
+func (d *Dispatcher) expandCandidates(ctx context.Context, names []string) []EndpointKey {
+	protocol := ingressProtocolFrom(ctx)
+	out := make([]EndpointKey, 0, len(names))
+	for _, name := range names {
+		epID, _ := d.endpointFor(name, protocol)
+		out = append(out, EndpointKey{Provider: name, Endpoint: epID})
+	}
+	return out
+}
+
 // Forward routes a non-streaming request and fails over across candidates on
 // retryable errors. It returns the unified response and routing-layer result
-// facts (provider actually hit, resolved model, fallback/retry count).
+// facts (provider endpoint actually hit, resolved model, fallback/retry count).
 func (d *Dispatcher) Forward(ctx context.Context, alias string, req *adapter.UnifiedRequest) (*adapter.UnifiedResponse, DispatchResult, error) {
-	candidates, err := d.router.Candidates(alias, sessionKeyFrom(ctx))
+	candidates, err := d.router.Candidates(alias, sessionKeyFrom(ctx), ingressProtocolFrom(ctx))
 	if err != nil {
 		return nil, DispatchResult{}, err
 	}
+	keys := d.expandCandidates(ctx, candidates)
 	var lastErr error
 	configMismatches := 0
-	for i, name := range candidates {
-		fwd, ok := d.forwarders[name]
+	for i, key := range keys {
+		fwd, ok := d.forwarders[key]
 		if !ok {
-			lastErr = fmt.Errorf("proxy: no forwarder for provider %q", name)
+			lastErr = fmt.Errorf("proxy: no forwarder for %s", key)
 			continue
 		}
-		preq, err := d.prepare(req, name)
+		preq, err := d.prepare(req, key)
 		if err != nil {
 			lastErr = err // provider doesn't serve this alias; try the next
 			configMismatches++
@@ -123,9 +164,9 @@ func (d *Dispatcher) Forward(ctx context.Context, alias string, req *adapter.Uni
 		}
 		resp, err := fwd.Forward(ctx, preq)
 		if err == nil {
-			d.breaker.MarkSuccess(name)
+			d.breaker.MarkSuccess(key)
 			return resp, DispatchResult{
-				Provider: name, ModelResolved: preq.Model,
+				Provider: key.Provider, Endpoint: key.Endpoint, ModelResolved: preq.Model,
 				Fallback: i > 0, RetryCount: i,
 				UpstreamRequestID: resp.UpstreamRequestID,
 			}, nil
@@ -134,32 +175,33 @@ func (d *Dispatcher) Forward(ctx context.Context, alias string, req *adapter.Uni
 		if !retryable(err) {
 			// non-retryable (e.g. 4xx): stop, don't fail over. This attempt did
 			// resolve a model on this provider even though forwarding failed.
-			return nil, DispatchResult{Provider: name, ModelResolved: preq.Model, Fallback: i > 0, RetryCount: i}, err
+			return nil, DispatchResult{Provider: key.Provider, Endpoint: key.Endpoint, ModelResolved: preq.Model, Fallback: i > 0, RetryCount: i}, err
 		}
-		d.breaker.MarkFailure(name)
+		d.breaker.MarkFailure(key)
 	}
-	return nil, DispatchResult{RetryCount: len(candidates)}, failoverExhausted(lastErr, configMismatches, len(candidates))
+	return nil, DispatchResult{RetryCount: len(keys)}, failoverExhausted(lastErr, configMismatches, len(keys))
 }
 
 // ForwardStream routes a streaming request and fails over across candidates.
 // Per ADR-0011, failover only happens before the first byte: opening the stream
 // (ForwardStream) succeeds only after the upstream status is checked and before
 // any byte is relayed, so retrying the open across candidates is the boundary.
-// Once a reader is returned, that provider is locked.
+// Once a reader is returned, that provider endpoint is locked.
 func (d *Dispatcher) ForwardStream(ctx context.Context, alias string, req *adapter.UnifiedRequest) (adapter.StreamReader, DispatchResult, error) {
-	candidates, err := d.router.Candidates(alias, sessionKeyFrom(ctx))
+	candidates, err := d.router.Candidates(alias, sessionKeyFrom(ctx), ingressProtocolFrom(ctx))
 	if err != nil {
 		return nil, DispatchResult{}, err
 	}
+	keys := d.expandCandidates(ctx, candidates)
 	var lastErr error
 	configMismatches := 0
-	for i, name := range candidates {
-		fwd, ok := d.forwarders[name]
+	for i, key := range keys {
+		fwd, ok := d.forwarders[key]
 		if !ok {
-			lastErr = fmt.Errorf("proxy: no forwarder for provider %q", name)
+			lastErr = fmt.Errorf("proxy: no forwarder for %s", key)
 			continue
 		}
-		preq, err := d.prepare(req, name)
+		preq, err := d.prepare(req, key)
 		if err != nil {
 			lastErr = err
 			configMismatches++
@@ -167,16 +209,16 @@ func (d *Dispatcher) ForwardStream(ctx context.Context, alias string, req *adapt
 		}
 		sr, upstreamID, err := fwd.ForwardStream(ctx, preq)
 		if err == nil {
-			d.breaker.MarkSuccess(name)
-			return sr, DispatchResult{Provider: name, ModelResolved: preq.Model, Fallback: i > 0, RetryCount: i, UpstreamRequestID: upstreamID}, nil
+			d.breaker.MarkSuccess(key)
+			return sr, DispatchResult{Provider: key.Provider, Endpoint: key.Endpoint, ModelResolved: preq.Model, Fallback: i > 0, RetryCount: i, UpstreamRequestID: upstreamID}, nil
 		}
 		lastErr = err
 		if !retryable(err) {
-			return nil, DispatchResult{Provider: name, ModelResolved: preq.Model, Fallback: i > 0, RetryCount: i}, err
+			return nil, DispatchResult{Provider: key.Provider, Endpoint: key.Endpoint, ModelResolved: preq.Model, Fallback: i > 0, RetryCount: i}, err
 		}
-		d.breaker.MarkFailure(name)
+		d.breaker.MarkFailure(key)
 	}
-	return nil, DispatchResult{RetryCount: len(candidates)}, failoverExhausted(lastErr, configMismatches, len(candidates))
+	return nil, DispatchResult{RetryCount: len(keys)}, failoverExhausted(lastErr, configMismatches, len(keys))
 }
 
 // retryable reports whether a forwarding error is eligible for failover.

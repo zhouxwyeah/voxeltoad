@@ -16,7 +16,8 @@
     "errorType": "错误",
     "blockedBy": "拦截来源",
     "fallback": "故障转移",
-    "session": "会话"
+    "session": "会话",
+    "ingressProtocol": "入站协议"
   },
   "filters": {
     "from": "开始时间",
@@ -32,6 +33,7 @@
     "stream": "流式",
     "fallback": "故障转移",
     "sessionId": "会话 ID",
+    "ingressProtocol": "入站协议",
     "any": "全部",
     "streamTrue": "流式",
     "streamFalse": "非流式",
@@ -45,6 +47,12 @@
     "success": "正常",
     "yes": "是",
     "no": "否"
+  },
+  "badges": {
+    "passthrough": "直通",
+    "translated": "转换",
+    "passthroughHint": "命中 provider 的协议与入站协议匹配（协议感知路由通常直通；带 tools 的 Anthropic 请求在 claude adapter 完整支持 tools 前可能仍为转换）",
+    "translatedHint": "命中 provider 的协议与入站协议不同，经 unified 模型转换"
   },
   "actions": {
     "emptyState": "暂无请求日志，尝试调整时间范围或筛选条件。"

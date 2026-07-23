@@ -53,6 +53,32 @@ func sessionSourceFrom(ctx context.Context) string {
 	return ""
 }
 
+// ingressProtocolCtxType carries the client's ingress protocol ("openai" /
+// "anthropic") from the HTTP handler down to the dispatcher, so protocol-aware
+// routing (ADR-0047) can prefer providers whose adapter speaks the same wire
+// protocol. Empty = unknown / single-provider test mode (no protocol preference).
+type ingressProtocolCtxType struct{}
+
+// withIngressProtocol returns ctx carrying the ingress protocol for the
+// dispatcher's protocol-aware candidate reordering (ADR-0047).
+func withIngressProtocol(ctx context.Context, protocol string) context.Context {
+	if protocol == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, ingressProtocolCtxType{}, protocol)
+}
+
+// ingressProtocolFrom returns the ingress protocol on ctx, or "" if none. The
+// dispatcher reads this after Candidates to reorder candidates so
+// protocol-matching providers come first (passthrough), with others as
+// failover (translated).
+func ingressProtocolFrom(ctx context.Context) string {
+	if v, ok := ctx.Value(ingressProtocolCtxType{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
 // Session-source labels recorded on request_logs.session_source and the trace
 // span, so operators can see which mechanism carried each request's session key
 // (and thus how reliable its affinity is).

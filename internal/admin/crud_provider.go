@@ -66,12 +66,11 @@ func mountProviderCRUD(g *gin.RouterGroup, repo *store.ConfigRepo, credService c
 			badRequest(c, "provider name is required")
 			return
 		}
-		if !isKnownAdapter(req.Provider.Adapter) {
-			badRequest(c, "unknown adapter: "+req.Provider.Adapter)
-			return
-		}
-		if req.Provider.BaseURL == "" {
-			badRequest(c, "base_url is required")
+		// Multi-endpoint validation (ADR-0049): at least one endpoint, known
+		// adapters, non-empty base_urls, unique endpoint ids (adapter-derived
+		// defaults openai/anthropic when id is omitted).
+		if err := config.ValidateProvider(&req.Provider); err != nil {
+			badRequest(c, err.Error())
 			return
 		}
 		req.Provider.APIKeyRef = effectiveAPIKeyRef(req.Provider.Name, req.APIKey, req.Provider.APIKeyRef)
@@ -104,10 +103,15 @@ func mountProviderCRUD(g *gin.RouterGroup, repo *store.ConfigRepo, credService c
 		if !bind(c, &patch) {
 			return
 		}
-		// Adapter, if provided, must still name a registered adapter.
-		if patch.Adapter != nil && !isKnownAdapter(*patch.Adapter) {
-			badRequest(c, "unknown adapter: "+*patch.Adapter)
-			return
+		// Endpoints, if provided, are a whole-list replacement and must
+		// themselves validate (ADR-0049): the patched provider is checked by
+		// PatchProvider's read-modify-write, so validate the merged result.
+		if patch.Endpoints != nil {
+			merged := config.Provider{Name: name, Endpoints: *patch.Endpoints}
+			if err := config.ValidateProvider(&merged); err != nil {
+				badRequest(c, err.Error())
+				return
+			}
 		}
 		updated, ok, err := repo.PatchProvider(c.Request.Context(), name, patch)
 		if err != nil {

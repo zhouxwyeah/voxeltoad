@@ -51,6 +51,11 @@ const (
 	AttrTraceID            = "llm.trace_id"
 	AttrSessionSource      = "llm.session_source"
 	AttrAgentType          = "llm.agent_type"
+	// AttrIngressProtocol records which client wire shape served the request
+	// (openai / anthropic). Low-cardinality (2 values), observability-only:
+	// attached to the trace span, never a metric label, NOT persisted to the
+	// audit ledger (request_logs has no ingress_protocol column — see ADR-0045).
+	AttrIngressProtocol = "llm.ingress.protocol"
 )
 
 // Provider configures observability initialization.
