@@ -23,7 +23,7 @@ func settingsFn(captureEnabled bool, maxBodyKB int) func() *config.GatewaySettin
 // allocation, no field writes) when CapturePayloadEnabled is false (ADR-0039).
 // The trace payload fields must remain their zero values.
 func TestCaptureDisabledIsNoOp(t *testing.T) {
-	acc := newTelemetryAcc("m", false, "rid", "sid", "tid", settingsFn(false, 0))
+	acc := newTelemetryAcc("m", false, "rid", "", "sid", "tid", settingsFn(false, 0))
 	acc.captureRequest([]byte(`{"model":"m"}`), &adapter.UnifiedRequest{Model: "m"})
 	acc.captureResponse(&adapter.UnifiedResponse{Raw: []byte(`{"id":"r"}`)}, 200)
 	acc.captureStreamChunk([]byte("data: {}\n\n"), "stop")
@@ -39,7 +39,7 @@ func TestCaptureDisabledIsNoOp(t *testing.T) {
 // TestCaptureEnabledPopulatesFields verifies the capture methods populate the
 // trace payload fields when CapturePayloadEnabled is true.
 func TestCaptureEnabledPopulatesFields(t *testing.T) {
-	acc := newTelemetryAcc("m", false, "rid", "sid", "tid", settingsFn(true, 0))
+	acc := newTelemetryAcc("m", false, "rid", "", "sid", "tid", settingsFn(true, 0))
 	acc.captureRequest([]byte(`{"model":"m"}`), &adapter.UnifiedRequest{
 		Model:    "m",
 		Messages: []adapter.Message{{Role: adapter.RoleUser}},
@@ -64,7 +64,7 @@ func TestCaptureEnabledPopulatesFields(t *testing.T) {
 // accumulate the verbatim SSE wire-frame transcript in responseRaw (ADR-0039).
 // The transcript is not valid JSON, so it must be stored as TEXT, not JSONB.
 func TestCaptureEnabledPopulatesStreamResponseRaw(t *testing.T) {
-	acc := newTelemetryAcc("m", true, "rid", "sid", "tid", settingsFn(true, 0))
+	acc := newTelemetryAcc("m", true, "rid", "", "sid", "tid", settingsFn(true, 0))
 	frame1 := []byte("data: {\"id\":\"chunk-1\"}\n\n")
 	frame2 := []byte("data: [DONE]\n\n")
 	acc.captureStreamChunk(frame1, "")
@@ -86,7 +86,7 @@ func TestCaptureEnabledPopulatesStreamResponseRaw(t *testing.T) {
 // request/response bodies (ADR-0039). MaxBodyKB is in KB, so 1 → 1024-byte cap;
 // a 2048-byte body is truncated to 1024.
 func TestCaptureMaxBodyBytesCapsBodies(t *testing.T) {
-	acc := newTelemetryAcc("m", false, "rid", "sid", "tid", settingsFn(true, 1)) // 1 KB cap
+	acc := newTelemetryAcc("m", false, "rid", "", "sid", "tid", settingsFn(true, 1)) // 1 KB cap
 	big := make([]byte, 2048)
 	acc.captureRequest(big, &adapter.UnifiedRequest{})
 	acc.captureResponse(&adapter.UnifiedResponse{Raw: big}, 200)
@@ -106,7 +106,7 @@ func TestCaptureMaxBodyBytesCapsBodies(t *testing.T) {
 // TestCaptureNilSettingsIsDisabled verifies a nil settings source (e.g. before
 // the first snapshot fetch) leaves capture disabled — defensive default.
 func TestCaptureNilSettingsIsDisabled(t *testing.T) {
-	acc := newTelemetryAcc("m", false, "rid", "sid", "tid", nil)
+	acc := newTelemetryAcc("m", false, "rid", "", "sid", "tid", nil)
 	acc.captureRequest([]byte(`{"model":"m"}`), &adapter.UnifiedRequest{Model: "m"})
 	if len(acc.tracePL.requestRaw) != 0 {
 		t.Errorf("nil settings should disable capture; got requestRaw=%s", acc.tracePL.requestRaw)
@@ -119,7 +119,7 @@ func TestCaptureNilSettingsIsDisabled(t *testing.T) {
 // otherwise the stored trace_payloads row has messages="" which surfaces as
 // invalid JSON in the trace API.
 func TestCaptureEmptyMessagesIsValidJSON(t *testing.T) {
-	acc := newTelemetryAcc("m", false, "rid", "sid", "tid", settingsFn(true, 0))
+	acc := newTelemetryAcc("m", false, "rid", "", "sid", "tid", settingsFn(true, 0))
 
 	// Empty messages slice: must default to "[]" rather than nil.
 	acc.captureRequest([]byte(`{}`), &adapter.UnifiedRequest{Model: "m"})

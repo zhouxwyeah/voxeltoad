@@ -54,16 +54,25 @@ const defaultSessionHeader = "X-Voxeltoad-Session"
 // logs/usage to their own traces. They mirror the incoming trace headers and the
 // session header, in the response direction.
 const (
-	headerRequestID = "X-Request-Id"
-	headerSessionID = "X-Voxeltoad-Session"
-	headerTraceID   = "X-Trace-Id"
+	headerRequestID       = "X-Request-Id"
+	headerClientRequestID = "X-Client-Request-Id"
+	headerSessionID       = "X-Voxeltoad-Session"
+	headerTraceID         = "X-Trace-Id"
 )
 
 // echoCorrelationHeaders sets the correlation-id response headers. It is a
 // no-op for empty values; safe to call on every exit path (success/error).
-func echoCorrelationHeaders(w http.ResponseWriter, requestID, sessionID, traceID string) {
+//
+// ADR-0050: requestID is always the gateway-generated id. clientRequestID
+// (the client's original X-Request-Id) is echoed back as X-Client-Request-Id
+// when the client sent one — letting the caller correlate its id with the
+// gateway's without contaminating the canonical X-Request-Id response header.
+func echoCorrelationHeaders(w http.ResponseWriter, requestID, clientRequestID, sessionID, traceID string) {
 	if requestID != "" {
 		w.Header().Set(headerRequestID, requestID)
+	}
+	if clientRequestID != "" {
+		w.Header().Set(headerClientRequestID, clientRequestID)
 	}
 	if sessionID != "" {
 		w.Header().Set(headerSessionID, sessionID)
@@ -81,14 +90,20 @@ func WithSessionHeaders(headers ...string) Option {
 	return func(c *routerConfig) { c.sessionHeaders = headers }
 }
 
-// defaultTraceHeaders are the incoming request headers consulted, in priority
-// order, for an upstream trace/request ID before falling back to the gateway-
-// generated chi middleware ID.
+// defaultTraceHeaders are the incoming request headers consulted for trace
+// correlation. Post-ADR-0050, ONLY `traceparent` is honored (parsed into
+// trace_id); `X-Request-Id` and `X-Trace-Id` are ignored entirely (the former
+// is preserved separately as client_request_id by the request-id middleware;
+// the latter is dropped — see ADR-0050 "Scope of the split"). The list is
+// kept as a configurable array for forward compatibility, but entries other
+// than `traceparent` currently have no effect on requestID.
 var defaultTraceHeaders = []string{"X-Request-Id", "X-Trace-Id", "traceparent"}
 
 // WithTraceHeaders overrides the default list of incoming request headers used
-// to extract a trace/correlation id. Each different agent/caller can carry its
-// own trace header — configure the names it sends here.
+// to extract a trace/correlation id. Post-ADR-0050, only `traceparent` in this
+// list is honored (parsed into trace_id); other entries are kept for forward
+// compatibility but have no effect on requestID. See ADR-0050 for the full
+// split semantics.
 func WithTraceHeaders(headers ...string) Option {
 	return func(c *routerConfig) { c.traceHeaders = headers }
 }
@@ -288,8 +303,8 @@ func serveChat(codec ingress.Codec, provider DispatcherProvider, chain *plugin.C
 		rawBody, err := io.ReadAll(r.Body)
 		r.Body.Close()
 		if err != nil {
-			rid, sid, tid := requestAndSessionIDs(r, traceHdrs, extractor, nil)
-			acc := newTelemetryAcc("", false, rid, sid, tid, settings)
+			rid, cid, sid, tid := requestAndSessionIDs(r, traceHdrs, extractor, nil)
+			acc := newTelemetryAcc("", false, rid, cid, sid, tid, settings)
 			acc.agentType = agentType
 			defer func() { acc.emit(r.Context(), nil, audit, tracePL) }()
 			acc.errType = apperr.InvalidRequestBody.Code
@@ -304,8 +319,8 @@ func serveChat(codec ingress.Codec, provider DispatcherProvider, chain *plugin.C
 		// and sees the same unified shape regardless of how the request came in.
 		req, err := codec.DecodeRequest(rawBody)
 		if err != nil {
-			rid, sid, tid := requestAndSessionIDs(r, traceHdrs, extractor, nil)
-			acc := newTelemetryAcc("", false, rid, sid, tid, settings)
+			rid, cid, sid, tid := requestAndSessionIDs(r, traceHdrs, extractor, nil)
+			acc := newTelemetryAcc("", false, rid, cid, sid, tid, settings)
 			acc.agentType = agentType
 			defer func() { acc.emit(r.Context(), nil, audit, tracePL) }()
 			acc.errType = apperr.InvalidRequestBody.Code
@@ -347,21 +362,22 @@ func serveChat(codec ingress.Codec, provider DispatcherProvider, chain *plugin.C
 			}
 		}
 
-		// Resolve request-id (chi middleware), session-id (X-Voxeltoad-Session
-		// header), and the W3C trace-id (parsed from traceparent) for tracing and
-		// the audit ledger.
-		rid, sid, tid := requestAndSessionIDs(r, traceHdrs, extractor, req)
+		// Resolve request-id (chi middleware), client-request-id (client
+		// X-Request-Id, preserved separately per ADR-0050), session-id
+		// (X-Voxeltoad-Session header), and the W3C trace-id (parsed from
+		// traceparent) for tracing and the audit ledger.
+		rid, cid, sid, tid := requestAndSessionIDs(r, traceHdrs, extractor, req)
 		sessSrc := sessionSourceFrom(r.Context())
 
 		// Echo correlation ids on every response (success, error, or stream) so
 		// callers can join gateway logs/usage to their own traces. Set once here;
 		// the same ResponseWriter flows into the stream handler.
-		echoCorrelationHeaders(w, rid, sid, tid)
+		echoCorrelationHeaders(w, rid, cid, sid, tid)
 
 		// Single collection point: the accumulator is filled through the branches
 		// below and emitted once here on EVERY exit path (success or rejection),
 		// fanning out to telemetry (trace+metric) and the audit ledger.
-		acc := newTelemetryAcc("", false, rid, sid, tid, settings)
+		acc := newTelemetryAcc("", false, rid, cid, sid, tid, settings)
 		acc.sessionSource = sessSrc
 		acc.agentType = agentType
 		acc.ingressProtocol = string(codec.Protocol()) // llm.ingress.protocol (ADR-0045)
@@ -620,35 +636,35 @@ func readyzHandler(p ReadinessProbe) http.HandlerFunc {
 	}
 }
 
-// requestAndSessionIDs returns the gateway-assigned per-request correlation id
-// (from an incoming trace header, or chi middleware), the client-supplied
-// session key (resolved by the session-key extractor and carried on ctx), and
-// the W3C trace id parsed from the traceparent header (empty if absent or
-// malformed). traceHdrs is the ordered list of headers to check for an upstream
-// trace/correlation id; if none match, chi's middleware.RequestID is used as
-// fallback. The session id is read from ctx (where the handler's earlier
-// extractor.key call stored it with full body context); the req/ex args are kept
-// for the body-read-failure paths that have no ctx value yet.
-func requestAndSessionIDs(r *http.Request, traceHdrs []string, ex sessionKeyExtractor, req *adapter.UnifiedRequest) (requestID, sessionID, traceID string) {
-	// Check incoming trace headers first, fall back to chi.
+// requestAndSessionIDs returns:
+//   - requestID: the gateway-generated per-request correlation id (chi's
+//     middleware.RequestID). ADR-0050: this is ALWAYS gateway-generated;
+//     the client-supplied X-Request-Id is no longer adopted here.
+//   - clientRequestID: the client's original X-Request-Id header value
+//     (trimmed; empty when the client sent nothing). Preserved for separate
+//     persistence as client_request_id and for the X-Client-Request-Id
+//     response echo.
+//   - sessionID: the client-supplied session key (resolved by the session-key
+//     extractor and carried on ctx).
+//   - traceID: the W3C trace id parsed from the traceparent header (empty if
+//     absent or malformed).
+//
+// traceHdrs is now consulted ONLY for the traceparent header (to extract
+// traceID). It no longer influences requestID. The session id is read from
+// ctx (where the handler's earlier extractor.key call stored it with full
+// body context); the req/ex args are kept for the body-read-failure paths
+// that have no ctx value yet.
+func requestAndSessionIDs(r *http.Request, traceHdrs []string, ex sessionKeyExtractor, req *adapter.UnifiedRequest) (requestID, clientRequestID, sessionID, traceID string) {
 	requestID = middleware.GetReqID(r.Context())
+	clientRequestID = clientRequestIDFrom(r.Context())
 	for _, h := range traceHdrs {
-		if v := r.Header.Get(h); v != "" {
-			if h == "traceparent" {
+		if h == "traceparent" {
+			if v := r.Header.Get(h); v != "" {
 				// A W3C traceparent is never a request id. Parse its trace
-				// segment into traceID if well-formed, and continue looking
-				// for a real correlation id.
+				// segment into traceID if well-formed.
 				if tid, ok := parseTraceparent(v); ok {
 					traceID = tid
 				}
-				continue
-			}
-			// Reject nil/zero ids (e.g. "0000...0000") so a dirty client header
-			// can't overwrite the good id chi already minted (Part 1). Keep
-			// scanning the remaining headers instead of adopting the bad value.
-			if id, ok := normalizeRequestID(v); ok {
-				requestID = id
-				break
 			}
 		}
 	}

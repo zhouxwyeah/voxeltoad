@@ -19,6 +19,7 @@ export interface RequestLogView {
   blocked_by: string;
   fallback: boolean;
   request_id: string;
+  client_request_id: string;
   session_id: string;
   trace_id: string;
   session_source: string;
@@ -47,6 +48,7 @@ export interface SessionSummary {
 export interface TraceSummary {
   id: number;
   request_id: string;
+  client_request_id: string;
   session_id: string;
   trace_id: string;
   tenant: string;

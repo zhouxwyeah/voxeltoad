@@ -82,6 +82,46 @@ func TestTelemetry_SuccessRecordsAuditRow(t *testing.T) {
 	}
 }
 
+// TestTelemetry_ClientRequestIDPreservedAndRegenerated (ADR-0050): when the
+// client sends X-Request-Id, the gateway (1) records the original value in
+// RequestLog.ClientRequestID, (2) generates a DIFFERENT id for RequestID
+// (never adopts the client value), and (3) echoes both back via response
+// headers X-Request-Id (gateway) and X-Client-Request-Id (original).
+func TestTelemetry_ClientRequestIDPreservedAndRegenerated(t *testing.T) {
+	up := newUpstream(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(okBody))
+	})
+	rec := &fakeAuditRecorder{}
+	h := proxy.Router(newDispatcherFor(t, up), proxy.WithAuditRecorder(rec))
+
+	const clientID = "client-abc-123"
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(clientChatReq))
+	req.Header.Set("X-Request-Id", clientID)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rec.count() != 1 {
+		t.Fatalf("audit rows = %d, want 1", rec.count())
+	}
+	row := rec.last()
+	if row.ClientRequestID != clientID {
+		t.Errorf("client_request_id = %q, want %q", row.ClientRequestID, clientID)
+	}
+	if row.RequestID == "" {
+		t.Fatal("gateway request_id should be non-empty")
+	}
+	if row.RequestID == clientID {
+		t.Errorf("gateway request_id must differ from client value; both = %q", clientID)
+	}
+	// Response header echoes.
+	if got := rr.Header().Get("X-Client-Request-Id"); got != clientID {
+		t.Errorf("X-Client-Request-Id response header = %q, want %q", got, clientID)
+	}
+	if got := rr.Header().Get("X-Request-Id"); got != row.RequestID {
+		t.Errorf("X-Request-Id response header = %q, want %q (gateway-generated)", got, row.RequestID)
+	}
+}
+
 // stopPlugin rejects every request in Pre, simulating e.g. a quota/ratelimit
 // block, so we can assert rejections are still audited.
 type stopPlugin struct {

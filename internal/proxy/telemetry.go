@@ -37,7 +37,8 @@ type telemetryAcc struct {
 	errMsg        string // truncated underlying cause (e.g. "upstream returned 500: ...")
 	blockedBy     string
 
-	requestID         string // gateway-assigned per-request correlation id
+	requestID         string // gateway-assigned per-request correlation id (always gateway-generated; ADR-0050)
+	clientRequestID   string // client-supplied X-Request-Id header value (preserved separately; ADR-0050)
 	sessionID         string // client-supplied session key (X-Voxeltoad-Session header)
 	traceID           string // W3C trace id parsed from traceparent (empty if absent/invalid)
 	sessionSource     string // origin label of sessionID (observability only)
@@ -82,15 +83,19 @@ type tracePayloadAcc struct {
 
 // newTelemetryAcc starts an accumulator at request entry. settings is read on
 // each capture call so trace capture + the body cap are hot-reloadable.
-func newTelemetryAcc(modelRequested string, stream bool, requestID, sessionID, traceID string, settings func() *config.GatewaySettings) *telemetryAcc {
+// clientRequestID is the client's original X-Request-Id header value (preserved
+// separately from the gateway-generated requestID per ADR-0050); empty when the
+// client sent no header.
+func newTelemetryAcc(modelRequested string, stream bool, requestID, clientRequestID, sessionID, traceID string, settings func() *config.GatewaySettings) *telemetryAcc {
 	return &telemetryAcc{
-		start:          time.Now(),
-		modelRequested: modelRequested,
-		stream:         stream,
-		requestID:      requestID,
-		sessionID:      sessionID,
-		traceID:        traceID,
-		settings:       settings,
+		start:           time.Now(),
+		modelRequested:  modelRequested,
+		stream:          stream,
+		requestID:       requestID,
+		clientRequestID: clientRequestID,
+		sessionID:       sessionID,
+		traceID:         traceID,
+		settings:        settings,
 	}
 }
 
@@ -273,6 +278,7 @@ func (a *telemetryAcc) emit(ctx context.Context, pc *plugin.Context, audit obser
 		ErrorType:          a.errType,
 		ErrorDetail:        a.errMsg,
 		RequestID:          a.requestID,
+		ClientRequestID:    a.clientRequestID,
 		UpstreamRequestID:  a.upstreamRequestID,
 		SessionID:          a.sessionID,
 		TraceID:            a.traceID,
@@ -303,6 +309,7 @@ func (a *telemetryAcc) emit(ctx context.Context, pc *plugin.Context, audit obser
 			CacheTier:          cacheTier,
 			CacheSource:        cacheSource,
 			RequestID:          a.requestID,
+			ClientRequestID:    a.clientRequestID,
 			UpstreamRequestID:  a.upstreamRequestID,
 			SessionID:          a.sessionID,
 			TraceID:            a.traceID,
@@ -319,26 +326,27 @@ func (a *telemetryAcc) emit(ctx context.Context, pc *plugin.Context, audit obser
 	// unjoinable and dropped.
 	if tracePL != nil && a.requestID != "" {
 		tracePL.Record(ctx, observability.TracePayload{
-			RequestID:      a.requestID,
-			SessionID:      a.sessionID,
-			TraceID:        a.traceID,
-			Tenant:         tenant,
-			Group:          group,
-			APIKeyID:       keyID,
-			Provider:       a.provider,
-			ModelRequested: a.modelRequested,
-			Stream:         a.stream,
-			AgentType:      a.agentType,
+			RequestID:        a.requestID,
+			ClientRequestID:  a.clientRequestID,
+			SessionID:        a.sessionID,
+			TraceID:          a.traceID,
+			Tenant:           tenant,
+			Group:            group,
+			APIKeyID:         keyID,
+			Provider:         a.provider,
+			ModelRequested:   a.modelRequested,
+			Stream:           a.stream,
+			AgentType:        a.agentType,
 			IngressProtocol:  a.ingressProtocol,
 			ProviderEndpoint: a.providerEndpoint,
 			StatusCode:       a.tracePL.statusCode,
-			StopReason:     a.tracePL.stopReason,
-			NMessages:      a.tracePL.nMessages,
-			NToolUse:       a.tracePL.nToolUse,
-			Messages:       a.tracePL.messages,
-			RequestRaw:     a.tracePL.requestRaw,
-			ResponseRaw:    string(a.tracePL.responseRaw),
-			ErrorRaw:       a.tracePL.errorRaw,
+			StopReason:       a.tracePL.stopReason,
+			NMessages:        a.tracePL.nMessages,
+			NToolUse:         a.tracePL.nToolUse,
+			Messages:         a.tracePL.messages,
+			RequestRaw:       a.tracePL.requestRaw,
+			ResponseRaw:      string(a.tracePL.responseRaw),
+			ErrorRaw:         a.tracePL.errorRaw,
 		})
 	}
 

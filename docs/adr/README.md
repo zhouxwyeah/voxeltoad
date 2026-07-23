@@ -57,3 +57,4 @@ Produced and refined through `grill-with-docs` sessions.
 | [0047](0047-protocol-aware-routing.md) | Protocol-aware routing — implicit passthrough via candidate reordering + RawProtocol gating | **Superseded by [ADR-0049](0049-multi-endpoint-provider.md)** |
 | [0048](0048-ingress-toggle.md) | Anthropic ingress global toggle (GatewaySettings.Ingress.AnthropicDisabled, 404 on disable) | Accepted |
 | [0049](0049-multi-endpoint-provider.md) | Multi-endpoint Provider — protocol-aware routing at endpoint granularity (supersedes ADR-0047) | Accepted |
+| [0050](0050-client-request-id-split.md) | Client request ID split — gateway always generates, client original preserved as `client_request_id` (revises ADR-0021 §5) | Accepted |

@@ -8,6 +8,7 @@ import { TraceCategories } from "@/components/trace/trace-categories";
 
 export type TraceDetail = {
   request_id?: string;
+  client_request_id?: string;
   session_id?: string;
   tenant?: string;
   provider?: string;
