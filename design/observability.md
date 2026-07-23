@@ -32,26 +32,33 @@
 | `llm.retry.count` | 重试次数 | 转发层 |
 | `llm.fallback` | 是否发生供应商降级 | 路由层 |
 | `llm.error.type` | 错误分类（auth/ratelimit/upstream/timeout…） | 错误层 |
-| `llm.request_id` | gateway 分配（或上行透传）的请求关联 ID | entry middleware |
+| `llm.request_id` | **gateway 生成**的请求关联 ID（ADR-0050：总是网关生成，不再采纳客户端值） | chi middleware |
+| `llm.client_request_id` | 客户端 `X-Request-Id` header 原值（trim 后；空=客户端未发） | entry middleware 备份原值（ADR-0050） |
 | `llm.upstream_request_id` | provider 返回的请求关联 ID（OpenAI `x-request-id` 头、Anthropic `request-id` 头/body 等） | forwarder |
 | `llm.session_id` | 客户端传入的会话 key（`X-Voxeltoad-Session`） | 请求 header |
 | `llm.agent_type` | 调用方 agent 类型（claude-code/codex/…，未知为空；纯可观测性，非治理维度，不作 metric label） | User-Agent / `x-<vendor>-session-id` |
 | `llm.ingress.protocol` | 客户端入站协议（`openai` / `anthropic`，低基数枚举；纯可观测性，ADR-0045） | 路由路径（`/v1/chat/completions` / `/v1/messages`） |
 
-### request_id 与 session_id 与 upstream_request_id
+### request_id / client_request_id / session_id / upstream_request_id
 
-- **request_id**: 每条 LLM 请求的唯一标识。取值优先级：上行请求 header（默认 `X-Request-Id` → `X-Trace-Id` → `traceparent`，可配置 `WithTraceHeaders()`）→ chi middleware 自动生成。此值落库 `request_logs.request_id` 并注入 OTel span attribute，上联 trace 下联审计。注意：`request_id` 不是主键，也不是唯一键——客户端可能在同一 session 内复用，trace 详情查询首选 `trace_payloads.id`（自增主键）。
-- **upstream_request_id**: provider 在响应中返回的请求关联 ID。OpenAI 在响应头 `x-request-id`；Anthropic 在响应头 `request-id` 和 body `request_id`（头优先，body 由 adapter 兜底）；Google Gemini 在 `x-goog-request-id`。由 Forwarder 在 `resp.Header` 上提取，覆盖 adapter 从 body 填的兜底值。落库 `request_logs.upstream_request_id`，支持按上游 ID 反查（`idx_request_logs_upstream_request_id`）。仅捕获最终成功尝试的 ID；失败尝试的 ID 需 per-attempt 表（阶段二）。不回显给外部客户端（安全考虑）。
+每个请求有**三个关联 ID 字段**，组成 id 三元组（ADR-0050）：
+
+- **request_id**（gateway 生成）: 每条 LLM 请求的唯一标识。**总是由网关的 chi middleware 生成**（ADR-0050），不再采纳客户端 `X-Request-Id` 的值。落库 `request_logs.request_id` / `trace_payloads.request_id` 并注入 OTel span attribute `llm.request_id`，上联 trace 下联审计。客户端原值保留到 `client_request_id`。
+- **client_request_id**（客户端原值）: 客户端 `X-Request-Id` header 的原始值（trim 后）；空表示客户端未发该 header。**仅用于跨系统关联**（让运维用客户端报障的 id 反查网关请求），**不作为主关联键**——某些 agent（Claude Code、Codex 等）会复用同一 id 跨整个 session，无法唯一标识单个请求。落库 `request_logs.client_request_id` / `trace_payloads.client_request_id`（00027 新增）；注入 OTel span attribute `llm.client_request_id`。响应头 `X-Client-Request-Id` 回显原值（仅当客户端发送过）。
+- **`X-Trace-Id` header 不再被采纳**（ADR-0050 收窄）：旧版 priority chain 把 `X-Trace-Id` 作为 `X-Request-Id` 缺失时的 request_id fallback；ADR-0050 之后该 header **完全不被读取**——不备份、不采纳为 request_id、不解析为 trace_id。已知客户端均用 `X-Request-Id` 或 W3C `traceparent`，没有依赖 `X-Trace-Id` 的真实使用方。响应侧仍按 ADR-0040 回显 `X-Trace-Id`（值来自 traceparent 解析），是 pre-existing 的不对称。若未来出现依赖 `X-Trace-Id` 的 agent，应新增独立字段（如 `client_trace_id`）而非混用 `client_request_id`。
+- **upstream_request_id**（provider 返回）: provider 在响应中返回的请求关联 ID。OpenAI 在响应头 `x-request-id`；Anthropic 在响应头 `request-id` 和 body `request_id`（头优先，body 由 adapter 兜底）；Google Gemini 在 `x-goog-request-id`。由 Forwarder 在 `resp.Header` 上提取，覆盖 adapter 从 body 填的兜底值。落库 `request_logs.upstream_request_id`，支持按上游 ID 反查（`idx_request_logs_upstream_request_id`）。仅捕获最终成功尝试的 ID；失败尝试的 ID 需 per-attempt 表（阶段二）。不回显给外部客户端（安全考虑）。
 - **session_id**: 客户端传入的会话 key，从 `X-Voxeltoad-Session`（可配置多 header）或 body identity 字段提取。落库 `request_logs.session_id`，索引 `(session_id, created_at)` 支持按会话聚合查询请求链路。
 - **agent_type**: 由 User-Agent 子串匹配检测（缺失时回退到 `x-<vendor>-session-id` 反推），落库 `request_logs.agent_type` / `trace_payloads.agent_type` 并注入 OTel span attribute `llm.agent_type`。**只用于审计/trace/管理面会话聚合**，不参与限流、配额、计费、路由、熔断任何治理决策；唯一例外是诊断 counter `request_id_invalid_total{agent_type}`。
 
-决策背景与消费侧约束见 [ADR-0040](../docs/adr/0040-request-id-strategy.md)。要点：
+决策背景见 [ADR-0050](../docs/adr/0050-client-request-id-split.md)（id 三元组拆分）与 [ADR-0040](../docs/adr/0040-request-id-strategy.md)（历史策略，部分被 ADR-0050 修订）。要点：
 
-**为什么 `request_id` 不强制 UNIQUE**：客户端协作模型（ADR-0040 Decision 1）允许客户端在同一 session 内复用同一个 `X-Request-Id`，或 buggy/恶意客户端硬编码 ID。强制 UNIQUE 会拒绝合法复用场景，或迫使网关覆盖客户端 ID（让回显的 `X-Request-Id` 说谎）。代价是 `request_logs.request_id` 可能有重复行——由下面的消费侧约束兜底。
+**为什么 request_id 不再采纳客户端值（ADR-0050 修订）**：历史上 `request_id` 是"gateway 分配或上行透传"，但客户端协作模型（ADR-0040 Decision 1）允许客户端在同一 session 内复用同一个 `X-Request-Id`。在旧策略下，Claude Code / Codex 等 agent 的所有请求会落到同一个 `request_id`，破坏请求日志的唯一性、UI 列表的可读性、以及 LIMIT 1 查询的正确性。ADR-0050 改为：网关**总是**生成自己的 id；客户端原值落到 `client_request_id` 单独保留，跨系统关联能力不丢。
 
-**消费侧硬约束**：任何按 `request_id` 取**单条** trace 详情的代码，重复场景下必须用 `trace_payloads.id`（自增主键）点查 `TracePayloadQueryRepo.GetByRowID(rowID int64)`（`internal/store/tracepayload_query.go:120-145`），而非 `GetByRequestID`（`WHERE request_id = ? LIMIT 1`，重复时总是返回同一行）。前端 session 详情页已经走主键：`fetch-detail.ts:24` 调 `/api/v1/trace/rows/{id}`。`GetByRequestID` 仍保留用于 support/reconciliation 的"按客户端 ID 反查"场景（配合时间窗或 session 过滤）。
+**为什么 `request_id` 不强制 UNIQUE**：即便 ADR-0050 之后，`request_logs.request_id` 在理论上仍可不唯一（历史迁移行 + 极端情况）；强制 UNIQUE 会给数据迁移和老数据带来风险。消费侧用主键兜底（见下）。
 
-**不回显上游 ID 给客户端**：`echoCorrelationHeaders`（`internal/proxy/router.go:61-71`）只回显 `X-Request-Id` / `X-Voxeltoad-Session` / `X-Trace-Id` 三个网关自己的关联头。上游 `req_xxx`（OpenAI/Anthropic/Gemini 的内部 ID）永远不暴露给外部客户端——安全考虑（避免泄露上游基础设施拓扑）+ 行业惯例（Nginx/HAProxy/AWS ALB 都不透传后端 ID）。上游 ID 已落库 `request_logs.upstream_request_id`，客户端报障时运维可查。
+**消费侧硬约束**：任何按 `request_id` 取**单条** trace 详情的代码，重复场景下必须用 `trace_payloads.id`（自增主键）点查 `TracePayloadQueryRepo.GetByRowID(rowID int64)`（`internal/store/tracepayload_query.go:120-145`），而非 `GetByRequestID`（`WHERE request_id = ? LIMIT 1`，重复时总是返回同一行）。前端 session 详情页已经走主键：`fetch-detail.ts:24` 调 `/api/v1/trace/rows/{id}`。ADR-0050 之后新数据不再产生重复，但旧数据仍可能重复，所以该约束不变。
+
+**不回显上游 ID 给客户端**：`echoCorrelationHeaders`（`internal/proxy/router.go`）回显 `X-Request-Id`（gateway 生成）/ `X-Client-Request-Id`（客户端原值，仅当客户端发送过）/ `X-Voxeltoad-Session` / `X-Trace-Id` 四个网关自己的关联头。上游 `req_xxx`（OpenAI/Anthropic/Gemini 的内部 ID）永远不暴露给外部客户端——安全考虑（避免泄露上游基础设施拓扑）+ 行业惯例（Nginx/HAProxy/AWS ALB 都不透传后端 ID）。上游 ID 已落库 `request_logs.upstream_request_id`，客户端报障时运维可查。
 
 **重试/failover 的多上游 ID**：当前 `upstream_request_id` 只捕获**最终成功**那次尝试的 ID（ADR-0040 Decision 5）。失败/重试/failover 尝试的上游 ID 不捕获——这会破坏 `request_logs` "1 请求 = 1 行"的账本模型（ADR-0021 §5）。per-attempt 捕获（含失败重试）是阶段二增强，见 `docs/ops/failover-troubleshooting.md §8`。
 

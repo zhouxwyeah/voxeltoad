@@ -3,7 +3,7 @@
 > 管理面 PostgreSQL schema 的可视化与集中清单。ADR-0014 是决策源，本文件是单一事实来源（可视化 + 完整表清单 + 软引用关系 + 设计决定说明）。
 > **适用对象**：修改 schema、新增表、调整跨表引用关系时，先读本文件对齐全貌，再查相关 ADR 看决策背景。
 
-Schema 形状由 `internal/store/migrations/` 下的 25 个 goose 迁移定义（`00001`-`00026`，缺 `00018`）；本文件与之保持同步。其中 `00018` 因 trace 迁移重命名而跳过（见 git log `856613d`）。
+Schema 形状由 `internal/store/migrations/` 下的 26 个 goose 迁移定义（`00001`-`00027`，缺 `00018`）；本文件与之保持同步。其中 `00018` 因 trace 迁移重命名而跳过（见 git log `856613d`）。
 
 > **同步规则（门禁）**：任何 PR 若新增/修改/删除表、列、索引或约束（即触碰 `internal/store/migrations/` 下的 SQL 文件），**必须同步更新本文件**。检查清单：
 > - §1 表分类矩阵：新表归入正确分类，业务表计数同步
@@ -272,7 +272,8 @@ erDiagram
         varchar error_type
         varchar blocked_by "拦截插件名"
         boolean fallback "是否发生了 failover"
-        varchar request_id "gateway 分配/上行透传"
+        varchar request_id "gateway 生成 (ADR-0050)"
+        text    client_request_id "客户端 X-Request-Id 原值 (00027)"
         varchar session_id "X-Voxeltoad-Session header"
         varchar trace_id "W3C trace id (00015)"
         varchar session_source "session key 来源 (00016)"
@@ -290,6 +291,7 @@ erDiagram
     trace_payloads {
         bigint id "PK(id, created_at)"
         varchar request_id "应用层 join request_logs (非 FK)"
+        text    client_request_id "客户端 X-Request-Id 原值 (00027)"
         varchar session_id "X-Voxeltoad-Session header"
         varchar trace_id "W3C trace id"
         varchar tenant "反范式,无 FK"
@@ -332,7 +334,8 @@ erDiagram
 | `error_type` | 错误类型（`permission_error`/`rate_limit_error`/`api_error` 等） | router 拒绝状态映射 |
 | `blocked_by` | 拦截该请求的插件名（空=未被拦截） | plugin.Context.BlockedBy |
 | `fallback` | 是否发生了 failover | dispatcher 命中 provider 与首选不一致 |
-| `request_id` | gateway 分配（或上行透传）的请求关联 ID | entry middleware / 上行 header |
+| `request_id` | **gateway 生成**的请求关联 ID（ADR-0050：总是网关生成，不再采纳客户端值） | chi middleware 生成 |
+| `client_request_id` | 客户端 `X-Request-Id` header 原值（trim 后）；空=客户端未发。保留用于跨系统关联（ADR-0050） | entry middleware 备份原值（00027） |
 | `session_id` | 客户端传入的会话 key | `X-Voxeltoad-Session` header |
 | `trace_id` | W3C trace id（从 traceparent 解析，空=无/无效） | entry middleware（00015） |
 | `session_source` | session key 来源标签（header-config/body-session/body-metadata/body-user/prefix） | session 检测中间件（00016） |
@@ -345,13 +348,13 @@ erDiagram
 | `ingress_protocol` | 客户端入站协议（`openai` / `anthropic`；空=迁移前历史行），驱动管理面协议筛选与直通/转换 badge | 数据面 codec.Protocol()（00025） |
 | `provider_endpoint` | 命中 provider 内的端点 slug（`openai`/`anthropic`/自定义 id；空=迁移前历史行），多端点 provider 的用量归因（ADR-0049） | 数据面 DispatchResult.Endpoint（00026） |
 
-**如何关联链路**: `GET /api/v1/request-logs?session_id=X` 查询同一 session 的所有请求；`request_id` 用于精确定位单次请求并与 OTel trace 串联；`upstream_request_id` 用于售后/对账时定位到 provider 侧的请求记录（按上游 ID 反查网关请求，见索引自 `idx_request_logs_upstream_request_id`）。
+**如何关联链路**: `GET /api/v1/request-logs?session_id=X` 查询同一 session 的所有请求；`request_id`（gateway 生成，全局唯一）用于精确定位单次请求并与 OTel trace 串联；`client_request_id`（客户端原值，ADR-0050）用于跨系统关联到调用方的 trace；`upstream_request_id` 用于售后/对账时定位到 provider 侧的请求记录（按上游 ID 反查网关请求，见索引 `idx_request_logs_upstream_request_id`）。三者形成 id 三元组：gateway / client / upstream。
 
 **写入时机**：数据面异步 fail-open 记录（ADR-0016），不阻塞请求路径。写入失败只记日志不报错。
 
 **分区策略**：`PARTITION BY RANGE (created_at)` + `request_logs_default` 默认分区 + 月度分区（`00007_request_logs_monthly_partitions`），支持 partition-DROP TTL（ADR-0029）。
 
-**索引**：`idx_request_logs_created_at`、`idx_request_logs_tenant_created`、`idx_request_logs_session_created`（00010，按 session_id 查询）、`idx_request_logs_trace_id`（00015，按 trace 串联）、`idx_request_logs_upstream_request_id`（00024，按上游 ID 反查）。
+**索引**：`idx_request_logs_created_at`、`idx_request_logs_tenant_created`、`idx_request_logs_session_created`（00010，按 session_id 查询）、`idx_request_logs_trace_id`（00015，按 trace 串联）、`idx_request_logs_upstream_request_id`（00024，按上游 ID 反查）、`idx_request_logs_client_request_id`（00027，按客户端 ID 反查）。
 
 **读 API**：`GET /api/v1/request-logs`（offset 分页，支持 tenant/provider/model/error_type/session_id/request_id/upstream_request_id 等过滤 + CSV 导出）、`GET /api/v1/request-logs/sessions`（按 session 聚合）、`GET /api/v1/request-logs/sessions/:session_id`（session 内请求时间线）。RBAC 隔离：super-admin 全局视图，租户角色 scoped。
 
@@ -366,7 +369,7 @@ erDiagram
 | token 字段 | prompt/completion + cached_prompt_tokens | prompt/completion/total + cached_prompt_tokens |
 | 性能字段 | 无 | ttft_ms/duration_ms/error_type/blocked_by/fallback |
 | 缓存维度 | cache_discount_micros（折扣） | cache_hit/cache_tier/cache_source（命中详情） |
-| 关联 ID | request_id/session_id/trace_id | request_id/session_id/trace_id/upstream_request_id |
+| 关联 ID | request_id/session_id/trace_id | request_id/client_request_id/session_id/trace_id/upstream_request_id（三元组：gateway/client/upstream） |
 | agent 检测 | 无 | agent_type |
 
 两表都有 `tenant`/`group_name`/`api_key_id`/`provider` 反范式身份串，无 FK（ADR-0014:118-122：append-only 审计行应保留身份原样，不受后续重命名/删除影响）。
@@ -400,7 +403,7 @@ erDiagram
 | `agent_type` | 检测到的调用 agent（00023 后加） |
 | `ingress_protocol` | 客户端入站协议（00025 后加，`openai`/`anthropic`/空） |
 | `provider_endpoint` | 命中 provider 内的端点 slug（00026 后加，ADR-0049） |
-| `request_id` / `session_id` / `trace_id` / `tenant` / `group_name` / `api_key_id` | 与 `request_logs` 相同的关联身份串（应用层配对） |
+| `request_id` / `client_request_id` / `session_id` / `trace_id` / `tenant` / `group_name` / `api_key_id` | 与 `request_logs` 相同的关联身份串（应用层配对；`client_request_id` 由 00027 新增） |
 
 **捕获开关**：默认**关**（`gateway_settings.trace.capture_payload_enabled`），热重载（~5s 生效，无需重启）。关闭时捕获方法短路，零成本（不拷贝 body、不 marshal）。
 
@@ -408,7 +411,7 @@ erDiagram
 
 **分区策略**：`PARTITION BY RANGE (created_at)` + 默认分区 + 月度分区（`00020_trace_payloads_monthly_partitions`），partition-DROP TTL（默认 7 天，ADR-0039 §4）。DROP 是 O(1) 操作，避免 DELETE 扫描大 JSONB 行。
 
-**索引**：`idx_trace_payloads_request_id`（按 request_id 点查/配对）、`idx_trace_payloads_session_created`（session 视图）、`idx_trace_payloads_tenant_created`（租户列表）。
+**索引**：`idx_trace_payloads_request_id`（按 request_id 点查/配对）、`idx_trace_payloads_session_created`（session 视图）、`idx_trace_payloads_tenant_created`（租户列表）、`idx_trace_payloads_client_request_id`（00027，按客户端 ID 反查）。
 
 **读 API**：`GET /api/v1/trace/sessions/:session_id`（session 内 trace 列表）、`GET /api/v1/trace/requests/:request_id`（单请求详情，按 request_id）、`GET /api/v1/trace/rows/:id`（按自增主键点查，应对 request_id 重复场景）。**读访问被审计**（ADR-0039 §5，读 prompt/completion 明文是敏感操作，每次详情读都写 `audit_logs` 行）。
 

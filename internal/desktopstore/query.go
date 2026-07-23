@@ -63,6 +63,7 @@ type RequestLogView struct {
 	BlockedBy          string    `gorm:"column:blocked_by" json:"blocked_by"`
 	Fallback           bool      `gorm:"column:fallback" json:"fallback"`
 	RequestID          string    `gorm:"column:request_id" json:"request_id"`
+	ClientRequestID    string    `gorm:"column:client_request_id" json:"client_request_id"`
 	SessionID          string    `gorm:"column:session_id" json:"session_id"`
 	TraceID            string    `gorm:"column:trace_id" json:"trace_id"`
 	SessionSource      string    `gorm:"column:session_source" json:"session_source"`
@@ -79,7 +80,7 @@ const requestLogCols = `id, tenant, group_name, api_key_id, provider,
        model_requested, model_resolved, stream,
        prompt_tokens, completion_tokens, total_tokens,
        ttft_ms, duration_ms, error_type, blocked_by, fallback,
-       request_id, session_id, trace_id, session_source, agent_type,
+       request_id, client_request_id, session_id, trace_id, session_source, agent_type,
        cache_hit, cache_tier, cache_source, cached_prompt_tokens,
        upstream_request_id, created_at`
 

@@ -963,7 +963,17 @@ paths:
           in: query
           required: false
           schema: { type: string }
-          description: Filter to a single request by its gateway-assigned correlation id (exact lookup, debug/trace drill-down).
+          description: "Filter to a single request by its gateway-assigned correlation id (exact lookup, debug/trace drill-down). ADR-0050: always gateway-generated, unique per request."
+        - name: client_request_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: "Reverse lookup by client-supplied X-Request-Id header value (support: trace a client-side id to a gateway request). Empty matches rows where the client sent no header."
+        - name: upstream_request_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: Reverse lookup by provider-assigned id (support/reconciliation against vendor records).
         - name: agent_type
           in: query
           required: false
@@ -986,7 +996,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RequestLogPage' }
             text/csv:
-              schema: { type: string, description: "CSV export with headers: id,tenant,group_name,api_key_id,provider,model_requested,model_resolved,stream,prompt_tokens,completion_tokens,total_tokens,ttft_ms,duration_ms,error_type,blocked_by,fallback,request_id,session_id,trace_id,session_source,agent_type,cache_hit,cache_tier,cache_source,cached_prompt_tokens,ingress_protocol,created_at" }
+              schema: { type: string, description: "CSV export with headers: id,tenant,group_name,api_key_id,provider,model_requested,model_resolved,stream,prompt_tokens,completion_tokens,total_tokens,ttft_ms,duration_ms,error_type,blocked_by,fallback,request_id,client_request_id,session_id,trace_id,session_source,agent_type,cache_hit,cache_tier,cache_source,cached_prompt_tokens,upstream_request_id,ingress_protocol,created_at" }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
@@ -2147,7 +2157,8 @@ components:
         error_type: { type: string, description: "OpenAI-compatible error type, empty on success." }
         blocked_by: { type: string, description: Plugin name that blocked the request (empty if not blocked). }
         fallback: { type: boolean, description: Whether the request failed over across candidates before succeeding. }
-        request_id: { type: string, description: "Gateway-assigned per-request correlation id (sourced from the X-Request-Id/X-Trace-Id/traceparent header when present, otherwise chi-generated)." }
+        request_id: { type: string, description: "Gateway-assigned per-request correlation id (ADR-0050: always gateway-generated via chi middleware, unique per request; never the client-supplied value)." }
+        client_request_id: { type: string, description: "Client-supplied X-Request-Id header value (verbatim after trim). Preserved for cross-system correlation (ADR-0050); empty when the client sent no header. Some agents (Claude Code, Codex) reuse the same id across every request in a session, which is why it is NOT used as the primary correlation key." }
         upstream_request_id: { type: string, description: "Provider-assigned request id from the upstream response (OpenAI x-request-id header, Anthropic request-id header/body, …). Final/successful attempt only; empty when no upstream call succeeded or the provider returned no id." }
         session_id: { type: string, description: "Client-supplied session key from X-Voxeltoad-Session header." }
         trace_id: { type: string, description: "W3C trace id parsed from the traceparent header (empty if absent/invalid)." }
@@ -2298,6 +2309,7 @@ components:
       properties:
         id: { type: integer, format: int64 }
         request_id: { type: string }
+        client_request_id: { type: string, description: "Client-supplied X-Request-Id header value (ADR-0050); empty when the client sent no header." }
         session_id: { type: string }
         trace_id: { type: string }
         tenant: { type: string }

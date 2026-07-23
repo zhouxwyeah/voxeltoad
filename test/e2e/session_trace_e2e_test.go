@@ -157,17 +157,24 @@ func TestTrace_AgentDetectionAndRequestID(t *testing.T) {
 	if got := resp.Header.Get("X-Request-Id"); got == "" || got == "00000000000000000000000000000000" {
 		t.Errorf("echoed X-Request-Id = %q; expected a regenerated non-zero id", got)
 	}
+	// ADR-0050: the original client value is echoed back via X-Client-Request-Id
+	// even when it was a nil-uuid (the gateway preserves it for correlation
+	// while still regenerating its own).
+	if got := resp.Header.Get("X-Client-Request-Id"); got != "00000000000000000000000000000000" {
+		t.Errorf("echoed X-Client-Request-Id = %q; want the original nil-uuid value", got)
+	}
 	_ = resp.Body.Close()
 
 	waitForRowCount(t, h, "request_logs", "tenant = 'acme' AND session_id = 'sess-agent-001'", 1)
 
 	// Verify agent_type landed and request_id is NOT the zero value.
 	var row struct {
-		AgentType string `gorm:"column:agent_type"`
-		RequestID string `gorm:"column:request_id"`
+		AgentType       string `gorm:"column:agent_type"`
+		RequestID       string `gorm:"column:request_id"`
+		ClientRequestID string `gorm:"column:client_request_id"`
 	}
 	if err := h.DB.Raw(
-		`SELECT agent_type, request_id FROM request_logs
+		`SELECT agent_type, request_id, client_request_id FROM request_logs
 		 WHERE tenant = 'acme' AND session_id = 'sess-agent-001' LIMIT 1`,
 	).Scan(&row).Error; err != nil {
 		t.Fatalf("query request_logs: %v", err)
@@ -177,6 +184,9 @@ func TestTrace_AgentDetectionAndRequestID(t *testing.T) {
 	}
 	if row.RequestID == "" || row.RequestID == "00000000000000000000000000000000" {
 		t.Errorf("request_id = %q; expected a regenerated non-zero id", row.RequestID)
+	}
+	if row.ClientRequestID != "00000000000000000000000000000000" {
+		t.Errorf("client_request_id = %q; want the original nil-uuid preserved verbatim", row.ClientRequestID)
 	}
 
 	// Verify the session-list aggregation surfaces the agent type.
@@ -213,5 +223,68 @@ func TestTrace_AgentDetectionAndRequestID(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("sess-agent-001 not in sessions list (agent filter); got %d sessions", len(list.Data))
+	}
+}
+
+// TestTrace_ValidClientRequestIDRegenerated (ADR-0050): when a client sends a
+// VALID (non-nil-uuid) X-Request-Id, the gateway must STILL generate its own
+// request_id and never adopt the client value. The original survives in
+// client_request_id and is echoed via X-Client-Request-Id. This is the bug
+// scenario that motivated ADR-0050: some agents (Claude Code, Codex) reuse the
+// same id across every request in a session, which previously produced
+// duplicate request_id rows in request_logs.
+func TestTrace_ValidClientRequestIDRegenerated(t *testing.T) {
+	h := NewHarness(t)
+
+	var hits int
+	up := jsonUpstream("hi", 10, 5, &hits)
+	defer up.Close()
+
+	h.AddProvider("openai", up.URL(), "plain://k")
+	h.AddModel("chat", 1_000_000, 2_000_000, config.ModelUpstream{
+		Provider: "openai", UpstreamModel: "gpt-4o",
+	})
+	h.AddRoute("chat", "priority", config.RouteProvider{Name: "openai"})
+	h.SeedKey("sk-agent", "acme", "team-a", "key_agent", nil)
+	h.SetQuota("tenant:acme", 100_000_000)
+	h.SyncConfig()
+
+	// A client that sends a fixed, valid X-Request-Id — the reuse pattern.
+	const clientID = "client-fixed-xyz"
+	resp := h.ChatWithHeaders("sk-agent", "chat", false, map[string]string{
+		"X-Request-Id":        clientID,
+		"X-Voxeltoad-Session": "sess-reuse-001",
+	})
+	// Gateway must NOT echo the client id as X-Request-Id.
+	if got := resp.Header.Get("X-Request-Id"); got == "" || got == clientID {
+		t.Errorf("X-Request-Id = %q; want a gateway-generated id different from client value", got)
+	}
+	// But X-Client-Request-Id must carry the original.
+	if got := resp.Header.Get("X-Client-Request-Id"); got != clientID {
+		t.Errorf("X-Client-Request-Id = %q, want %q", got, clientID)
+	}
+	gatewayID := resp.Header.Get("X-Request-Id")
+	_ = resp.Body.Close()
+
+	waitForRowCount(t, h, "request_logs", "tenant = 'acme' AND session_id = 'sess-reuse-001'", 1)
+
+	var row struct {
+		RequestID       string `gorm:"column:request_id"`
+		ClientRequestID string `gorm:"column:client_request_id"`
+	}
+	if err := h.DB.Raw(
+		`SELECT request_id, client_request_id FROM request_logs
+		 WHERE tenant = 'acme' AND session_id = 'sess-reuse-001' LIMIT 1`,
+	).Scan(&row).Error; err != nil {
+		t.Fatalf("query request_logs: %v", err)
+	}
+	if row.RequestID != gatewayID {
+		t.Errorf("stored request_id = %q, want %q (gateway-generated, echoed in response)", row.RequestID, gatewayID)
+	}
+	if row.RequestID == clientID {
+		t.Error("stored request_id matches client value; gateway must regenerate, not adopt")
+	}
+	if row.ClientRequestID != clientID {
+		t.Errorf("stored client_request_id = %q, want %q", row.ClientRequestID, clientID)
 	}
 }

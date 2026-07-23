@@ -66,7 +66,7 @@ func TestStreamChatCompletions_EncodeChunkFailureRecordsTelemetry(t *testing.T) 
 	disp := NewSingleProviderDispatcher(newTestForwarder(t, upstream.URL))
 
 	// Telemetry accumulator + a failing codec wrapping the OpenAI codec.
-	acc := newTelemetryAcc("m", true, "rid", "sid", "tid", nil)
+	acc := newTelemetryAcc("m", true, "rid", "", "sid", "tid", nil)
 	codec := failingStreamCodec{inner: ingress.Lookup(ingress.ProtocolOpenAI)}
 
 	rr := httptest.NewRecorder()

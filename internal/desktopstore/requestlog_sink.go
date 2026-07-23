@@ -39,6 +39,7 @@ func (s *RequestLogSink) Record(ctx context.Context, r observability.RequestLog)
 		CacheTier:          r.CacheTier,
 		CacheSource:        r.CacheSource,
 		RequestID:          r.RequestID,
+		ClientRequestID:    r.ClientRequestID,
 		SessionID:          r.SessionID,
 		TraceID:            r.TraceID,
 		UpstreamRequestID:  r.UpstreamRequestID,
