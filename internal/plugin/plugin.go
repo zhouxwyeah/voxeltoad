@@ -45,6 +45,10 @@ type Context struct {
 
 	// Provider is the upstream actually selected (after routing/fallback).
 	Provider string
+	// ProviderEndpoint is the endpoint selected within the multi-endpoint
+	// provider (ADR-0049), e.g. "openai" or "anthropic". Carried so Post
+	// plugins (billing, audit) can attribute cost to the exact endpoint.
+	ProviderEndpoint string
 
 	// RequestID is the gateway-assigned per-request correlation id, populated
 	// by the router from trace headers (or generated when absent). Format is

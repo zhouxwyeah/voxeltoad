@@ -458,7 +458,7 @@ func serveChat(codec ingress.Codec, provider DispatcherProvider, chain *plugin.C
 			// Run Post even on failure so the Pre reservation (e.g. billing's
 			// quota pre-debit) is reconciled/refunded — no usage ⇒ full refund
 			// (ADR-0013/0016). dr.Provider is the last attempted upstream.
-			runPost(chain, pc, &adapter.UnifiedResponse{Model: req.Model}, dr.Provider)
+			runPost(chain, pc, &adapter.UnifiedResponse{Model: req.Model}, dr)
 			status, typ := mapForwardError(err)
 			acc.errType = typ
 			acc.errMsg = truncate([]byte(err.Error()), 256)
@@ -470,7 +470,7 @@ func serveChat(codec ingress.Codec, provider DispatcherProvider, chain *plugin.C
 		}
 
 		// Completion hook: Post phase (billing/quota debit, audit) — ADR-0012.
-		runPost(chain, pc, resp, dr.Provider)
+		runPost(chain, pc, resp, dr)
 		acc.setResult(dr, resp.Usage)
 		acc.captureResponse(resp, http.StatusOK)
 
@@ -490,14 +490,16 @@ func serveChat(codec ingress.Codec, provider DispatcherProvider, chain *plugin.C
 	}
 }
 
-// runPost populates the plugin Context with the completed response + hit
-// provider and runs the Post phase (the completion hook). Safe with a nil chain.
-func runPost(chain *plugin.Chain, pc *plugin.Context, resp *adapter.UnifiedResponse, provider string) {
+// runPost populates the plugin Context with the completed response, hit
+// provider + endpoint and runs the Post phase (the completion hook). Safe with
+// a nil chain.
+func runPost(chain *plugin.Chain, pc *plugin.Context, resp *adapter.UnifiedResponse, dr DispatchResult) {
 	if chain == nil {
 		return
 	}
 	pc.Response = resp
-	pc.Provider = provider
+	pc.Provider = dr.Provider
+	pc.ProviderEndpoint = dr.Endpoint
 	_ = chain.Run(pc, plugin.PhasePost)
 }
 

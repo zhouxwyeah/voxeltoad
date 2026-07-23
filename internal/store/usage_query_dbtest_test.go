@@ -17,9 +17,11 @@ func seedUsageAt(t *testing.T, db *store.DB, tenant string, cost int64, at time.
 	t.Helper()
 	if err := db.Exec(
 		`INSERT INTO usage_records
-		   (tenant, group_name, api_key_id, provider, model,
-		    prompt_tokens, completion_tokens, cost, created_at)
-		 VALUES (?, '', 'k', 'openai', 'gpt-4o', 10, 20, ?, ?)`,
+		   (tenant, group_name, api_key_id, provider, provider_endpoint, model,
+		    prompt_tokens, completion_tokens, cost,
+		    request_id, session_id, trace_id,
+		    cached_prompt_tokens, cache_discount_micros, created_at)
+		 VALUES (?, '', 'k', 'openai', '', 'gpt-4o', 10, 20, ?, '', '', '', 0, 0, ?)`,
 		tenant, cost, at,
 	).Error; err != nil {
 		t.Fatalf("seed usage: %v", err)

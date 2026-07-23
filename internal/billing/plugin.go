@@ -148,6 +148,7 @@ func (p *Plugin) settle(c *plugin.Context) error {
 		Group:               c.Group,
 		APIKeyID:            c.APIKeyID,
 		Provider:            c.Provider,
+		ProviderEndpoint:    c.ProviderEndpoint,
 		Model:               c.Request.Model,
 		PromptTokens:        usage.PromptTokens,
 		CompletionTokens:    usage.CompletionTokens,

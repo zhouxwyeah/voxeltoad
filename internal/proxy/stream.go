@@ -63,7 +63,7 @@ func streamChatCompletions(w http.ResponseWriter, r *http.Request, disp *Dispatc
 		}
 		_, _ = w.Write(codec.StreamTerminator())
 		flusher.Flush()
-		runPost(chain, pc, &adapter.UnifiedResponse{Model: req.Model, Usage: lastUsage}, dr.Provider)
+		runPost(chain, pc, &adapter.UnifiedResponse{Model: req.Model, Usage: lastUsage}, dr)
 		acc.setResult(dr, lastUsage)
 	}()
 

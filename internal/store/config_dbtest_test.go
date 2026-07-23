@@ -29,8 +29,9 @@ func TestConfigRepo_UpsertAndSnapshot(t *testing.T) {
 	repo := freshConfigRepo(t)
 
 	if err := repo.UpsertProvider(ctx, config.Provider{
-		Name: "openai-prod", Type: "openai", Adapter: "openai",
-		BaseURL: "https://api.openai.com/v1", APIKeyRef: "env://OPENAI_KEY", Weight: 1,
+		Name: "openai-prod", Type: "openai",
+		Endpoints: []config.ProviderEndpoint{{ID: "openai", Adapter: "openai", BaseURL: "https://api.openai.com/v1"}},
+		APIKeyRef: "env://OPENAI_KEY", Weight: 1,
 	}); err != nil {
 		t.Fatalf("UpsertProvider: %v", err)
 	}
@@ -77,8 +78,8 @@ func TestConfigRepo_UpsertReplaces(t *testing.T) {
 	ctx := context.Background()
 	repo := freshConfigRepo(t)
 
-	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p", Adapter: "openai", BaseURL: "u1"})
-	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p", Adapter: "openai", BaseURL: "u2"})
+	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p", Endpoints: []config.ProviderEndpoint{{Adapter: "openai", BaseURL: "u1"}}})
+	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p", Endpoints: []config.ProviderEndpoint{{Adapter: "openai", BaseURL: "u2"}}})
 
 	snap, err := repo.Snapshot(ctx)
 	if err != nil {
@@ -87,8 +88,8 @@ func TestConfigRepo_UpsertReplaces(t *testing.T) {
 	if len(snap.Providers) != 1 {
 		t.Fatalf("provider count = %d, want 1 (upsert replaces)", len(snap.Providers))
 	}
-	if snap.Providers[0].BaseURL != "u2" {
-		t.Errorf("BaseURL = %q, want u2 (latest)", snap.Providers[0].BaseURL)
+	if snap.Providers[0].Endpoints[0].BaseURL != "u2" {
+		t.Errorf("Endpoints[0].BaseURL = %q, want u2 (latest)", snap.Providers[0].Endpoints[0].BaseURL)
 	}
 	if snap.Version != "2" {
 		t.Errorf("Version = %q, want \"2\"", snap.Version)
@@ -100,8 +101,8 @@ func TestConfigRepo_Delete(t *testing.T) {
 	ctx := context.Background()
 	repo := freshConfigRepo(t)
 
-	_ = repo.UpsertProvider(ctx, config.Provider{Name: "a", Adapter: "openai", BaseURL: "u"})
-	_ = repo.UpsertProvider(ctx, config.Provider{Name: "b", Adapter: "openai", BaseURL: "u"})
+	_ = repo.UpsertProvider(ctx, config.Provider{Name: "a", Endpoints: []config.ProviderEndpoint{{Adapter: "openai", BaseURL: "u"}}})
+	_ = repo.UpsertProvider(ctx, config.Provider{Name: "b", Endpoints: []config.ProviderEndpoint{{Adapter: "openai", BaseURL: "u"}}})
 	if err := repo.DeleteProvider(ctx, "a"); err != nil {
 		t.Fatalf("DeleteProvider: %v", err)
 	}
@@ -122,8 +123,8 @@ func TestConfigRepo_Delete(t *testing.T) {
 func TestConfigRepo_ListProviders(t *testing.T) {
 	ctx := context.Background()
 	repo := freshConfigRepo(t)
-	_ = repo.UpsertProvider(ctx, config.Provider{Name: "a", Adapter: "openai", BaseURL: "u"})
-	_ = repo.UpsertProvider(ctx, config.Provider{Name: "b", Adapter: "claude", BaseURL: "u"})
+	_ = repo.UpsertProvider(ctx, config.Provider{Name: "a", Endpoints: []config.ProviderEndpoint{{Adapter: "openai", BaseURL: "u"}}})
+	_ = repo.UpsertProvider(ctx, config.Provider{Name: "b", Endpoints: []config.ProviderEndpoint{{Adapter: "claude", BaseURL: "u"}}})
 
 	got, err := repo.ListProviders(ctx)
 	if err != nil {
@@ -154,7 +155,7 @@ func TestConfigRepo_EmptySnapshot(t *testing.T) {
 func TestConfigRepo_GetModel(t *testing.T) {
 	ctx := context.Background()
 	repo := freshConfigRepo(t)
-	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p", Adapter: "openai", BaseURL: "u"})
+	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p", Endpoints: []config.ProviderEndpoint{{Adapter: "openai", BaseURL: "u"}}})
 	if err := repo.UpsertModel(ctx, config.Model{
 		Alias:     "chat",
 		Upstreams: []config.ModelUpstream{{Provider: "p", UpstreamModel: "gpt-4o"}},
@@ -219,7 +220,7 @@ func TestConfigRepo_GetRoute(t *testing.T) {
 func TestConfigRepo_PatchModelMetadata(t *testing.T) {
 	ctx := context.Background()
 	repo := freshConfigRepo(t)
-	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p", Adapter: "openai", BaseURL: "u"})
+	_ = repo.UpsertProvider(ctx, config.Provider{Name: "p", Endpoints: []config.ProviderEndpoint{{Adapter: "openai", BaseURL: "u"}}})
 	if err := repo.UpsertModel(ctx, config.Model{
 		Alias:         "chat",
 		Description:   "original",

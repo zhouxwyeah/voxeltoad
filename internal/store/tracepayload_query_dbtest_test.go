@@ -16,12 +16,17 @@ import (
 func seedTracePayload(t *testing.T, db *store.DB, tenant, requestID, sessionID, provider string, at time.Time) {
 	t.Helper()
 	if err := db.Exec(`INSERT INTO trace_payloads
-	    (request_id, session_id, tenant, provider, model_requested,
-	     status_code, stop_reason, n_messages, n_tool_use, messages, request_raw, response_raw, created_at)
-	    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?)`,
-		requestID, sessionID, tenant, provider, "chat",
+	    (request_id, session_id, trace_id, tenant, group_name, api_key_id,
+	     provider, model_requested, stream, agent_type,
+	     ingress_protocol, provider_endpoint,
+	     status_code, stop_reason, n_messages, n_tool_use,
+	     messages, request_raw, response_raw, error_raw, created_at)
+	    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		requestID, sessionID, "", tenant, "", "",
+		provider, "chat", false, "",
+		"", "",
 		200, "stop", 2, 0,
-		[]byte(`[{"role":"user","content":"hi"}]`), []byte(`{"model":"chat"}`), at).Error; err != nil {
+		[]byte(`[{"role":"user","content":"hi"}]`), []byte(`{"model":"chat"}`), "", "", at).Error; err != nil {
 		t.Fatalf("seed trace_payloads: %v", err)
 	}
 }

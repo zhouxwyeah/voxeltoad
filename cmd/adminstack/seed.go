@@ -61,9 +61,12 @@ func seedDemoData(ctx context.Context, db *store.DB, credService credential.Serv
 	}
 	for _, p := range providers {
 		if err := cfgRepo.UpsertProvider(ctx, config.Provider{
-			Name: p.name, Type: p.typ, Adapter: p.adapter,
-			BaseURL: p.baseURL, APIKeyRef: config.DBProviderRef(p.name),
-			Timeouts: providerTimeouts, Weight: 100,
+			Name: p.name, Type: p.typ,
+			Endpoints: []config.ProviderEndpoint{{
+				Adapter: p.adapter, BaseURL: p.baseURL,
+			}},
+			APIKeyRef: config.DBProviderRef(p.name),
+			Timeouts:  providerTimeouts, Weight: 100,
 		}); err != nil {
 			return "", fmt.Errorf("seed provider %q: %w", p.name, err)
 		}
