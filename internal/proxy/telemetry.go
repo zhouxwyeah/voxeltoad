@@ -43,6 +43,7 @@ type telemetryAcc struct {
 	traceID           string // W3C trace id parsed from traceparent (empty if absent/invalid)
 	sessionSource     string // origin label of sessionID (observability only)
 	agentType         string // detected agent/client type (claude-code, codex, …; "" if unknown)
+	userAgent         string // raw User-Agent header value (trimmed, length-capped; "" if absent)
 	ingressProtocol   string // client wire shape that served this request (openai/anthropic, ADR-0045)
 	providerEndpoint  string // hit provider's endpoint slug (ADR-0049, provider_endpoint column)
 	upstreamRequestID string // provider-assigned id from the successful attempt's response header/body
@@ -315,6 +316,7 @@ func (a *telemetryAcc) emit(ctx context.Context, pc *plugin.Context, audit obser
 			TraceID:            a.traceID,
 			SessionSource:      a.sessionSource,
 			AgentType:          a.agentType,
+			UserAgent:          a.userAgent,
 			IngressProtocol:    a.ingressProtocol,
 			ProviderEndpoint:   a.providerEndpoint,
 		})
@@ -337,6 +339,7 @@ func (a *telemetryAcc) emit(ctx context.Context, pc *plugin.Context, audit obser
 			ModelRequested:   a.modelRequested,
 			Stream:           a.stream,
 			AgentType:        a.agentType,
+			UserAgent:        a.userAgent,
 			IngressProtocol:  a.ingressProtocol,
 			ProviderEndpoint: a.providerEndpoint,
 			StatusCode:       a.tracePL.statusCode,

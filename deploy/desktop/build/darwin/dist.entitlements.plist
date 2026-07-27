@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Distribution entitlements (ad-hoc or Developer ID signing).
+	     Hardened Runtime is ON for distribution; App Sandbox is OFF
+	     (the desktop gateway binds arbitrary local ports + reads YAML
+	     config + writes SQLite files in user-chosen locations).
+	     For a notarized build, add com.apple.security.cs.disable-library-validation
+	     if the Go runtime loads unsigned dylibs. -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<key>com.apple.security.network.server</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<!-- Required by Wails/WebKit JIT compilation of JavaScript -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+</dict>
+</plist>

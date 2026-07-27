@@ -11,6 +11,7 @@ import {
 import { useTranslations } from "next-intl";
 import { deleteProvider, testProvider } from "./actions";
 import { Button } from "@/components/ui";
+import { Badge } from "@/components/ui/badge";
 import { ConfirmModal } from "@/components/modal";
 import { toast } from "@/lib/toast";
 
@@ -75,14 +76,11 @@ export function ProvidersTable({
               {eps.map((ep, i) => {
                 const v = ep.adapter ?? "";
                 const label = v === "claude" ? "Anthropic" : v === "openai" ? "OpenAI" : v;
-                const color =
-                  v === "claude"
-                    ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
-                    : "bg-blue-500/10 text-blue-600 dark:text-blue-400";
+                const variant = v === "claude" ? "warning" : "info";
                 return (
-                  <span key={i} className={`rounded-full px-2 py-0.5 text-xs font-medium ${color}`}>
+                  <Badge key={i} variant={variant as "warning" | "info"}>
                     {label}
-                  </span>
+                  </Badge>
                 );
               })}
             </div>

@@ -32,6 +32,7 @@ func (s *TracePayloadSink) Record(ctx context.Context, p observability.TracePayl
 		ModelRequested:  p.ModelRequested,
 		Stream:          p.Stream,
 		AgentType:       p.AgentType,
+		UserAgent:       p.UserAgent,
 		StatusCode:      p.StatusCode,
 		StopReason:      p.StopReason,
 		NMessages:       p.NMessages,

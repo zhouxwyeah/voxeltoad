@@ -68,6 +68,7 @@ type RequestLogView struct {
 	TraceID            string    `gorm:"column:trace_id" json:"trace_id"`
 	SessionSource      string    `gorm:"column:session_source" json:"session_source"`
 	AgentType          string    `gorm:"column:agent_type" json:"agent_type"`
+	UserAgent          string    `gorm:"column:user_agent" json:"user_agent"`
 	CacheHit           bool      `gorm:"column:cache_hit" json:"cache_hit"`
 	CacheTier          string    `gorm:"column:cache_tier" json:"cache_tier"`
 	CacheSource        string    `gorm:"column:cache_source" json:"cache_source"`
@@ -80,7 +81,7 @@ const requestLogCols = `id, tenant, group_name, api_key_id, provider,
        model_requested, model_resolved, stream,
        prompt_tokens, completion_tokens, total_tokens,
        ttft_ms, duration_ms, error_type, blocked_by, fallback,
-       request_id, client_request_id, session_id, trace_id, session_source, agent_type,
+       request_id, client_request_id, session_id, trace_id, session_source, agent_type, user_agent,
        cache_hit, cache_tier, cache_source, cached_prompt_tokens,
        upstream_request_id, created_at`
 
@@ -176,6 +177,7 @@ type SessionListFilter struct {
 type SessionSummary struct {
 	SessionID        string    `json:"session_id"`
 	AgentType        string    `json:"agent_type"`
+	UserAgent        string    `json:"user_agent"`
 	RequestCount     int       `json:"request_count"`
 	PromptTokens     int       `json:"prompt_tokens"`
 	CompletionTokens int       `json:"completion_tokens"`
@@ -199,6 +201,7 @@ type sessionAggRow struct {
 	StartedAt        time.Time `gorm:"column:started_at"`
 	LastSeen         time.Time `gorm:"column:last_seen"`
 	AgentType        string    `gorm:"column:agent_type"`
+	UserAgent        string    `gorm:"column:user_agent"`
 	HasErrors        int       `gorm:"column:has_errors"`
 }
 
@@ -254,9 +257,13 @@ func (r *QueryRepo) ListSessions(ctx context.Context, f SessionListFilter, page,
 	                       WHERE r4.session_id = request_logs.session_id
 	                       ORDER BY created_at DESC, id DESC LIMIT 1) AS last_seen,
 	             COALESCE((SELECT agent_type FROM request_logs r2
-	                       WHERE r2.session_id = request_logs.session_id
-	                         AND agent_type <> ''
-	                       ORDER BY created_at DESC, id DESC LIMIT 1), '') AS agent_type,
+		               WHERE r2.session_id = request_logs.session_id
+		                 AND agent_type <> ''
+		               ORDER BY created_at DESC, id DESC LIMIT 1), '') AS agent_type,
+		             COALESCE((SELECT user_agent FROM request_logs r5
+		               WHERE r5.session_id = request_logs.session_id
+		                 AND user_agent <> ''
+		               ORDER BY created_at DESC, id DESC LIMIT 1), '') AS user_agent,
 	             MAX(CASE WHEN error_type <> '' THEN 1 ELSE 0 END)  AS has_errors
 	      FROM request_logs
 	      WHERE ` + whereSQL + `
@@ -273,6 +280,7 @@ func (r *QueryRepo) ListSessions(ctx context.Context, f SessionListFilter, page,
 		out = append(out, SessionSummary{
 			SessionID:        a.SessionID,
 			AgentType:        a.AgentType,
+			UserAgent:        a.UserAgent,
 			RequestCount:     a.RequestCount,
 			PromptTokens:     a.PromptTokens,
 			CompletionTokens: a.CompletionTokens,
@@ -303,6 +311,7 @@ type TraceSummary struct {
 	ModelRequested string    `gorm:"column:model_requested" json:"model_requested"`
 	Stream         bool      `gorm:"column:stream" json:"stream"`
 	AgentType      string    `gorm:"column:agent_type" json:"agent_type"`
+	UserAgent      string    `gorm:"column:user_agent" json:"user_agent"`
 	StatusCode     int       `gorm:"column:status_code" json:"status_code"`
 	StopReason     string    `gorm:"column:stop_reason" json:"stop_reason"`
 	NMessages      int       `gorm:"column:n_messages" json:"n_messages"`
@@ -378,7 +387,7 @@ func rawMessageOrNull(s string) json.RawMessage {
 }
 
 const traceSummaryCols = `id, request_id, session_id, trace_id, tenant,
-       provider, model_requested, stream, agent_type,
+       provider, model_requested, stream, agent_type, user_agent,
        status_code, stop_reason, n_messages, n_tool_use, created_at`
 
 // ListTraceBySession returns the trace events for a session_id in chronological

@@ -64,14 +64,22 @@ providers:
     api_key_ref: "plain://${GATEWAY_SEED_KIMI_KEY:-}"
     timeouts: {connect: 5s, first_byte: 2m, overall: 5m}
     weight: 100
+  - name: GLM
+    type: zhipu
+    adapter: openai
+    base_url: https://open.bigmodel.cn/api/coding/paas/v4
+    api_key_ref: "plain://${GATEWAY_SEED_GLM_KEY:-}"
+    timeouts: {connect: 5s, first_byte: 2m, overall: 5m}
+    weight: 100
 models:
   - alias: deepseek-v4-flash
     upstreams:
       - {provider: 深度求索, upstream_model: deepseek-v4-flash, pricing: {prompt_per_1m: 2500000, completion_per_1m: 10000000, currency: usd}}
-      - {provider: TokenHub, upstream_model: deepseek-v4-flash, pricing: {prompt_per_1m: 3000000, completion_per_1m: 15000000, currency: usd}}
+      - {provider: TokenHub, upstream_model: deepseek-v4-flash, pricing: {prompt_per_1m: 2500000, completion_per_1m: 10000000, currency: usd}}
   - alias: deepseek-v4-pro
     upstreams:
       - {provider: 深度求索, upstream_model: deepseek-v4-pro, pricing: {prompt_per_1m: 150000, completion_per_1m: 600000, currency: usd}}
+      - {provider: TokenHub, upstream_model: deepseek-v4-pro, pricing: {prompt_per_1m: 150000, completion_per_1m: 600000, currency: usd}}
   - alias: hy3
     upstreams:
       - {provider: TokenHub, upstream_model: hy3, pricing: {prompt_per_1m: 150000, completion_per_1m: 600000, currency: usd}}
@@ -81,12 +89,16 @@ models:
   - alias: kimi-for-coding
     upstreams:
       - {provider: Kimi-code, upstream_model: kimi-for-coding, pricing: {prompt_per_1m: 150000, completion_per_1m: 600000, currency: usd}}
+  - alias: glm-5.2
+    upstreams:
+      - {provider: GLM, upstream_model: glm-5.2, pricing: {prompt_per_1m: 150000, completion_per_1m: 600000, currency: usd}}
 routes:
   - {model_alias: deepseek-v4-flash, strategy: priority, providers: [{name: 深度求索, weight: 1}, {name: TokenHub, weight: 1}]}
   - {model_alias: deepseek-v4-pro, strategy: round_robin, providers: [{name: 深度求索, weight: 1}, {name: TokenHub, weight: 1}]}
   - {model_alias: hy3, strategy: session_affinity, providers: [{name: TokenHub, weight: 1}]}
   - {model_alias: kimi-k2.7-code, strategy: session_affinity, providers: [{name: TokenHub, weight: 1}]}
   - {model_alias: kimi-for-coding, strategy: session_affinity, providers: [{name: Kimi-code, weight: 1}]}
+  - {model_alias: glm-5.2, strategy: session_affinity, providers: [{name: GLM, weight: 1}]}
 settings:
   trace: {capture_payload_enabled: true, max_body_kb: 256, retention_days: 30}
 EOF

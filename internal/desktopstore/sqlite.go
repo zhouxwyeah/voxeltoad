@@ -112,6 +112,7 @@ type RequestLogRow struct {
 	UpstreamRequestID  string    `gorm:"column:upstream_request_id"`
 	SessionSource      string    `gorm:"column:session_source"`
 	AgentType          string    `gorm:"column:agent_type;index"`
+	UserAgent          string    `gorm:"column:user_agent"`
 	CreatedAt          time.Time `gorm:"column:created_at;index"`
 }
 
@@ -133,6 +134,7 @@ type TracePayloadRow struct {
 	ModelRequested  string    `gorm:"column:model_requested"`
 	Stream          bool      `gorm:"column:stream"`
 	AgentType       string    `gorm:"column:agent_type;index"`
+	UserAgent       string    `gorm:"column:user_agent"`
 	StatusCode      int       `gorm:"column:status_code"`
 	StopReason      string    `gorm:"column:stop_reason"`
 	NMessages       int       `gorm:"column:n_messages"`

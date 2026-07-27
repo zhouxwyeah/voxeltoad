@@ -6,6 +6,11 @@
 #   2. Sync dist/ → deploy/desktop/app/dist/ (the //go:embed source)
 #   3. `wails build` under deploy/desktop/ → bundles the platform installer
 #
+# After wails build (darwin only):
+#   - Ad-hoc codesign the .app bundle (identity "-", no Apple Developer cert needed)
+#   - Create a DMG for distribution
+#   Users still need right-click → Open on first launch to bypass Gatekeeper.
+#
 # Platform selection:
 #   ./scripts/build-desktop.sh                  # default: darwin
 #   ./scripts/build-desktop.sh darwin           # macOS .app bundle (universal)
@@ -21,7 +26,8 @@
 #   - Linux/WSL2: sudo apt install mingw-w64 nsis
 #
 # Output:
-#   darwin:         deploy/desktop/build/bin/voxeltoad-desktop.app
+#   darwin:         deploy/desktop/build/bin/voxeltoad-desktop.app (ad-hoc signed)
+#                   deploy/desktop/build/bin/voxeltoad-desktop.dmg
 #   windows*:       deploy/desktop/build/bin/voxeltoad-desktop-amd64-installer.exe
 set -euo pipefail
 
@@ -74,7 +80,35 @@ cd deploy/desktop
 
 case "$TARGET" in
   darwin)
+    APP="$ROOT/deploy/desktop/build/bin/voxeltoad-desktop.app"
     CGO_ENABLED=1 "$WAILS_BIN" build -tags desktop -ldflags "$LDFLAGS" -platform darwin/universal
+
+    # ---- Ad-hoc code-sign the .app bundle ----
+    # Identity "-" means ad-hoc signing (no Apple Developer cert needed).
+    # This prevents the bundle from being instantly quarantined as damaged;
+    # users still need to right-click → Open on first launch to bypass
+    # Gatekeeper's notarization check.
+    ENTITLEMENTS="$ROOT/deploy/desktop/build/darwin/dist.entitlements.plist"
+    if [ -f "$ENTITLEMENTS" ]; then
+      echo
+      echo "  signing with ad-hoc identity (codesign --sign -)"
+      codesign --force --deep --sign - \
+        --entitlements "$ENTITLEMENTS" \
+        --options runtime \
+        "$APP"
+    else
+      echo "  warning: entitlements not found at $ENTITLEMENTS — skipping codesign"
+    fi
+
+    # ---- Create DMG for distribution ----
+    DMG_DIR="$ROOT/deploy/desktop/build/bin"
+    DMG="$DMG_DIR/voxeltoad-desktop.dmg"
+    echo "  creating DMG: $DMG"
+    hdiutil create -volname "voxeltoad 桌面" \
+      -srcfolder "$APP" \
+      -ov -format UDZO \
+      "$DMG" >/dev/null
+    echo "  DMG size: $(du -sh "$DMG" | awk '{print $1}')"
     ;;
   windows)
     # Run on Windows. NSIS must be installed (choco install nsis).
@@ -109,10 +143,15 @@ echo
 case "$TARGET" in
   darwin)
     APP="$ROOT/deploy/desktop/build/bin/voxeltoad-desktop.app"
+    DMG="$ROOT/deploy/desktop/build/bin/voxeltoad-desktop.dmg"
     if [ -d "$APP" ]; then
       echo "✓ built: $APP"
       echo "  size: $(du -sh "$APP" | awk '{print $1}')"
+      if [ -f "$DMG" ]; then
+        echo "✓ DMG:   $DMG"
+      fi
       echo "  open with: open '$APP'"
+      echo "  (first launch: right-click → Open to bypass Gatekeeper)"
     else
       echo "✗ expected output not found at $APP"
       exit 1

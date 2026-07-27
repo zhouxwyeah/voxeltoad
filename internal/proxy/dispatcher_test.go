@@ -42,7 +42,7 @@ func TestDispatcher_FirstProviderSucceeds(t *testing.T) {
 
 	d := proxy.NewDispatcher(
 		[]config.Route{{ModelAlias: "gpt-4o", Strategy: "priority", Providers: []config.RouteProvider{{Name: "a"}, {Name: "b"}}}},
-		map[proxy.EndpointKey]*proxy.Forwarder{proxy.EndpointKey{Provider: "a", Endpoint: "default"}: fwdTo(t, up.URL), proxy.EndpointKey{Provider: "b", Endpoint: "default"}: fwdTo(t, up.URL)},
+		map[proxy.EndpointKey]*proxy.Forwarder{{Provider: "a", Endpoint: "default"}: fwdTo(t, up.URL), {Provider: "b", Endpoint: "default"}: fwdTo(t, up.URL)},
 		proxy.DispatcherConfig{FailureThreshold: 3, Cooldown: time.Minute},
 	)
 
@@ -81,7 +81,7 @@ func TestDispatcher_FailsOverOn5xx(t *testing.T) {
 
 	d := proxy.NewDispatcher(
 		[]config.Route{{ModelAlias: "gpt-4o", Strategy: "priority", Providers: []config.RouteProvider{{Name: "a"}, {Name: "b"}}}},
-		map[proxy.EndpointKey]*proxy.Forwarder{proxy.EndpointKey{Provider: "a", Endpoint: "default"}: fwdTo(t, bad.URL), proxy.EndpointKey{Provider: "b", Endpoint: "default"}: fwdTo(t, good.URL)},
+		map[proxy.EndpointKey]*proxy.Forwarder{{Provider: "a", Endpoint: "default"}: fwdTo(t, bad.URL), {Provider: "b", Endpoint: "default"}: fwdTo(t, good.URL)},
 		proxy.DispatcherConfig{FailureThreshold: 3, Cooldown: time.Minute},
 	)
 
@@ -121,7 +121,7 @@ func TestDispatcher_DoesNotFailOverOn4xx(t *testing.T) {
 
 	d := proxy.NewDispatcher(
 		[]config.Route{{ModelAlias: "gpt-4o", Strategy: "priority", Providers: []config.RouteProvider{{Name: "a"}, {Name: "b"}}}},
-		map[proxy.EndpointKey]*proxy.Forwarder{proxy.EndpointKey{Provider: "a", Endpoint: "default"}: fwdTo(t, bad.URL), proxy.EndpointKey{Provider: "b", Endpoint: "default"}: fwdTo(t, good.URL)},
+		map[proxy.EndpointKey]*proxy.Forwarder{{Provider: "a", Endpoint: "default"}: fwdTo(t, bad.URL), {Provider: "b", Endpoint: "default"}: fwdTo(t, good.URL)},
 		proxy.DispatcherConfig{FailureThreshold: 3, Cooldown: time.Minute},
 	)
 
@@ -142,7 +142,7 @@ func TestDispatcher_AllFail_ReturnsLastError(t *testing.T) {
 
 	d := proxy.NewDispatcher(
 		[]config.Route{{ModelAlias: "gpt-4o", Strategy: "priority", Providers: []config.RouteProvider{{Name: "a"}, {Name: "b"}}}},
-		map[proxy.EndpointKey]*proxy.Forwarder{proxy.EndpointKey{Provider: "a", Endpoint: "default"}: fwdTo(t, bad.URL), proxy.EndpointKey{Provider: "b", Endpoint: "default"}: fwdTo(t, bad.URL)},
+		map[proxy.EndpointKey]*proxy.Forwarder{{Provider: "a", Endpoint: "default"}: fwdTo(t, bad.URL), {Provider: "b", Endpoint: "default"}: fwdTo(t, bad.URL)},
 		proxy.DispatcherConfig{FailureThreshold: 3, Cooldown: time.Minute},
 	)
 	if _, _, err := d.Forward(context.Background(), "gpt-4o", dispatchReq()); err == nil {
@@ -166,7 +166,7 @@ func TestDispatcher_TripsBreakerAfterRepeatedFailures(t *testing.T) {
 
 	d := proxy.NewDispatcher(
 		[]config.Route{{ModelAlias: "gpt-4o", Strategy: "priority", Providers: []config.RouteProvider{{Name: "a"}, {Name: "b"}}}},
-		map[proxy.EndpointKey]*proxy.Forwarder{proxy.EndpointKey{Provider: "a", Endpoint: "default"}: fwdTo(t, bad.URL), proxy.EndpointKey{Provider: "b", Endpoint: "default"}: fwdTo(t, good.URL)},
+		map[proxy.EndpointKey]*proxy.Forwarder{{Provider: "a", Endpoint: "default"}: fwdTo(t, bad.URL), {Provider: "b", Endpoint: "default"}: fwdTo(t, good.URL)},
 		proxy.DispatcherConfig{FailureThreshold: 2, Cooldown: time.Minute},
 	)
 
@@ -200,7 +200,7 @@ func TestDispatcher_StreamFailsOverBeforeFirstByte(t *testing.T) {
 
 	d := proxy.NewDispatcher(
 		[]config.Route{{ModelAlias: "gpt-4o", Strategy: "priority", Providers: []config.RouteProvider{{Name: "a"}, {Name: "b"}}}},
-		map[proxy.EndpointKey]*proxy.Forwarder{proxy.EndpointKey{Provider: "a", Endpoint: "default"}: fwdTo(t, bad.URL), proxy.EndpointKey{Provider: "b", Endpoint: "default"}: fwdTo(t, good.URL)},
+		map[proxy.EndpointKey]*proxy.Forwarder{{Provider: "a", Endpoint: "default"}: fwdTo(t, bad.URL), {Provider: "b", Endpoint: "default"}: fwdTo(t, good.URL)},
 		proxy.DispatcherConfig{FailureThreshold: 3, Cooldown: time.Minute},
 	)
 
@@ -259,7 +259,7 @@ func TestDispatcher_WithModelPreparation_ResolvesUpstreamName(t *testing.T) {
 	}
 	d := proxy.NewDispatcher(
 		[]config.Route{{ModelAlias: "default-chat", Strategy: "priority", Providers: []config.RouteProvider{{Name: "a"}}}},
-		map[proxy.EndpointKey]*proxy.Forwarder{proxy.EndpointKey{Provider: "a", Endpoint: "default"}: fwdTo(t, up.URL)},
+		map[proxy.EndpointKey]*proxy.Forwarder{{Provider: "a", Endpoint: "default"}: fwdTo(t, up.URL)},
 		proxy.DispatcherConfig{FailureThreshold: 3, Cooldown: time.Minute},
 	).WithModelPreparation(dyn)
 
@@ -299,7 +299,7 @@ func TestDispatcher_ConfigMismatch_AllCandidatesFailPrepare(t *testing.T) {
 	}
 	d := proxy.NewDispatcher(
 		[]config.Route{{ModelAlias: "chat", Strategy: "priority", Providers: []config.RouteProvider{{Name: "a"}, {Name: "b"}}}},
-		map[proxy.EndpointKey]*proxy.Forwarder{proxy.EndpointKey{Provider: "a", Endpoint: "default"}: fwdTo(t, up.URL), proxy.EndpointKey{Provider: "b", Endpoint: "default"}: fwdTo(t, up.URL)},
+		map[proxy.EndpointKey]*proxy.Forwarder{{Provider: "a", Endpoint: "default"}: fwdTo(t, up.URL), {Provider: "b", Endpoint: "default"}: fwdTo(t, up.URL)},
 		proxy.DispatcherConfig{FailureThreshold: 3, Cooldown: time.Minute},
 	).WithModelPreparation(dyn)
 
@@ -325,7 +325,7 @@ func TestDispatcher_AllFail_GivesAllProvidersFailed(t *testing.T) {
 
 	d := proxy.NewDispatcher(
 		[]config.Route{{ModelAlias: "gpt-4o", Strategy: "priority", Providers: []config.RouteProvider{{Name: "a"}, {Name: "b"}}}},
-		map[proxy.EndpointKey]*proxy.Forwarder{proxy.EndpointKey{Provider: "a", Endpoint: "default"}: fwdTo(t, bad.URL), proxy.EndpointKey{Provider: "b", Endpoint: "default"}: fwdTo(t, bad.URL)},
+		map[proxy.EndpointKey]*proxy.Forwarder{{Provider: "a", Endpoint: "default"}: fwdTo(t, bad.URL), {Provider: "b", Endpoint: "default"}: fwdTo(t, bad.URL)},
 		proxy.DispatcherConfig{FailureThreshold: 3, Cooldown: time.Minute},
 	)
 

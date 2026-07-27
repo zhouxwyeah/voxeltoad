@@ -109,6 +109,27 @@ func (c Content) IsMultipart() bool {
 	return bytes.HasPrefix(c.raw, []byte{'['})
 }
 
+// HasImageURL reports whether this multipart content carries an image part
+// (type "image_url"). Used to gate vision-capability checks before forwarding
+// to text-only upstreams. Returns false for non-array content.
+func (c Content) HasImageURL() bool {
+	if !c.IsMultipart() {
+		return false
+	}
+	var parts []struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(c.raw, &parts); err != nil {
+		return false
+	}
+	for _, p := range parts {
+		if p.Type == "image_url" {
+			return true
+		}
+	}
+	return false
+}
+
 // Role identifies the author of a message in a chat completion.
 type Role string
 

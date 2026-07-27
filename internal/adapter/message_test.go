@@ -333,6 +333,34 @@ func TestContent_MultipartRoundTrip(t *testing.T) {
 	}
 }
 
+// TestContent_HasImageURL verifies HasImageURL detects image_url parts across
+// string, null, text-only-array, and image-bearing-array content forms.
+func TestContent_HasImageURL(t *testing.T) {
+	cases := []struct {
+		name string
+		data string // the raw JSON value of "content"
+		want bool
+	}{
+		{"string content", `"hello"`, false},
+		{"null content", `null`, false},
+		{"text-only array", `[{"type":"text","text":"hi"}]`, false},
+		{"image_url array", `[{"type":"text","text":"see"},{"type":"image_url","image_url":{"url":"x"}}]`, true},
+		{"image-only array", `[{"type":"image_url","image_url":{"url":"x"}}]`, true},
+		{"empty array", `[]`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var c adapter.Content
+			if err := json.Unmarshal([]byte(tc.data), &c); err != nil {
+				t.Fatalf("unmarshal %q: %v", tc.data, err)
+			}
+			if got := c.HasImageURL(); got != tc.want {
+				t.Errorf("HasImageURL() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestContent_SetText verifies that SetText replaces content with a string.
 func TestContent_SetText(t *testing.T) {
 	var c adapter.Content
@@ -343,7 +371,6 @@ func TestContent_SetText(t *testing.T) {
 	if c.IsNull() {
 		t.Error("IsNull() should be false after SetText")
 	}
-
 	// Marshal as JSON string.
 	b, err := json.Marshal(c)
 	if err != nil {

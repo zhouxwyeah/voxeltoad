@@ -65,7 +65,7 @@ check_rule() {
   local f x skip
   while IFS= read -r f; do
     skip=0
-    for x in "${exempt[@]}"; do
+    for x in ${exempt[@]+"${exempt[@]}"}; do
       if [ "$f" = "$x" ]; then skip=1; break; fi
     done
     [ "$skip" = "0" ] && targets+=("$f")

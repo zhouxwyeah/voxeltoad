@@ -65,7 +65,7 @@ func (r *ConfigRepo) UpsertProvider(ctx context.Context, p config.Provider) erro
 	if err != nil {
 		return err
 	}
-		err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(
 			`INSERT INTO providers (name, type, adapter, enabled, spec, updated_at)
 			 VALUES (?, ?, ?, true, ?, now())

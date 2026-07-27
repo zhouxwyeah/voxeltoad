@@ -17,7 +17,7 @@ import (
 // each. In the multi-endpoint model (ADR-0049) the candidate is a
 // (provider, endpoint) pair; the endpoint's adapter drives normalization.
 type modelPreparer struct {
-	dyn          *config.Dynamic
+	dyn            *config.Dynamic
 	endpointsByPvd map[string][]config.ProviderEndpoint // provider name → its endpoints (ordered)
 }
 
@@ -83,4 +83,24 @@ func (p *modelPreparer) Prepare(req *adapter.UnifiedRequest, provider, endpointI
 	out := normalize.Apply(req, target) // returns a copy; input untouched
 	out.Model = mu.UpstreamModel        // alias → provider-native upstream name
 	return out, nil
+}
+
+// modelSupportsVision reports whether the alias is served by at least one
+// upstream whose model declares the "vision" capability. The capability is
+// informational metadata on the model catalog (config.Model.Capabilities); the
+// data plane reads it only here, to gate image-bearing requests before they
+// reach a text-only upstream.
+func (p *modelPreparer) modelSupportsVision(alias string) bool {
+	for _, m := range p.dyn.Models {
+		if m.Alias != alias {
+			continue
+		}
+		for _, cap := range m.Capabilities {
+			if cap == "vision" {
+				return true
+			}
+		}
+		return false // alias found, no vision upstream
+	}
+	return false // alias unknown
 }

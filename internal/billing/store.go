@@ -26,10 +26,10 @@ type QuotaStore interface {
 // UsageRecord is one billable request, written for audit/reconciliation. Cost is
 // int64 micro-units (ADR-0013).
 type UsageRecord struct {
-	Tenant           string
-	Group            string
-	APIKeyID         string
-	Provider         string
+	Tenant   string
+	Group    string
+	APIKeyID string
+	Provider string
 	// ProviderEndpoint identifies the selected endpoint within a multi-endpoint
 	// provider (ADR-0049), e.g. "openai" or "anthropic". Empty when routing
 	// selected a single-endpoint provider by its primary adapter.

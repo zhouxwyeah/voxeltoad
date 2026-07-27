@@ -73,6 +73,7 @@ type RequestLogRow struct {
 	TraceID            string    `json:"trace_id"`
 	SessionSource      string    `json:"session_source"`
 	AgentType          string    `json:"agent_type"`
+	UserAgent          string    `json:"user_agent"`
 	IngressProtocol    string    `json:"ingress_protocol"`
 	ProviderEndpoint   string    `json:"provider_endpoint"`
 	CacheHit           bool      `json:"cache_hit"`
@@ -197,7 +198,7 @@ func (r *RequestLogQueryRepo) List(ctx context.Context, f RequestLogFilter, curs
 	             model_requested, model_resolved, stream,
 	             prompt_tokens, completion_tokens, total_tokens,
 	             ttft_ms, duration_ms, error_type, blocked_by, fallback,
-	             request_id, client_request_id, session_id, trace_id, session_source, agent_type, ingress_protocol, provider_endpoint,
+	             request_id, client_request_id, session_id, trace_id, session_source, agent_type, user_agent, ingress_protocol, provider_endpoint,
 	             cache_hit, cache_tier, cache_source, cached_prompt_tokens,
 	             upstream_request_id, created_at
 	      FROM request_logs
@@ -250,7 +251,7 @@ func (r *RequestLogQueryRepo) ListPage(ctx context.Context, f RequestLogFilter, 
 	             model_requested, model_resolved, stream,
 	             prompt_tokens, completion_tokens, total_tokens,
 	             ttft_ms, duration_ms, error_type, blocked_by, fallback,
-	             request_id, client_request_id, session_id, trace_id, session_source, agent_type, ingress_protocol, provider_endpoint,
+	             request_id, client_request_id, session_id, trace_id, session_source, agent_type, user_agent, ingress_protocol, provider_endpoint,
 	             cache_hit, cache_tier, cache_source, cached_prompt_tokens,
 	             upstream_request_id, created_at
 	      FROM request_logs
@@ -290,7 +291,7 @@ func (r *RequestLogQueryRepo) ListBySession(ctx context.Context, sessionID strin
 	             model_requested, model_resolved, stream,
 	             prompt_tokens, completion_tokens, total_tokens,
 	             ttft_ms, duration_ms, error_type, blocked_by, fallback,
-	             request_id, client_request_id, session_id, trace_id, session_source, agent_type, ingress_protocol, provider_endpoint,
+	             request_id, client_request_id, session_id, trace_id, session_source, agent_type, user_agent, ingress_protocol, provider_endpoint,
 	             cache_hit, cache_tier, cache_source, cached_prompt_tokens,
 	             upstream_request_id, created_at
 	      FROM request_logs
@@ -316,6 +317,7 @@ func (r *RequestLogQueryRepo) ListBySession(ctx context.Context, sessionID strin
 type SessionSummary struct {
 	SessionID        string    `json:"session_id"`
 	AgentType        string    `json:"agent_type"`
+	UserAgent        string    `json:"user_agent"`
 	RequestCount     int       `json:"request_count"`
 	PromptTokens     int       `json:"prompt_tokens"`
 	CompletionTokens int       `json:"completion_tokens"`
@@ -392,8 +394,9 @@ func (r *RequestLogQueryRepo) ListSessions(ctx context.Context, f SessionListFil
 	             COALESCE(SUM(duration_ms), 0)                      AS duration_ms,
 	             MIN(created_at)                                    AS started_at,
 	             MAX(created_at)                                    AS last_seen,
-	             COALESCE((array_agg(agent_type ORDER BY created_at DESC) FILTER (WHERE agent_type <> ''))[1], '') AS agent_type,
-	             bool_or(error_type <> '')                          AS has_errors
+		             COALESCE((array_agg(agent_type ORDER BY created_at DESC) FILTER (WHERE agent_type <> ''))[1], '') AS agent_type,
+		             COALESCE((array_agg(user_agent ORDER BY created_at DESC) FILTER (WHERE user_agent <> ''))[1], '') AS user_agent,
+		             bool_or(error_type <> '')                          AS has_errors
 	      FROM request_logs
 	      WHERE ` + whereSQL + `
 	      GROUP BY session_id

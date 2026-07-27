@@ -5,5 +5,6 @@
   "modelNotPermitted": "API Key 无权使用此模型",
   "upstreamUnreachable": "上游不可达",
   "streamingUnsupported": "服务器不支持流式",
-  "requestBlocked": "请求被拦截"
+  "requestBlocked": "请求被拦截",
+  "unsupportedContent": "该模型不支持图片输入"
 }

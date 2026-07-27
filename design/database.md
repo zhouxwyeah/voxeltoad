@@ -3,11 +3,11 @@
 > 管理面 PostgreSQL schema 的可视化与集中清单。ADR-0014 是决策源，本文件是单一事实来源（可视化 + 完整表清单 + 软引用关系 + 设计决定说明）。
 > **适用对象**：修改 schema、新增表、调整跨表引用关系时，先读本文件对齐全貌，再查相关 ADR 看决策背景。
 
-Schema 形状由 `internal/store/migrations/` 下的 26 个 goose 迁移定义（`00001`-`00027`，缺 `00018`）；本文件与之保持同步。其中 `00018` 因 trace 迁移重命名而跳过（见 git log `856613d`）。
+Schema 形状由 `internal/store/migrations/` 下的 27 个 goose 迁移定义（`00001`-`00028`，缺 `00018`）；本文件与之保持同步。其中 `00018` 因 trace 迁移重命名而跳过（见 git log `856613d`）。
 
 > **同步规则（门禁）**：任何 PR 若新增/修改/删除表、列、索引或约束（即触碰 `internal/store/migrations/` 下的 SQL 文件），**必须同步更新本文件**。检查清单：
 > - §1 表分类矩阵：新表归入正确分类，业务表计数同步
-> - 头部迁移数量（"23 个 goose 迁移"）同步
+> - 头部迁移数量（"27 个 goose 迁移"）同步
 > - 对应表的 ER 图块：新列/新索引加进去
 > - §3.1（及类似专节）字段表、索引清单、字段计数同步
 > - §3.2（及类似对比表）字段数同步
@@ -285,6 +285,7 @@ erDiagram
         text    upstream_request_id "provider 返回的请求 ID (00024)"
         varchar ingress_protocol "openai|anthropic (00025)"
         varchar provider_endpoint "provider 内端点 slug (00026)"
+        varchar user_agent "客户端 UA 原值（trim 后,≤256B）（00028）"
         timestamptz created_at "PARTITION BY RANGE"
     }
 
@@ -303,6 +304,7 @@ erDiagram
         varchar agent_type "claude-code/codex/... (00023)"
         varchar ingress_protocol "openai|anthropic (00025)"
         varchar provider_endpoint "provider 内端点 slug (00026)"
+        varchar user_agent "客户端 UA 原值（trim 后,≤256B）（00028）"
         integer status_code "上游 HTTP 状态"
         varchar stop_reason "finish/stop reason"
         integer n_messages
@@ -347,6 +349,7 @@ erDiagram
 | `upstream_request_id` | provider 返回的请求关联 ID（OpenAI `x-request-id` 头、Anthropic `request-id` 头/body 等），仅最终成功尝试 | Forwarder 从 `resp.Header` 提取（00024） |
 | `ingress_protocol` | 客户端入站协议（`openai` / `anthropic`；空=迁移前历史行），驱动管理面协议筛选与直通/转换 badge | 数据面 codec.Protocol()（00025） |
 | `provider_endpoint` | 命中 provider 内的端点 slug（`openai`/`anthropic`/自定义 id；空=迁移前历史行），多端点 provider 的用量归因（ADR-0049） | 数据面 DispatchResult.Endpoint（00026） |
+| `user_agent` | 客户端 `User-Agent` header 原值（trim 后，≤256B；与 `agent_type` 互补：后者是 substring 派生标签，本字段保留原串用于未知 agent 识别与诊断） | 数据面 capUserAgent（00028） |
 
 **如何关联链路**: `GET /api/v1/request-logs?session_id=X` 查询同一 session 的所有请求；`request_id`（gateway 生成，全局唯一）用于精确定位单次请求并与 OTel trace 串联；`client_request_id`（客户端原值，ADR-0050）用于跨系统关联到调用方的 trace；`upstream_request_id` 用于售后/对账时定位到 provider 侧的请求记录（按上游 ID 反查网关请求，见索引 `idx_request_logs_upstream_request_id`）。三者形成 id 三元组：gateway / client / upstream。
 
@@ -364,7 +367,7 @@ erDiagram
 |---|---|---|
 | 用途 | 计费/对账 | 审计/合规 |
 | 写入时机 | billing plugin 结算阶段 | 请求结束时异步 |
-| 字段数 | 15 列 | 27 列 |
+| 字段数 | 15 列 | 31 列 |
 | cost 字段 | 有（微单位 + cache 折扣） | 无 |
 | token 字段 | prompt/completion + cached_prompt_tokens | prompt/completion/total + cached_prompt_tokens |
 | 性能字段 | 无 | ttft_ms/duration_ms/error_type/blocked_by/fallback |
@@ -401,6 +404,7 @@ erDiagram
 | `error_raw` (TEXT) | 上游错误体（目前只发给 client 后丢失，此处保留） |
 | `status_code` / `stop_reason` / `n_messages` / `n_tool_use` | summary 维度，让列表视图不解析大 JSON 就能渲染 |
 | `agent_type` | 检测到的调用 agent（00023 后加） |
+| `user_agent` | 客户端 `User-Agent` header 原值（trim 后，≤256B；00028 后加，与 `request_logs.user_agent` 同义） |
 | `ingress_protocol` | 客户端入站协议（00025 后加，`openai`/`anthropic`/空） |
 | `provider_endpoint` | 命中 provider 内的端点 slug（00026 后加，ADR-0049） |
 | `request_id` / `client_request_id` / `session_id` / `trace_id` / `tenant` / `group_name` / `api_key_id` | 与 `request_logs` 相同的关联身份串（应用层配对；`client_request_id` 由 00027 新增） |

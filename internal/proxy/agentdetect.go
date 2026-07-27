@@ -3,7 +3,34 @@ package proxy
 import (
 	"net/http"
 	"strings"
+	"unicode/utf8"
 )
+
+// userAgentMaxLen caps how many bytes of the raw User-Agent header are
+// persisted. UAs are short product tokens ("claude-cli/1.0.83 (cli, …)"), well
+// under 256 bytes; the cap just guards against a misbehaving client emitting a
+// pathological value that would bloat the audit ledger rows.
+const userAgentMaxLen = 256
+
+// capUserAgent trims surrounding whitespace and truncates the User-Agent value
+// to userAgentMaxLen bytes for persistence. Returns "" for an absent/empty UA.
+// Truncation strips trailing bytes that would form an incomplete UTF-8 rune
+// (an isolated leading byte or orphan continuation byte), so a multi-byte UA
+// (CJK / emoji) cannot be split mid-rune and produce invalid UTF-8 in the
+// persisted column — Postgres rejects invalid UTF-8 on insert and JSON
+// renders it as U+FFFD.
+func capUserAgent(ua string) string {
+	ua = strings.TrimSpace(ua)
+	if len(ua) > userAgentMaxLen {
+		ua = ua[:userAgentMaxLen]
+		// Walk back to the nearest valid rune boundary. ua is at most 256
+		// bytes, so the loop scans at most a handful of times.
+		for len(ua) > 0 && !utf8.ValidString(ua) {
+			ua = ua[:len(ua)-1]
+		}
+	}
+	return ua
+}
 
 // Agent type labels recorded on request_logs / trace_payloads (the agent_type
 // column). A canonical short identifier per known agent so the column stays
@@ -15,6 +42,7 @@ const (
 	AgentCodeBuddy  = "codebuddy"
 	AgentWorkBuddy  = "workbuddy"
 	AgentOpenCode   = "opencode"
+	AgentZCode      = "zcode"
 )
 
 // agentRule maps a (case-insensitive) User-Agent substring to an agent type.
@@ -33,6 +61,11 @@ var agentRules = []agentRule{
 	{uaContains: "workbuddy", agentType: AgentWorkBuddy, sessionHeader: "x-workbuddy-session-id"},
 	// opencode.
 	{uaContains: "opencode", agentType: AgentOpenCode, sessionHeader: "x-opencode-session-id"},
+	// ZCode (Z.ai's coding agent). UA is "ZCode/<ver> ai-sdk/... runtime/node.js/...",
+	// matched case-insensitively on the leading "zcode" token. It sends X-Session-Id
+	// (not the x-<vendor>-session-id form), which the default session-header list
+	// now recognizes; sessionHeader here records that convention for documentation.
+	{uaContains: "zcode", agentType: AgentZCode, sessionHeader: "x-session-id"},
 }
 
 type agentRule struct {

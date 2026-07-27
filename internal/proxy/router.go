@@ -46,9 +46,15 @@ type routerConfig struct {
 	accessLog      bool
 }
 
-// defaultSessionHeader is the session-id header consulted for affinity routing
-// when none is configured (ADR-0018).
-const defaultSessionHeader = "X-Voxeltoad-Session"
+// defaultSessionHeaders are the session-id headers consulted for affinity
+// routing, in priority order, when none are configured (ADR-0018). The first
+// header present with a well-formed value wins.
+//
+// X-Voxeltoad-Session is the gateway-native convention. X-Session-Id is the
+// header ZCode (and other ACP-style clients) send; recognizing it by default
+// keeps those clients' session keys stable instead of degrading to the
+// prefix-hash fallback (which drifts across turns).
+var defaultSessionHeaders = []string{"X-Voxeltoad-Session", "X-Session-Id"}
 
 // Response headers echoing the correlation ids so callers can join gateway
 // logs/usage to their own traces. They mirror the incoming trace headers and the
@@ -84,8 +90,9 @@ func echoCorrelationHeaders(w http.ResponseWriter, requestID, clientRequestID, s
 
 // WithSessionHeaders configures the candidate HTTP header names used to extract
 // the session key for session_affinity routing (ADR-0018), in priority order.
-// Empty preserves the default (X-Voxeltoad-Session). Different agent frameworks are
-// supported by adding their header name here — no per-agent code.
+// Empty preserves the default (X-Voxeltoad-Session, X-Session-Id). Different
+// agent frameworks are supported by adding their header name here — no
+// per-agent code.
 func WithSessionHeaders(headers ...string) Option {
 	return func(c *routerConfig) { c.sessionHeaders = headers }
 }
@@ -195,7 +202,7 @@ func Router(disp *Dispatcher, opts ...Option) http.Handler {
 	// Session-key extractor for affinity routing (ADR-0018).
 	headers := cfg.sessionHeaders
 	if len(headers) == 0 {
-		headers = []string{defaultSessionHeader}
+		headers = defaultSessionHeaders
 	}
 	extractor := sessionKeyExtractor{headers: headers}
 
@@ -258,6 +265,18 @@ func chatCompletionsHandler(provider DispatcherProvider, chain *plugin.Chain, ex
 	return serveChat(ingress.Lookup(ingress.ProtocolOpenAI), provider, chain, extractor, traceHdrs, audit, tracePL, settings)
 }
 
+// reqHasImage reports whether any message in the request carries an image_url
+// content part (multimodal/vision input). Used by the vision gate to reject
+// image-bearing requests against text-only upstreams before forwarding.
+func reqHasImage(req *adapter.UnifiedRequest) bool {
+	for i := range req.Messages {
+		if req.Messages[i].Content.HasImageURL() {
+			return true
+		}
+	}
+	return false
+}
+
 func messagesHandler(provider DispatcherProvider, chain *plugin.Chain, extractor sessionKeyExtractor, traceHdrs []string, audit observability.RequestLogRecorder, tracePL observability.TracePayloadRecorder, settings func() *config.GatewaySettings) http.HandlerFunc {
 	codec := ingress.Lookup(ingress.ProtocolAnthropic)
 	inner := serveChat(codec, provider, chain, extractor, traceHdrs, audit, tracePL, settings)
@@ -294,6 +313,11 @@ func serveChat(codec ingress.Codec, provider DispatcherProvider, chain *plugin.C
 		// x-<vendor>-session-id headers once, so every exit path's telemetry
 		// carries the same label. "" when unrecognized (a plain OpenAI client).
 		agentType := detectAgent(r)
+		// Capture the raw User-Agent once (trimmed and capped) so it can be
+		// persisted alongside the derived agent_type for diagnostics and rule
+		// tuning; agent detection discards the source string. See ADR-0050 era
+		// user_agent column (migration 00028).
+		userAgent := capUserAgent(r.Header.Get("User-Agent"))
 
 		// Read the raw body once; we need it for two-step decoding because
 		// UnifiedRequest implements UnmarshalJSON (which captures unknown
@@ -306,6 +330,7 @@ func serveChat(codec ingress.Codec, provider DispatcherProvider, chain *plugin.C
 			rid, cid, sid, tid := requestAndSessionIDs(r, traceHdrs, extractor, nil)
 			acc := newTelemetryAcc("", false, rid, cid, sid, tid, settings)
 			acc.agentType = agentType
+			acc.userAgent = userAgent
 			defer func() { acc.emit(r.Context(), nil, audit, tracePL) }()
 			acc.errType = apperr.InvalidRequestBody.Code
 			writeAppErrCodec(w, codec, apperr.InvalidRequestBody, err.Error())
@@ -322,6 +347,7 @@ func serveChat(codec ingress.Codec, provider DispatcherProvider, chain *plugin.C
 			rid, cid, sid, tid := requestAndSessionIDs(r, traceHdrs, extractor, nil)
 			acc := newTelemetryAcc("", false, rid, cid, sid, tid, settings)
 			acc.agentType = agentType
+			acc.userAgent = userAgent
 			defer func() { acc.emit(r.Context(), nil, audit, tracePL) }()
 			acc.errType = apperr.InvalidRequestBody.Code
 			writeAppErrCodec(w, codec, apperr.InvalidRequestBody, err.Error())
@@ -380,6 +406,7 @@ func serveChat(codec ingress.Codec, provider DispatcherProvider, chain *plugin.C
 		acc := newTelemetryAcc("", false, rid, cid, sid, tid, settings)
 		acc.sessionSource = sessSrc
 		acc.agentType = agentType
+		acc.userAgent = userAgent
 		acc.ingressProtocol = string(codec.Protocol()) // llm.ingress.protocol (ADR-0045)
 		pc := newPluginContext(r, req)
 		pc.RequestID = rid
@@ -442,6 +469,16 @@ func serveChat(codec ingress.Codec, provider DispatcherProvider, chain *plugin.C
 		}
 
 		alias := req.Model // the client-facing model name is the routing alias
+
+		// Vision gate: if the request carries an image part but no upstream
+		// serving this alias declares the "vision" capability, reject with a
+		// clear 400 rather than forwarding to a text-only upstream that will
+		// 400 and be surfaced as an opaque 502 upstream_error.
+		if reqHasImage(req) && !disp.SupportsVision(alias) {
+			acc.errType = apperr.UnsupportedContent.Code
+			writeAppErrCodec(w, codec, apperr.UnsupportedContent, "model "+alias+" does not support image input")
+			return
+		}
 		// Carry the ingress protocol on the context so the dispatcher can
 		// prefer providers whose adapter speaks the same wire protocol
 		// (protocol-aware routing, ADR-0047) — passthrough becomes a natural
@@ -552,14 +589,6 @@ func mapForwardError(err error) (status int, errType string) {
 	return http.StatusBadGateway, "upstream_error"
 }
 
-// writeError emits an OpenAI-compatible error envelope: {"error":{...}}.
-// It delegates to the OpenAI ingress codec so the wire shape lives in one
-// place. For protocol-aware error responses (e.g. Anthropic inbound), use
-// writeCodecErr with the request's ingress codec.
-func writeError(w http.ResponseWriter, status int, errType, message string) {
-	writeCodecErr(w, ingress.Lookup(ingress.ProtocolOpenAI), status, errType, message)
-}
-
 // writeCodecErr emits an error body in the codec's wire format and writes the
 // HTTP status. Used by handlers and middleware that know the inbound protocol
 // (e.g. /v1/messages → anthropic codec).
@@ -588,20 +617,6 @@ func logForwardFailure(r *http.Request, rid, sid, model, provider, errType strin
 		"error_type", errType,
 		"error", truncate([]byte(err.Error()), 256),
 	)
-}
-
-// writeAppErr emits the same envelope as writeError, driven by an apperr.Error.
-// The message is the i18n key (the client resolves it); the type is the stable
-// code. Use this in favor of inline writeError(...) so each domain lives in its
-// own apperr file. Uses the OpenAI envelope by default.
-func writeAppErr(w http.ResponseWriter, e *apperr.Error) {
-	writeAppErrCodec(w, ingress.Lookup(ingress.ProtocolOpenAI), e, "")
-}
-
-// writeAppErrMsg is writeAppErr when the handler needs to append runtime context
-// to the message (e.g. the underlying cause).
-func writeAppErrMsg(w http.ResponseWriter, e *apperr.Error, ctx string) {
-	writeAppErrCodec(w, ingress.Lookup(ingress.ProtocolOpenAI), e, ctx)
 }
 
 // writeAppErrCodec is the protocol-aware variant: it uses codec's envelope

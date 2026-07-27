@@ -71,8 +71,10 @@ desktop-e2e: ## Manual smoke test of the desktop gateway (build mock + desktop, 
 desktop-web-dev: ## Start Go gateway (:8787) + Vite dev server (:5173) for desktop-ui hot reload
 	./scripts/desktop-web-dev.sh
 
-desktop-build: ## Build the macOS .app (requires Wails CLI: go install github.com/wailsapp/wails/v2/cmd/wails@latest)
-	./scripts/build-desktop.sh darwin
+desktop-build: ## Build macOS .app + .dmg (ad-hoc signed; requires Wails CLI: go install github.com/wailsapp/wails/v2/cmd/wails@latest)
+		./scripts/build-desktop.sh darwin
+
+desktop-package: desktop-build ## Alias: build macOS .app + .dmg
 
 desktop-build-windows: ## Build the Windows NSIS .exe (run on Windows; requires Wails CLI + NSIS: choco install nsis)
 	./scripts/build-desktop.sh windows
@@ -155,7 +157,7 @@ fmt: ## Format Go code in place
 	gofmt -w .
 
 fmt-check: ## Verify gofmt cleanliness (no writes; used by ci)
-	@unformatted=$$(gofmt -l .); \
+	@unformatted=$$(gofmt -l . | grep -v '^\.codebuddy/'); \
 	if [ -n "$$unformatted" ]; then \
 		echo "The following files are not gofmt-clean:"; \
 		echo "$$unformatted"; \

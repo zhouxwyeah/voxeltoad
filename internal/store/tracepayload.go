@@ -29,13 +29,13 @@ func (r *TracePayloadRepo) Record(ctx context.Context, p observability.TracePayl
 	return r.db.WithContext(ctx).Exec(
 		`INSERT INTO trace_payloads
 		   (request_id, client_request_id, session_id, trace_id, tenant, group_name, api_key_id,
-		    provider, model_requested, stream, agent_type, ingress_protocol,
+		    provider, model_requested, stream, agent_type, user_agent, ingress_protocol,
 		    provider_endpoint,
 		    status_code, stop_reason, n_messages, n_tool_use,
 		    messages, request_raw, response_raw, error_raw)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.RequestID, p.ClientRequestID, p.SessionID, p.TraceID, p.Tenant, p.Group, p.APIKeyID,
-		p.Provider, p.ModelRequested, p.Stream, p.AgentType, p.IngressProtocol,
+		p.Provider, p.ModelRequested, p.Stream, p.AgentType, p.UserAgent, p.IngressProtocol,
 		p.ProviderEndpoint,
 		p.StatusCode, p.StopReason, p.NMessages, p.NToolUse,
 		jsonBody(p.Messages, "[]"), jsonBody(p.RequestRaw, "{}"),

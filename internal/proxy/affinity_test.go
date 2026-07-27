@@ -160,15 +160,46 @@ func TestSessionKey_GenericHeaderRegex(t *testing.T) {
 	// A too-short value (< 8 chars) is rejected so it can't hijack affinity.
 	r2, _ := http.NewRequest(http.MethodPost, "/", nil)
 	r2.Header.Set("X-Foo-Session-Id", "short")
-	if got, _ := ext.key(r2, &adapter.UnifiedRequest{}, bodyIdentity{}); got == "short" {
-		t.Error("short generic session-id value was accepted")
+	if got, src := ext.key(r2, &adapter.UnifiedRequest{}, bodyIdentity{}); got != "" || src != "" {
+		t.Errorf("short generic session-id was accepted: got (%q, %q), want (\"\", \"\")", got, src)
 	}
 
 	// trace-id headers are deliberately NOT matched (keeps trace_id distinct).
 	r3, _ := http.NewRequest(http.MethodPost, "/", nil)
 	r3.Header.Set("X-Vendor-Trace-Id", "trace1234567")
-	if got, _ := ext.key(r3, &adapter.UnifiedRequest{}, bodyIdentity{}); got == "trace1234567" {
-		t.Error("x-*-trace-id header was matched by the session regex")
+	if got, src := ext.key(r3, &adapter.UnifiedRequest{}, bodyIdentity{}); got != "" || src != "" {
+		t.Errorf("x-*-trace-id header was matched by the session regex: got (%q, %q), want (\"\", \"\")", got, src)
+	}
+}
+
+// The default session-header list (defaultSessionHeaders) recognizes X-Session-Id,
+// the header ZCode and other ACP-style clients send, so their session key stays
+// stable across turns instead of degrading to the prefix-hash fallback. The bare
+// "x-session-id" form is NOT matched by the generic x-<vendor>-session-id regex
+// (which requires a vendor infix), so it must come from the configured/default list.
+func TestSessionKey_DefaultHeadersIncludeXSessionId(t *testing.T) {
+	ext := sessionKeyExtractor{headers: defaultSessionHeaders}
+	r, _ := http.NewRequest(http.MethodPost, "/", nil)
+	r.Header.Set("X-Session-Id", "acp-sess-123456")
+
+	got, src := ext.key(r, &adapter.UnifiedRequest{}, bodyIdentity{})
+	if got != "acp-sess-123456" || src != sourceHeaderConfig {
+		t.Errorf("key = (%q, %q), want (acp-sess-123456, %s)", got, src, sourceHeaderConfig)
+	}
+
+	// X-Voxeltoad-Session still wins when both are present (it is first in the list).
+	r2, _ := http.NewRequest(http.MethodPost, "/", nil)
+	r2.Header.Set("X-Session-Id", "acp-sess-123456")
+	r2.Header.Set("X-Voxeltoad-Session", "voxel-sess-12")
+	if got, src := ext.key(r2, &adapter.UnifiedRequest{}, bodyIdentity{}); got != "voxel-sess-12" || src != sourceHeaderConfig {
+		t.Errorf("key = (%q, %q), want (voxel-sess-12, %s)", got, src, sourceHeaderConfig)
+	}
+
+	// An X-Session-Id value that fails validateSessionID is skipped (falls through).
+	r3, _ := http.NewRequest(http.MethodPost, "/", nil)
+	r3.Header.Set("X-Session-Id", "too short")
+	if got, src := ext.key(r3, &adapter.UnifiedRequest{}, bodyIdentity{}); got != "" || src != "" {
+		t.Errorf("malformed X-Session-Id was accepted: got (%q, %q), want (\"\", \"\")", got, src)
 	}
 }
 
@@ -300,9 +331,9 @@ func TestSessionKey_PromptCacheKeyIgnored(t *testing.T) {
 
 	// With only a prompt_cache_key and no other source, the prefix hash (or
 	// empty) is used — never the cache key value itself.
-	got, _ := ext.key(r, &adapter.UnifiedRequest{}, bodyIdentity{})
-	if got == "some-cache-key" {
-		t.Error("prompt_cache_key leaked into session key resolution")
+	got, src := ext.key(r, &adapter.UnifiedRequest{}, bodyIdentity{})
+	if got != "" || src != "" {
+		t.Errorf("prompt_cache_key leaked into session key resolution: got (%q, %q), want (\"\", \"\")", got, src)
 	}
 }
 

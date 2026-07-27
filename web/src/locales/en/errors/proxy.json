@@ -5,5 +5,6 @@
   "modelNotPermitted": "api key not permitted to use this model",
   "upstreamUnreachable": "upstream unreachable",
   "streamingUnsupported": "streaming unsupported by server",
-  "requestBlocked": "request blocked"
+  "requestBlocked": "request blocked",
+  "unsupportedContent": "this model does not support image input"
 }

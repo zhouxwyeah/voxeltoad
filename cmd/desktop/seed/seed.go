@@ -107,9 +107,15 @@ models:
       - provider: 深度求索
         upstream_model: deepseek-v4-flash
         pricing: {prompt_per_1m: 2500000, completion_per_1m: 10000000, currency: usd}
+      - provider: TokenHub
+        upstream_model: deepseek-v4-flash
+        pricing: {prompt_per_1m: 2500000, completion_per_1m: 10000000, currency: usd}
   - alias: deepseek-v4-pro
     upstreams:
       - provider: 深度求索
+        upstream_model: deepseek-v4-pro
+        pricing: {prompt_per_1m: 150000, completion_per_1m: 600000, currency: usd}
+      - provider: TokenHub
         upstream_model: deepseek-v4-pro
         pricing: {prompt_per_1m: 150000, completion_per_1m: 600000, currency: usd}
   - alias: hy3
@@ -125,17 +131,19 @@ models:
   - alias: glm-5.2
     upstreams:
       - provider: GLM
-        upstream_model: glm5.2
+        upstream_model: glm-5.2
         pricing: {prompt_per_1m: 150000, completion_per_1m: 600000, currency: usd}
 routes:
   - model_alias: deepseek-v4-flash
     strategy: priority
     providers:
       - {name: 深度求索, weight: 1}
+      - {name: TokenHub, weight: 1}
   - model_alias: deepseek-v4-pro
     strategy: round_robin
     providers:
       - {name: 深度求索, weight: 1}
+      - {name: TokenHub, weight: 1}
   - model_alias: kimi-for-coding
     strategy: session_affinity
     providers:

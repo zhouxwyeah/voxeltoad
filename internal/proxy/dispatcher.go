@@ -103,6 +103,19 @@ func (d *Dispatcher) prepare(req *adapter.UnifiedRequest, key EndpointKey) (*ada
 	return d.preparer.Prepare(req, key.Provider, key.Endpoint)
 }
 
+// SupportsVision reports whether any upstream serving the given alias declares
+// the "vision" capability. Used by the router to reject image-bearing requests
+// early (clear 400) instead of forwarding them to text-only upstreams that
+// would 400 and get surfaced as an opaque 502. Returns false when no preparer is
+// configured (single-provider test mode) or the alias is unknown — matching the
+// conservative "assume text-only" default so test doubles behave like prod.
+func (d *Dispatcher) SupportsVision(alias string) bool {
+	if d.preparer == nil {
+		return false
+	}
+	return d.preparer.modelSupportsVision(alias)
+}
+
 // DispatchResult carries the routing-layer facts an emit()/billing caller needs
 // beyond the response body itself: which provider endpoint was actually hit,
 // what upstream model name was resolved to (ADR-0002; equals the requested

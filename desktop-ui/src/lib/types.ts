@@ -104,11 +104,16 @@ export interface ProviderTimeouts {
   overall: number;
 }
 
+export interface ProviderEndpoint {
+  id?: string;
+  adapter: string;
+  base_url: string;
+}
+
 export interface Provider {
   name: string;
   type: string;
-  adapter: string;
-  base_url: string;
+  endpoints: ProviderEndpoint[];
   api_key_ref: string;
   timeouts: ProviderTimeouts;
   weight: number;

@@ -28,6 +28,9 @@ standard macOS `.app` bundle. See `design/desktop.md` §10 and ADR-0041.
 - `build/darwin/dev.entitlements.plist` — dev-build entitlements (App Sandbox
   OFF; needs network server/client + user-selected files for the SQLite DB /
   YAML config paths the user chooses).
+- `build/darwin/dist.entitlements.plist` — distribution entitlements (same as
+  dev + Hardened Runtime flags `allow-jit` / `allow-unsigned-executable-memory`
+  required by Wails/WebKit).
 - `build/appicon.png` — 1024×1024 master icon. `wails build` generates the
   platform-specific `icon.icns` from this.
 
@@ -59,7 +62,8 @@ go install github.com/wailsapp/wails/v2/cmd/wails@latest
 make desktop-build
 ```
 
-Output: `deploy/desktop/build/bin/voxeltoad-desktop.app`.
+Output: `deploy/desktop/build/bin/voxeltoad-desktop.app` (ad-hoc signed) and
+`deploy/desktop/build/bin/voxeltoad-desktop.dmg`.
 
 The build script (`scripts/build-desktop.sh`) does in order:
 1. `cd desktop-ui && npm ci && npm run build` → `desktop-ui/dist/`
@@ -68,17 +72,34 @@ The build script (`scripts/build-desktop.sh`) does in order:
    `package main` in this directory (`main.go` imports `internal/desktopapp`),
    embeds `app/dist/`, produces `.app`
 
-## Signing & notarization (distribution)
+## Signing & notarization
 
-For a distributable build (vs. local dev):
+### Current: ad-hoc signing (no Apple Developer cert needed)
 
-1. Get a Developer ID Application certificate from Apple Developer Program.
-2. Replace `dev.entitlements.plist` usage with a hardened-runtime entitlements
-   set in `wails.json` (`darwin/signandnotarise` section).
-3. `wails build -platform darwin/universal -sign <identity> -notarize`.
+`scripts/build-desktop.sh` automatically ad-hoc signs the `.app` bundle with
+`codesign --sign -` and creates a `.dmg` for distribution. Users must bypass
+Gatekeeper on first launch:
 
-Local dev builds (just `make desktop-build`) are unsigned and will trigger
-Gatekeeper on first launch — right-click → Open to bypass.
+- **方法一（推荐）：** 右键点击 app → 打开 → 确认
+- **方法二：** 终端执行 `xattr -dr com.apple.quarantine voxeltoad-desktop.app`
+
+### Future: Developer ID signing + notarization
+
+For a distributable build that opens without Gatekeeper prompts:
+
+1. Get a Developer ID Application certificate from Apple Developer Program
+   ($99/year).
+2. Replace `-` in the codesign command with your certificate identity, e.g.:
+   `codesign --sign "Developer ID Application: Your Name (TEAMID)"`
+3. Notarize the DMG:
+   ```bash
+   xcrun notarytool submit voxeltoad-desktop.dmg \
+     --apple-id your@email.com --team-id TEAMID --wait
+   xcrun stapler staple voxeltoad-desktop.dmg
+   ```
+
+The entitlements (`dist.entitlements.plist`) are already set up with Hardened
+Runtime flags — just swap the signing identity and add notarization.
 
 ## Reuse vs the enterprise gateway
 

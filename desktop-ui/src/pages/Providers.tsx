@@ -116,8 +116,11 @@ export function Providers() {
               <TableRow key={p.name}>
                 <TableCell>{p.name}</TableCell>
                 <TableCell>{p.type}</TableCell>
-                <TableCell>{p.adapter}</TableCell>
-                <TableCell>{p.base_url}</TableCell>
+                <TableCell>
+                  {p.endpoints?.[0]?.adapter ?? ""}
+                  {(p.endpoints?.length ?? 0) > 1 ? ` (+${p.endpoints.length - 1})` : ""}
+                </TableCell>
+                <TableCell>{p.endpoints?.[0]?.base_url ?? ""}</TableCell>
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-1">
                     <Button variant="ghost" size="sm" onClick={() => setEditRow(p)}>
@@ -199,8 +202,8 @@ function ProviderForm({
   const dvIsPreset = PRESET_BRANDS.includes(dvType);
   const [typeSelect, setTypeSelect] = useState(dvIsPreset ? dvType : dvType ? CUSTOM_TYPE : "");
   const [customType, setCustomType] = useState(!dvIsPreset && dvType ? dvType : "");
-  const [adapter, setAdapter] = useState(defaultValues?.adapter ?? "");
-  const [baseURL, setBaseURL] = useState(defaultValues?.base_url ?? "");
+  const [adapter, setAdapter] = useState(defaultValues?.endpoints?.[0]?.adapter ?? "");
+  const [baseURL, setBaseURL] = useState(defaultValues?.endpoints?.[0]?.base_url ?? "");
   const dvApiKeyRef = defaultValues?.api_key_ref ?? "";
   const [credMode, setCredMode] = useState<CredMode>(
     dvApiKeyRef.startsWith(PLAIN_REF_PREFIX) ? "key" : "ref",
@@ -234,8 +237,7 @@ function ProviderForm({
         weight: defaultValues?.weight ?? DEFAULT_WEIGHT,
         name: name.trim(),
         type: typeValue,
-        adapter,
-        base_url: baseURL.trim(),
+        endpoints: [{ id: defaultValues?.endpoints?.[0]?.id ?? "", adapter, base_url: baseURL.trim() }],
         api_key_ref: ref,
       };
       const res = isEdit ? await updateProvider(body.name, body) : await createProvider(body);

@@ -13,4 +13,9 @@ var (
 	UpstreamUnreachable  = New("upstream_unreachable", StatusBadGateway, "errors.proxy.upstreamUnreachable")
 	StreamingUnsupported = New("streaming_unsupported", StatusInternalServerError, "errors.proxy.streamingUnsupported")
 	RequestBlocked       = New("request_blocked", StatusForbidden, "errors.proxy.requestBlocked")
+	// UnsupportedContent is returned (400) when the request carries content the
+	// target model cannot handle — e.g. an image_url part against a text-only
+	// upstream. Surfacing the real cause here beats forwarding to the upstream
+	// and wrapping its 400 as an opaque 502 upstream_error.
+	UnsupportedContent = New("unsupported_content", StatusBadRequest, "errors.proxy.unsupportedContent")
 )

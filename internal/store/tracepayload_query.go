@@ -42,6 +42,7 @@ type TracePayloadSummaryRow struct {
 	ModelRequested  string    `json:"model_requested"`
 	Stream          bool      `json:"stream"`
 	AgentType       string    `json:"agent_type"`
+	UserAgent       string    `json:"user_agent"`
 	StatusCode      int       `json:"status_code"`
 	StopReason      string    `json:"stop_reason"`
 	NMessages       int       `json:"n_messages"`
@@ -65,7 +66,7 @@ type TracePayloadDetail struct {
 // summaryCols lists the columns fetched for a summary row (no JSONB), shared by
 // ListBySession and the summary projection of GetByRequestID.
 const traceSummaryCols = `id, request_id, client_request_id, session_id, trace_id, tenant,
-       provider, model_requested, stream, agent_type,
+       provider, model_requested, stream, agent_type, user_agent,
        status_code, stop_reason, n_messages, n_tool_use, created_at`
 
 // ListBySession returns the trace events for a session_id in chronological ASC

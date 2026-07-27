@@ -61,6 +61,11 @@ type RequestLog struct {
 	// codebuddy, workbuddy, opencode, …). "" when unrecognized (a plain OpenAI
 	// SDK/curl/browser). Drives agent-level filtering in the trace UI.
 	AgentType string
+	// UserAgent is the raw User-Agent header value (verbatim, trimmed, length-
+	// capped). Persisted alongside AgentType so the original client string is
+	// recoverable for agent-detection tuning and diagnostics: AgentType is a
+	// derived label and discards the source. "" when the client sent no UA.
+	UserAgent string
 	// IngressProtocol records which client wire protocol served the request
 	// ("openai" / "anthropic"). "" for pre-migration rows (pre-ADR-0045). Used
 	// by the management UI for protocol filtering and the passthrough/translated

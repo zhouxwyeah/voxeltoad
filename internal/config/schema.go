@@ -136,8 +136,11 @@ type Model struct {
 	// (e.g. 128000). Informational only; the data plane does not enforce it.
 	ContextLength int `json:"context_length,omitempty"`
 	// Capabilities lists what the model supports (e.g. "vision",
-	// "function_calling", "streaming"). Surfaced in the model catalog for
-	// filtering; not enforced by the data plane.
+	// "function_calling", "streaming"). Most tokens are informational and
+	// surface in the model catalog for filtering; the "vision" token is
+	// enforced by the data plane — the router rejects image-bearing requests
+	// for aliases whose upstreams do not declare it (see internal/proxy/router.go
+	// reqHasImage gate). Operators must tag vision-capable models explicitly.
 	Capabilities []string `json:"capabilities,omitempty"`
 	// Tags are free-form labels for categorization and search.
 	Tags []string `json:"tags,omitempty"`

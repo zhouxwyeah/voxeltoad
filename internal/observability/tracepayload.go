@@ -42,6 +42,9 @@ type TracePayload struct {
 	// "" when unrecognized. Surfaced as a summary dimension so the request-list
 	// view can render it without decoding the JSONB bodies.
 	AgentType string
+	// UserAgent is the raw User-Agent header value (mirrors RequestLog.UserAgent)
+	// so the row is self-describing without a join. "" when the client sent no UA.
+	UserAgent string
 
 	// IngressProtocol records which client wire protocol served the request
 	// ("openai" / "anthropic"). "" for pre-migration rows. Mirrors RequestLog
