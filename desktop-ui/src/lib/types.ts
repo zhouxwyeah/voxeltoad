@@ -29,6 +29,8 @@ export interface RequestLogView {
   cache_source: string;
   cached_prompt_tokens: number;
   upstream_request_id: string;
+  ingress_protocol: string;
+  provider_endpoint: string;
   created_at: string;
 }
 
@@ -43,6 +45,7 @@ export interface SessionSummary {
   started_at: string;
   last_seen: string;
   has_errors: boolean;
+  favorited: boolean;
 }
 
 export interface TraceSummary {
@@ -56,6 +59,8 @@ export interface TraceSummary {
   model_requested: string;
   stream: boolean;
   agent_type: string;
+  ingress_protocol: string;
+  provider_endpoint: string;
   status_code: number;
   stop_reason: string;
   n_messages: number;
@@ -83,6 +88,35 @@ export interface AgentUsage {
   error_count: number;
 }
 
+export interface DimensionUsage {
+  key: string;
+  request_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  duration_ms: number;
+  error_count: number;
+}
+
+export interface ErrorUsage {
+  error_type: string;
+  count: number;
+}
+
+export interface OverviewScalars {
+  total_requests: number;
+  error_count: number;
+  success_rate: number;
+  fallback_count: number;
+  fallback_rate: number;
+  stream_count: number;
+  stream_rate: number;
+  cache_hit_count: number;
+  cache_hit_rate: number;
+  avg_duration_ms: number;
+  avg_ttft_ms: number;
+}
+
 export interface OffsetEnvelope<T> {
   data: T[];
   total: number;
@@ -93,6 +127,10 @@ export interface OffsetEnvelope<T> {
 export interface OverviewResult {
   agents: AgentUsage[];
   totals: AgentUsage;
+  providers: DimensionUsage[];
+  models: DimensionUsage[];
+  errors: ErrorUsage[];
+  scalars: OverviewScalars;
 }
 
 // --- Config types (match internal/config/schema.go JSON shape) ---
@@ -104,11 +142,17 @@ export interface ProviderTimeouts {
   overall: number;
 }
 
+export interface ProviderEndpoint {
+  id?: string;
+  adapter: string; // "openai" | "claude"
+  base_url: string;
+  timeouts?: ProviderTimeouts;
+}
+
 export interface Provider {
   name: string;
   type: string;
-  adapter: string;
-  base_url: string;
+  endpoints: ProviderEndpoint[]; // ≥1, first is primary (ADR-0049)
   api_key_ref: string;
   timeouts: ProviderTimeouts;
   weight: number;
@@ -220,4 +264,34 @@ export interface PromptPayload {
   note: string;
   session_id?: string;
   source_trace_row_id?: number;
+}
+
+// /api/v1/dispatch-steps/{request_id} — ordered dispatch path (ADR-0051).
+export interface DispatchStep {
+  id: number;
+  request_id: string;
+  ordinal: number;
+  provider: string;
+  endpoint: string;
+  action: string; // "skipped" | "attempted"
+  skip_reason: string;
+  selection_outcome: string; // "selected" | "retryable_failure" | "terminal_failure"
+  error_type: string;
+  upstream_request_id: string;
+  duration_ms: number;
+  created_at: string;
+}
+
+// /api/v1/provider-health — passive health projection (ADR-0051).
+export interface EndpointHealth {
+  provider: string;
+  endpoint: string;
+  breaker_state: string; // "closed"|"open"|"half-open"|"unknown"
+  attempted: number;
+  selected: number;
+  retryable_failures: number;
+  terminal_failures: number;
+  skipped: number;
+  avg_duration_ms: number;
+  last_seen: string | null;
 }

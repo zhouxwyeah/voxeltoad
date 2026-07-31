@@ -30,6 +30,10 @@ export function formatNumber(n: number | undefined): string {
   return (n ?? 0).toLocaleString("zh-CN");
 }
 
+export function formatPercent(v: number | undefined): string {
+  return `${Math.round((v ?? 0) * 100)}%`;
+}
+
 export function formatDuration(ms: number | undefined): string {
   const v = ms ?? 0;
   if (v < 1000) return `${v}ms`;

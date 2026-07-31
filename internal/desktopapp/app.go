@@ -127,8 +127,16 @@ func Main() {
 	// Auth over the SQLite KeyStore.
 	authn := auth.NewAuthenticator(desktopstore.NewKeyStore(db), auth.Options{})
 
+	// DispatchStep observer (ADR-0051): records the ordered dispatch path
+	// (candidate skip/attempt/outcome) for failover explainability. Started
+	// before the dispatcher so it is ready when Build runs.
+	stepSink := desktopstore.NewDispatchStepSink(db, 1024)
+	stepSink.Start()
+	defer stepSink.Close()
+
 	// Dispatcher built from the local dynamic config (reused enterprise watcher).
 	dispWatcher := app.NewDispatcherWatcher(dynFn, proxy.DispatcherConfig{})
+	dispWatcher.WithObserver(stepSink)
 	if err := dispWatcher.Build(); err != nil {
 		log.Printf("warn: initial dispatcher build failed (chat unavailable until config is valid): %v", err)
 	}

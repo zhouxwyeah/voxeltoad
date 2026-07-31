@@ -60,21 +60,36 @@ func TestOverview(t *testing.T) {
 	seedTestData(t, db)
 	repo := NewQueryRepo(db)
 
-	agents, tot, err := repo.Overview(context.Background(), time.Time{}, time.Time{})
+	result, err := repo.Overview(context.Background(), time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatalf("Overview: %v", err)
 	}
-	if tot.RequestCount != 4 {
-		t.Errorf("totals request_count = %d, want 4", tot.RequestCount)
+	if result.Totals.RequestCount != 4 {
+		t.Errorf("totals request_count = %d, want 4", result.Totals.RequestCount)
 	}
-	if tot.TotalTokens != 95 {
-		t.Errorf("totals total_tokens = %d, want 95", tot.TotalTokens)
+	if result.Totals.TotalTokens != 95 {
+		t.Errorf("totals total_tokens = %d, want 95", result.Totals.TotalTokens)
 	}
-	if tot.ErrorCount != 1 {
-		t.Errorf("totals error_count = %d, want 1", tot.ErrorCount)
+	if result.Totals.ErrorCount != 1 {
+		t.Errorf("totals error_count = %d, want 1", result.Totals.ErrorCount)
+	}
+	if result.Scalars.TotalRequests != 4 {
+		t.Errorf("scalars total_requests = %d, want 4", result.Scalars.TotalRequests)
+	}
+	if result.Scalars.SuccessRate != 0.75 {
+		t.Errorf("scalars success_rate = %v, want 0.75", result.Scalars.SuccessRate)
+	}
+	if len(result.Providers) == 0 {
+		t.Errorf("providers distribution empty")
+	}
+	if len(result.Models) == 0 {
+		t.Errorf("models distribution empty")
+	}
+	if len(result.Errors) != 1 || result.Errors[0].ErrorType != "upstream_error" {
+		t.Errorf("errors = %+v, want 1 upstream_error", result.Errors)
 	}
 	byAgent := map[string]AgentUsage{}
-	for _, a := range agents {
+	for _, a := range result.Agents {
 		byAgent[a.AgentType] = a
 	}
 	if a, ok := byAgent["claude-code"]; !ok || a.RequestCount != 2 {

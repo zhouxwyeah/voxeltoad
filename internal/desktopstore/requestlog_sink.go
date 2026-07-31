@@ -45,6 +45,8 @@ func (s *RequestLogSink) Record(ctx context.Context, r observability.RequestLog)
 		UpstreamRequestID:  r.UpstreamRequestID,
 		SessionSource:      r.SessionSource,
 		AgentType:          r.AgentType,
+		IngressProtocol:    r.IngressProtocol,
+		ProviderEndpoint:   r.ProviderEndpoint,
 		CreatedAt:          r.CreatedAt,
 	}
 	return s.db.WithContext(ctx).Create(&row).Error

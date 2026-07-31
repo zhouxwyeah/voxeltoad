@@ -1,19 +1,17 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { CircleAlert } from "lucide-react";
+import { CircleAlert, Star, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
+import { Button } from "../components/ui/button";
 import { Pagination } from "../components/ui/pagination";
 import { Skeleton } from "../components/ui/skeleton";
-import { listSessions } from "../lib/api";
+import { ConfirmModal } from "../components/ui/confirm-modal";
+import { deleteSession, favoriteSession, listSessions, unfavoriteSession } from "../lib/api";
 import type { SessionSummary } from "../lib/types";
 import { agentLabel, formatDurationCompact, formatTime, formatTokens } from "../lib/format";
 
-// Mirrors the admin trace landing page (web/.../(dashboard)/trace): session
-// link with an error marker, agent type, request count, token total with
-// prompt/completion detail, compact duration, started-at. Desktop keeps its
-// date-range filters (supported by the desktop API) and shows no cost column
-// (the desktop store intentionally does not track billing).
 const AGENTS = ["claude-code", "codex", "codebuddy", "workbuddy", "opencode"];
 
 function toRFC3339(date: string, endOfDay = false): string | undefined {
@@ -32,6 +30,8 @@ export function Sessions() {
   const [pageSize, setPageSize] = useState(20);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
 
   useEffect(() => {
     setLoading(true);
@@ -49,18 +49,24 @@ export function Sessions() {
       })
       .catch((e) => setError(String(e?.message ?? e)))
       .finally(() => setLoading(false));
-  }, [agent, from, to, page, pageSize]);
+  }, [agent, from, to, page, pageSize, tick]);
+
+  const toggleFavorite = (s: SessionSummary) => {
+    const fn = s.favorited ? unfavoriteSession : favoriteSession;
+    fn(s.session_id)
+      .then(() => setTick((t) => t + 1))
+      .catch((e) => toast.error(String(e?.message ?? e)));
+  };
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 p-8">
       <div>
         <h1 className="text-xl font-semibold text-foreground">会话浏览器</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          按 Agent 与时间段过滤，查看每个会话的请求序列（点开进入 Trace 查看器）。
+          按 Agent 与时间段过滤，查看每个会话的请求序列。星标收藏的会话置顶且豁免普通留存。
         </p>
       </div>
 
-      {/* Filter bar (admin request-logs filter-bar styling) */}
       <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-muted/30 p-3">
         <label className="flex flex-col gap-1">
           <span className="text-[11px] text-muted-foreground">Agent</span>
@@ -116,23 +122,24 @@ export function Sessions() {
           ))}
         </div>
       ) : (
-        /* Table shell + in-shell Pagination, mirroring admin request-logs. */
         <div className="overflow-hidden rounded-lg border border-border bg-background">
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-border bg-muted text-left">
+                <Th className="w-8">{""}</Th>
                 <Th>会话</Th>
                 <Th>Agent 类型</Th>
                 <Th className="text-right">请求数</Th>
                 <Th className="text-right">Token 总量</Th>
                 <Th className="text-right">耗时</Th>
                 <Th>开始时间</Th>
+                <Th className="w-8">{""}</Th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
+                  <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
                     暂无会话。调整过滤条件，或先通过网关发起请求。
                   </td>
                 </tr>
@@ -142,6 +149,17 @@ export function Sessions() {
                     key={s.session_id}
                     className="border-b border-border transition-colors last:border-b-0 hover:bg-accent/40"
                   >
+                    <td className="px-2 py-2 text-center">
+                      <button
+                        onClick={() => toggleFavorite(s)}
+                        className={`transition-colors hover:text-primary ${
+                          s.favorited ? "text-primary" : "text-muted-foreground/40"
+                        }`}
+                        title={s.favorited ? "取消收藏" : "收藏"}
+                      >
+                        <Star className={`h-4 w-4 ${s.favorited ? "fill-current" : ""}`} />
+                      </button>
+                    </td>
                     <td className="px-3 py-2">
                       <Link
                         to={`/trace/${encodeURIComponent(s.session_id)}`}
@@ -165,6 +183,17 @@ export function Sessions() {
                       {formatDurationCompact(s.duration_ms)}
                     </td>
                     <td className="px-3 py-2">{formatTime(s.started_at)}</td>
+                    <td className="px-2 py-2 text-center">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2 text-destructive"
+                        onClick={() => setDeleting(s.session_id)}
+                        title="删除该会话的所有观测数据"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -182,6 +211,24 @@ export function Sessions() {
           />
         </div>
       )}
+
+      <ConfirmModal
+        open={deleting !== null}
+        onCancel={() => setDeleting(null)}
+        onConfirm={async () => {
+          if (deleting === null) return;
+          try {
+            const res = await deleteSession(deleting);
+            toast.success(`已删除 ${res.deleted} 条观测记录。`);
+            setTick((t) => t + 1);
+          } catch (e) {
+            toast.error(String((e as Error)?.message ?? e));
+          }
+          setDeleting(null);
+        }}
+        title="确认删除会话"
+        message={deleting ? `删除会话 "${deleting}" 的所有请求日志、Trace 与分发步骤？此操作不可撤销。` : ""}
+      />
     </div>
   );
 }

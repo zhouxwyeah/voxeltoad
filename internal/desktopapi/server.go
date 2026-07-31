@@ -14,7 +14,9 @@
 package desktopapi
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -40,6 +42,8 @@ import (
 type Server struct {
 	repo       *desktopstore.QueryRepo
 	prompts    *desktopstore.PromptRepo
+	favorites  *desktopstore.SessionFavoriteRepo
+	db         *desktopstore.DB
 	configPath string
 	watcher    *app.DispatcherWatcher
 	logs       *desktoplog.Ring
@@ -59,6 +63,8 @@ func New(db *desktopstore.DB, configPath string, watcher *app.DispatcherWatcher,
 	return &Server{
 		repo:       desktopstore.NewQueryRepo(db),
 		prompts:    desktopstore.NewPromptRepo(db),
+		favorites:  desktopstore.NewSessionFavoriteRepo(db),
+		db:         db,
 		configPath: configPath,
 		watcher:    watcher,
 		logs:       logs,
@@ -80,6 +86,13 @@ func (s *Server) Handler() http.Handler {
 	// (e.g. "NODE/abc-000001"), so a single-segment wildcard would 404. The
 	// "..." multi-segment wildcard (Go 1.22+) captures the full remainder.
 	mux.HandleFunc("GET /api/v1/trace/requests/{request_id...}", s.handleTraceByRequestID)
+	// DispatchStep path (ADR-0051): same multi-segment wildcard as trace.
+	mux.HandleFunc("GET /api/v1/dispatch-steps/{request_id...}", s.handleDispatchSteps)
+	mux.HandleFunc("GET /api/v1/provider-health", s.handleProviderHealth)
+	mux.HandleFunc("PUT /api/v1/session-favorites/{session_id...}", s.handleFavoriteSession)
+	mux.HandleFunc("DELETE /api/v1/session-favorites/{session_id...}", s.handleUnfavoriteSession)
+	mux.HandleFunc("DELETE /api/v1/sessions/{session_id...}", s.handleDeleteSession)
+	mux.HandleFunc("POST /api/v1/observation/purge", s.handlePurgeObservation)
 	mux.HandleFunc("GET /api/v1/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/v1/apikey", s.handleGetAPIKey)
 	mux.HandleFunc("POST /api/v1/apikey/rotate", s.handleRotateAPIKey)
@@ -188,15 +201,12 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	agents, totals, err := s.repo.Overview(r.Context(), from, to)
+	result, err := s.repo.Overview(r.Context(), from, to)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"agents": agents,
-		"totals": totals,
-	})
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleTraceBySession(w http.ResponseWriter, r *http.Request) {
@@ -250,6 +260,186 @@ func (s *Server) handleTraceByRequestID(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, d)
+}
+
+func (s *Server) handleDispatchSteps(w http.ResponseWriter, r *http.Request) {
+	requestID := r.PathValue("request_id")
+	if requestID == "" {
+		writeError(w, http.StatusBadRequest, "request_id path parameter is required")
+		return
+	}
+	steps, err := s.repo.ListDispatchSteps(r.Context(), requestID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, steps)
+}
+
+func (s *Server) handleProviderHealth(w http.ResponseWriter, r *http.Request) {
+	// Passive provider health (ADR-0051): combines in-memory breaker states
+	// (real-time circuit snapshot) with recent dispatch_steps aggregation
+	// (historical outcomes + last-seen). Does NOT probe upstreams.
+	health, err := s.repo.ListProviderHealth(r.Context(), 200)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+	// Fill breaker states from the live dispatcher (if available), and merge
+	// in breaker-only endpoints not yet in dispatch_steps. Call BreakerStates()
+	// once — it acquires a mutex and allocates a map each call.
+	var states map[string]string
+	if s.watcher != nil {
+		if disp := s.watcher.Current(); disp != nil {
+			states = disp.BreakerStates() // map["<provider>/<endpoint>"]"closed"|"open"|"half-open"
+		}
+	}
+	if states != nil {
+		seen := map[string]bool{}
+		for i := range health {
+			key := health[i].Provider + "/" + health[i].Endpoint
+			seen[key] = true
+			if st, ok := states[key]; ok {
+				health[i].BreakerState = st
+			} else {
+				health[i].BreakerState = "unknown"
+			}
+		}
+		// Merge breaker-only endpoints (seen by breaker but no recent dispatch_steps).
+		for key, st := range states {
+			if seen[key] {
+				continue
+			}
+			provider, endpoint := splitEndpointKey(key)
+			health = append(health, desktopstore.EndpointHealthAgg{
+				Provider:     provider,
+				Endpoint:     endpoint,
+				BreakerState: st,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, health)
+}
+
+// splitEndpointKey splits "<provider>/<endpoint>" back into parts. Provider
+// names do not contain "/" in practice; if they did, the first "/" is the
+// separator.
+func splitEndpointKey(key string) (provider, endpoint string) {
+	for i := 0; i < len(key); i++ {
+		if key[i] == '/' {
+			return key[:i], key[i+1:]
+		}
+	}
+	return key, ""
+}
+
+// handleFavoriteSession adds a session to favorites (idempotent).
+func (s *Server) handleFavoriteSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("session_id")
+	if sessionID == "" {
+		writeError(w, http.StatusBadRequest, "session_id is required")
+		return
+	}
+	if err := s.favorites.Put(r.Context(), sessionID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to favorite session")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleUnfavoriteSession removes a session from favorites.
+func (s *Server) handleUnfavoriteSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("session_id")
+	if sessionID == "" {
+		writeError(w, http.StatusBadRequest, "session_id is required")
+		return
+	}
+	_, err := s.favorites.Delete(r.Context(), sessionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to unfavorite session")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleDeleteSession deletes all observation data for one session.
+func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("session_id")
+	if sessionID == "" {
+		writeError(w, http.StatusBadRequest, "session_id is required")
+		return
+	}
+	n, err := s.db.DeleteSession(r.Context(), sessionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "delete failed")
+		return
+	}
+	if err := s.db.Checkpoint(); err != nil {
+		// non-fatal; data is deleted, just WAL not compacted
+		_ = err
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": n})
+}
+
+// handlePurgeObservation immediately deletes observation data. With a `before`
+// body parameter (RFC3339), deletes only rows older than that timestamp
+// (respecting favorites). Without it (empty body), clears all observation data.
+func (s *Server) handlePurgeObservation(w http.ResponseWriter, r *http.Request) {
+	// Read body leniently: empty body = "clear all"; non-empty must be valid
+	// JSON with an optional `before` field. We must NOT use readJSON here
+	// because it writes a 400 response on decode failure (including empty
+	// body) — ignoring that return value would proceed to ClearAllObservation
+	// and delete everything.
+	defer r.Body.Close()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read body")
+		return
+	}
+	var payload struct {
+		Before string `json:"before"`
+	}
+	if len(bytes.TrimSpace(body)) > 0 {
+		if err := json.Unmarshal(body, &payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			return
+		}
+	}
+
+	if payload.Before == "" {
+		// Clear all observation data (preserves api_keys, prompt_templates, session_favorites).
+		n, err := s.db.ClearAllObservation(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "purge failed")
+			return
+		}
+		_ = s.db.Checkpoint()
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": n})
+		return
+	}
+
+	before, err := time.Parse(time.RFC3339, payload.Before)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid 'before' timestamp (use RFC3339)")
+		return
+	}
+	nLogs, err := s.db.DeleteRequestLogsBefore(r.Context(), before)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "purge failed")
+		return
+	}
+	nTraces, err := s.db.DeleteTracePayloadsBefore(r.Context(), before)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "purge failed")
+		return
+	}
+	nSteps, err := s.db.DeleteDispatchStepsBefore(r.Context(), before)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "purge failed")
+		return
+	}
+	_ = s.db.Checkpoint()
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": nLogs + nTraces + nSteps})
 }
 
 // handleLogs serves the process log ring for the UI log viewer: the newest
@@ -508,6 +698,10 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
+	if err := config.ValidateProvider(&p); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	dyn := s.loadConfig(w)
 	if dyn == nil {
 		return
@@ -550,6 +744,10 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	// Name in URL wins (renames via PUT are rejected to avoid breaking model/route refs).
 	p.Name = name
+	if err := config.ValidateProvider(&p); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	dyn.Providers[idx] = p
 	if warn, ok := s.saveConfigAndReload(w, dyn, nil); ok {
 		writeJSON(w, http.StatusOK, envelope{Data: p, Warning: warn})

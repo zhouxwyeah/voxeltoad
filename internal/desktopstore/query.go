@@ -73,6 +73,8 @@ type RequestLogView struct {
 	CacheSource        string    `gorm:"column:cache_source" json:"cache_source"`
 	CachedPromptTokens int       `gorm:"column:cached_prompt_tokens" json:"cached_prompt_tokens"`
 	UpstreamRequestID  string    `gorm:"column:upstream_request_id" json:"upstream_request_id"`
+	IngressProtocol    string    `gorm:"column:ingress_protocol" json:"ingress_protocol"`
+	ProviderEndpoint   string    `gorm:"column:provider_endpoint" json:"provider_endpoint"`
 	CreatedAt          time.Time `gorm:"column:created_at" json:"created_at"`
 }
 
@@ -82,7 +84,7 @@ const requestLogCols = `id, tenant, group_name, api_key_id, provider,
        ttft_ms, duration_ms, error_type, blocked_by, fallback,
        request_id, client_request_id, session_id, trace_id, session_source, agent_type,
        cache_hit, cache_tier, cache_source, cached_prompt_tokens,
-       upstream_request_id, created_at`
+       upstream_request_id, ingress_protocol, provider_endpoint, created_at`
 
 // buildRequestLogWhere assembles request-log filter predicates.
 func buildRequestLogWhere(f RequestLogFilter) (where []string, args []any) {
@@ -184,6 +186,7 @@ type SessionSummary struct {
 	StartedAt        time.Time `json:"started_at"`
 	LastSeen         time.Time `json:"last_seen"`
 	HasErrors        bool      `json:"has_errors"`
+	Favorited        bool      `json:"favorited"`
 }
 
 // sessionAggRow is the raw aggregation scan target: SQLite returns the
@@ -200,6 +203,7 @@ type sessionAggRow struct {
 	LastSeen         time.Time `gorm:"column:last_seen"`
 	AgentType        string    `gorm:"column:agent_type"`
 	HasErrors        int       `gorm:"column:has_errors"`
+	Favorited        int       `gorm:"column:favorited"`
 }
 
 // ListSessions aggregates request_logs by session_id, returning per-session
@@ -257,11 +261,13 @@ func (r *QueryRepo) ListSessions(ctx context.Context, f SessionListFilter, page,
 	                       WHERE r2.session_id = request_logs.session_id
 	                         AND agent_type <> ''
 	                       ORDER BY created_at DESC, id DESC LIMIT 1), '') AS agent_type,
-	             MAX(CASE WHEN error_type <> '' THEN 1 ELSE 0 END)  AS has_errors
+	             MAX(CASE WHEN error_type <> '' THEN 1 ELSE 0 END)  AS has_errors,
+	             CASE WHEN EXISTS(SELECT 1 FROM session_favorites sf
+	                       WHERE sf.session_id = request_logs.session_id) THEN 1 ELSE 0 END AS favorited
 	      FROM request_logs
 	      WHERE ` + whereSQL + `
 	      GROUP BY session_id
-	      ORDER BY last_seen DESC
+	      ORDER BY favorited DESC, last_seen DESC
 	      LIMIT ? OFFSET ?`
 
 	var agg []sessionAggRow
@@ -281,6 +287,7 @@ func (r *QueryRepo) ListSessions(ctx context.Context, f SessionListFilter, page,
 			StartedAt:        a.StartedAt,
 			LastSeen:         a.LastSeen,
 			HasErrors:        a.HasErrors != 0,
+			Favorited:        a.Favorited != 0,
 		})
 	}
 	return out, total, nil
@@ -303,6 +310,8 @@ type TraceSummary struct {
 	ModelRequested string    `gorm:"column:model_requested" json:"model_requested"`
 	Stream         bool      `gorm:"column:stream" json:"stream"`
 	AgentType      string    `gorm:"column:agent_type" json:"agent_type"`
+	IngressProtocol string   `gorm:"column:ingress_protocol" json:"ingress_protocol"`
+	ProviderEndpoint string  `gorm:"column:provider_endpoint" json:"provider_endpoint"`
 	StatusCode     int       `gorm:"column:status_code" json:"status_code"`
 	StopReason     string    `gorm:"column:stop_reason" json:"stop_reason"`
 	NMessages      int       `gorm:"column:n_messages" json:"n_messages"`
@@ -378,7 +387,7 @@ func rawMessageOrNull(s string) json.RawMessage {
 }
 
 const traceSummaryCols = `id, request_id, session_id, trace_id, tenant,
-       provider, model_requested, stream, agent_type,
+       provider, model_requested, stream, agent_type, ingress_protocol, provider_endpoint,
        status_code, stop_reason, n_messages, n_tool_use, created_at`
 
 // ListTraceBySession returns the trace events for a session_id in chronological
@@ -442,7 +451,7 @@ func (r *QueryRepo) GetTraceByRequestID(ctx context.Context, requestID string) (
 }
 
 // ---------------------------------------------------------------------------
-// overview (per-agent rollup)
+// overview (per-agent rollup + multi-dimension distribution)
 // ---------------------------------------------------------------------------
 
 // AgentUsage is the per-agent rollup shown on the overview page: call volume,
@@ -458,6 +467,50 @@ type AgentUsage struct {
 	ErrorCount       int    `json:"error_count"`
 }
 
+// DimensionUsage is a generic per-dimension rollup (provider / model alias).
+// The UI derives averages from DurationMs/RequestCount.
+type DimensionUsage struct {
+	Key              string `json:"key"`
+	RequestCount     int    `json:"request_count"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	TotalTokens      int    `json:"total_tokens"`
+	DurationMs       int    `json:"duration_ms"`
+	ErrorCount       int    `json:"error_count"`
+}
+
+// ErrorUsage is a per-error-type count for the error distribution card.
+type ErrorUsage struct {
+	ErrorType string `json:"error_type"`
+	Count     int    `json:"count"`
+}
+
+// OverviewScalars carries single-row aggregates that don't fit a GROUP BY
+// dimension: success rate, fallback/stream/cache rates, average latency.
+type OverviewScalars struct {
+	TotalRequests int     `json:"total_requests"`
+	ErrorCount    int     `json:"error_count"`
+	SuccessRate   float64 `json:"success_rate"` // 0-1
+	FallbackCount int     `json:"fallback_count"`
+	FallbackRate  float64 `json:"fallback_rate"` // 0-1, legacy coarse signal
+	StreamCount   int     `json:"stream_count"`
+	StreamRate    float64 `json:"stream_rate"` // 0-1
+	CacheHitCount int     `json:"cache_hit_count"`
+	CacheHitRate  float64 `json:"cache_hit_rate"` // 0-1
+	AvgDurationMs int     `json:"avg_duration_ms"`
+	AvgTTFTms     int     `json:"avg_ttft_ms"`
+}
+
+// OverviewResult is the full payload returned to the overview page.
+type OverviewResult struct {
+	Agents    []AgentUsage     `json:"agents"`
+	Totals    AgentUsage       `json:"totals"`
+	Providers []DimensionUsage `json:"providers"`
+	Models    []DimensionUsage `json:"models"`
+	Errors    []ErrorUsage     `json:"errors"`
+	Scalars   OverviewScalars  `json:"scalars"`
+}
+
 // agentUsageAgg is the raw scan target (error_count is an integer aggregate).
 type agentUsageAgg struct {
 	AgentType        string `gorm:"column:agent_type"`
@@ -470,11 +523,38 @@ type agentUsageAgg struct {
 	ErrorCount       int    `gorm:"column:error_count"`
 }
 
-// Overview returns a per-agent rollup (ordered by request count DESC) plus a
-// grand-total row (AgentType == "ALL") over the optional time window. The
-// desktop gateway does not run billing, so currency cost is intentionally
-// absent (design/desktop.md §10.3: cost is "顺手记", tracked as token volume).
-func (r *QueryRepo) Overview(ctx context.Context, from, to time.Time) ([]AgentUsage, AgentUsage, error) {
+// dimensionAgg is the raw scan target for provider/model distributions.
+type dimensionAgg struct {
+	Key              string `gorm:"column:key"`
+	RequestCount     int    `gorm:"column:request_count"`
+	PromptTokens     int    `gorm:"column:prompt_tokens"`
+	CompletionTokens int    `gorm:"column:completion_tokens"`
+	TotalTokens      int    `gorm:"column:total_tokens"`
+	DurationMs       int    `gorm:"column:duration_ms"`
+	ErrorCount       int    `gorm:"column:error_count"`
+}
+
+// errorAgg is the raw scan target for the error-type distribution.
+type errorAgg struct {
+	ErrorType string `gorm:"column:error_type"`
+	Count     int    `gorm:"column:cnt"`
+}
+
+// scalarsAgg is the raw scan target for the single-row scalar aggregates.
+type scalarsAgg struct {
+	TotalRequests int     `gorm:"column:total_requests"`
+	ErrorCount    int     `gorm:"column:error_count"`
+	FallbackCount int     `gorm:"column:fallback_count"`
+	StreamCount   int     `gorm:"column:stream_count"`
+	CacheHitCount int     `gorm:"column:cache_hit_count"`
+	AvgDurationMs int     `gorm:"column:avg_duration_ms"`
+	AvgTTFTms     int     `gorm:"column:avg_ttft_ms"`
+}
+
+// Overview returns a multi-dimension rollup over the optional time window:
+// per-agent, per-provider, per-model distributions, error-type breakdown,
+// and scalar aggregates (success rate, fallback/stream/cache rates, averages).
+func (r *QueryRepo) Overview(ctx context.Context, from, to time.Time) (*OverviewResult, error) {
 	where := []string{"1=1"}
 	var args []any
 	if !from.IsZero() {
@@ -487,7 +567,8 @@ func (r *QueryRepo) Overview(ctx context.Context, from, to time.Time) ([]AgentUs
 	}
 	whereSQL := strings.Join(where, " AND ")
 
-	q := `SELECT agent_type,
+	// --- agents (existing SQL, unchanged) ---
+	agentQ := `SELECT agent_type,
 	             COUNT(*)                                          AS request_count,
 	             COALESCE(SUM(prompt_tokens), 0)                   AS prompt_tokens,
 	             COALESCE(SUM(completion_tokens), 0)               AS completion_tokens,
@@ -501,8 +582,8 @@ func (r *QueryRepo) Overview(ctx context.Context, from, to time.Time) ([]AgentUs
 	      ORDER BY request_count DESC`
 
 	var agg []agentUsageAgg
-	if err := r.db.WithContext(ctx).Raw(q, args...).Scan(&agg).Error; err != nil {
-		return nil, AgentUsage{}, err
+	if err := r.db.WithContext(ctx).Raw(agentQ, args...).Scan(&agg).Error; err != nil {
+		return nil, err
 	}
 
 	agents := make([]AgentUsage, 0, len(agg))
@@ -527,8 +608,214 @@ func (r *QueryRepo) Overview(ctx context.Context, from, to time.Time) ([]AgentUs
 		tot.TTFTms += a.TTFTms
 		tot.ErrorCount += a.ErrorCount
 	}
-	if agents == nil {
-		agents = []AgentUsage{}
+
+	// --- providers ---
+	provQ := `SELECT provider AS key,
+	             COUNT(*)                                          AS request_count,
+	             COALESCE(SUM(prompt_tokens), 0)                   AS prompt_tokens,
+	             COALESCE(SUM(completion_tokens), 0)               AS completion_tokens,
+	             COALESCE(SUM(total_tokens), 0)                     AS total_tokens,
+	             COALESCE(SUM(duration_ms), 0)                      AS duration_ms,
+	             COALESCE(SUM(CASE WHEN error_type <> '' THEN 1 ELSE 0 END), 0) AS error_count
+	      FROM request_logs
+	      WHERE ` + whereSQL + ` AND provider <> ''
+	      GROUP BY provider
+	      ORDER BY request_count DESC`
+	var provAgg []dimensionAgg
+	if err := r.db.WithContext(ctx).Raw(provQ, args...).Scan(&provAgg).Error; err != nil {
+		return nil, err
 	}
-	return agents, tot, nil
+	providers := make([]DimensionUsage, 0, len(provAgg))
+	for _, d := range provAgg {
+		providers = append(providers, DimensionUsage{
+			Key: d.Key, RequestCount: d.RequestCount, PromptTokens: d.PromptTokens,
+			CompletionTokens: d.CompletionTokens, TotalTokens: d.TotalTokens,
+			DurationMs: d.DurationMs, ErrorCount: d.ErrorCount,
+		})
+	}
+
+	// --- models ---
+	modelQ := `SELECT model_requested AS key,
+	             COUNT(*)                                          AS request_count,
+	             COALESCE(SUM(prompt_tokens), 0)                   AS prompt_tokens,
+	             COALESCE(SUM(completion_tokens), 0)               AS completion_tokens,
+	             COALESCE(SUM(total_tokens), 0)                     AS total_tokens,
+	             COALESCE(SUM(duration_ms), 0)                      AS duration_ms,
+	             COALESCE(SUM(CASE WHEN error_type <> '' THEN 1 ELSE 0 END), 0) AS error_count
+	      FROM request_logs
+	      WHERE ` + whereSQL + ` AND model_requested <> ''
+	      GROUP BY model_requested
+	      ORDER BY request_count DESC`
+	var modelAgg []dimensionAgg
+	if err := r.db.WithContext(ctx).Raw(modelQ, args...).Scan(&modelAgg).Error; err != nil {
+		return nil, err
+	}
+	models := make([]DimensionUsage, 0, len(modelAgg))
+	for _, d := range modelAgg {
+		models = append(models, DimensionUsage{
+			Key: d.Key, RequestCount: d.RequestCount, PromptTokens: d.PromptTokens,
+			CompletionTokens: d.CompletionTokens, TotalTokens: d.TotalTokens,
+			DurationMs: d.DurationMs, ErrorCount: d.ErrorCount,
+		})
+	}
+
+	// --- errors ---
+	errQ := `SELECT error_type, COUNT(*) AS cnt
+	      FROM request_logs
+	      WHERE ` + whereSQL + ` AND error_type <> ''
+	      GROUP BY error_type
+	      ORDER BY cnt DESC`
+	var errAgg []errorAgg
+	if err := r.db.WithContext(ctx).Raw(errQ, args...).Scan(&errAgg).Error; err != nil {
+		return nil, err
+	}
+	errors := make([]ErrorUsage, 0, len(errAgg))
+	for _, e := range errAgg {
+		errors = append(errors, ErrorUsage{ErrorType: e.ErrorType, Count: e.Count})
+	}
+
+	// --- scalars ---
+	scalarQ := `SELECT
+	      COUNT(*)                                                          AS total_requests,
+	      COALESCE(SUM(CASE WHEN error_type <> '' THEN 1 ELSE 0 END), 0)   AS error_count,
+	      COALESCE(SUM(CASE WHEN fallback THEN 1 ELSE 0 END), 0)           AS fallback_count,
+	      COALESCE(SUM(CASE WHEN stream THEN 1 ELSE 0 END), 0)             AS stream_count,
+	      COALESCE(SUM(CASE WHEN cache_hit THEN 1 ELSE 0 END), 0)          AS cache_hit_count,
+	      COALESCE(CAST(AVG(duration_ms) AS INTEGER), 0)                    AS avg_duration_ms,
+	      COALESCE(CAST(AVG(ttft_ms) AS INTEGER), 0)                        AS avg_ttft_ms
+	      FROM request_logs
+	      WHERE ` + whereSQL
+	var sc scalarsAgg
+	if err := r.db.WithContext(ctx).Raw(scalarQ, args...).Scan(&sc).Error; err != nil {
+		return nil, err
+	}
+	scalars := OverviewScalars{
+		TotalRequests: sc.TotalRequests,
+		ErrorCount:    sc.ErrorCount,
+		FallbackCount: sc.FallbackCount,
+		StreamCount:   sc.StreamCount,
+		CacheHitCount: sc.CacheHitCount,
+		AvgDurationMs: sc.AvgDurationMs,
+		AvgTTFTms:     sc.AvgTTFTms,
+	}
+	if sc.TotalRequests > 0 {
+		scalars.SuccessRate = float64(sc.TotalRequests-sc.ErrorCount) / float64(sc.TotalRequests)
+		scalars.FallbackRate = float64(sc.FallbackCount) / float64(sc.TotalRequests)
+		scalars.StreamRate = float64(sc.StreamCount) / float64(sc.TotalRequests)
+		scalars.CacheHitRate = float64(sc.CacheHitCount) / float64(sc.TotalRequests)
+	}
+
+	return &OverviewResult{
+		Agents:    agents,
+		Totals:    tot,
+		Providers: providers,
+		Models:    models,
+		Errors:    errors,
+		Scalars:   scalars,
+	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// dispatch_steps (ADR-0051)
+// ---------------------------------------------------------------------------
+
+// ListDispatchSteps returns the ordered dispatch path for a request_id
+// (oldest-first). Empty slice when no steps were recorded.
+func (r *QueryRepo) ListDispatchSteps(ctx context.Context, requestID string) ([]DispatchStepRow, error) {
+	if requestID == "" {
+		return []DispatchStepRow{}, nil
+	}
+	var rows []DispatchStepRow
+	if err := r.db.WithContext(ctx).
+		Where("request_id = ?", requestID).
+		Order("ordinal ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []DispatchStepRow{}
+	}
+	return rows, nil
+}
+
+// ---------------------------------------------------------------------------
+// provider health (ADR-0051 passive projection)
+// ---------------------------------------------------------------------------
+
+// EndpointHealthAgg is the passive health projection for one provider endpoint:
+// recent dispatch_step outcomes + average latency + last activity. The
+// BreakerState field is filled by the handler (from the in-memory circuit
+// breaker), not by the SQL query. ADR-0051.
+type EndpointHealthAgg struct {
+	Provider          string     `json:"provider"`
+	Endpoint          string     `json:"endpoint"`
+	BreakerState      string     `json:"breaker_state"` // "closed"|"open"|"half-open"|"unknown"
+	Attempted         int        `json:"attempted"`
+	Selected          int        `json:"selected"`
+	RetryableFailures int        `json:"retryable_failures"`
+	TerminalFailures  int        `json:"terminal_failures"`
+	Skipped           int        `json:"skipped"`
+	AvgDurationMs     int        `json:"avg_duration_ms"`
+	LastSeen          *time.Time `json:"last_seen"`
+}
+
+// ListProviderHealth returns per-endpoint health aggregates derived from the
+// most recent dispatch_steps. It fetches the global last `limit` rows and
+// aggregates in Go (SQLite has no clean "last N per group" window function).
+// BreakerState is left empty — the caller fills it from the live dispatcher.
+func (r *QueryRepo) ListProviderHealth(ctx context.Context, limit int) ([]EndpointHealthAgg, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	var rows []DispatchStepRow
+	if err := r.db.WithContext(ctx).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	type aggKey struct {
+		Provider string
+		Endpoint string
+	}
+	aggs := map[aggKey]*EndpointHealthAgg{}
+	durSum := map[aggKey]int{} // sum of DurationMs for attempted steps
+	for _, row := range rows {
+		k := aggKey{Provider: row.Provider, Endpoint: row.Endpoint}
+		a, ok := aggs[k]
+		if !ok {
+			a = &EndpointHealthAgg{Provider: row.Provider, Endpoint: row.Endpoint}
+			aggs[k] = a
+		}
+		if row.Action == "skipped" {
+			a.Skipped++
+		} else {
+			a.Attempted++
+			durSum[k] += row.DurationMs
+			switch row.SelectionOutcome {
+			case "selected":
+				a.Selected++
+			case "retryable_failure":
+				a.RetryableFailures++
+			case "terminal_failure":
+				a.TerminalFailures++
+			}
+		}
+		if a.LastSeen == nil || row.CreatedAt.After(*a.LastSeen) {
+			t := row.CreatedAt
+			a.LastSeen = &t
+		}
+	}
+	for k, a := range aggs {
+		if a.Attempted > 0 {
+			a.AvgDurationMs = durSum[k] / a.Attempted
+		}
+	}
+
+	out := make([]EndpointHealthAgg, 0, len(aggs))
+	for _, a := range aggs {
+		out = append(out, *a)
+	}
+	return out, nil
 }
