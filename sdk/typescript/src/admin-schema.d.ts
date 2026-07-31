@@ -2389,6 +2389,154 @@ export interface paths {
         };
         trace?: never;
     };
+    "/api/v1/applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the caller tenant's applications */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Opaque keyset cursor from a prior response's next_cursor. Omit for the first page. */
+                    cursor?: components["parameters"]["Cursor"];
+                    /** @description Max items to return. */
+                    limit?: components["parameters"]["Limit"];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Application list */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationList"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        /** Create an application in the caller's tenant */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateApplicationRequest"];
+                };
+            };
+            responses: {
+                /** @description Application created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Application"];
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/applications/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete an application (rejected if api_keys reference it — 409) */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+                /** @description Refused — api_keys reference this application (via api_keys.application_id FK). Repoint or revoke them first. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /** Enable or disable an application (reversible) */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdateApplicationRequest"];
+                };
+            };
+            responses: {
+                /** @description Application updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Application"];
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        trace?: never;
+    };
     "/api/v1/me": {
         parameters: {
             query?: never;
@@ -2850,6 +2998,23 @@ export interface components {
         UpdateGroupRequest: {
             enabled: boolean;
         };
+        Application: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            /** Format: int64 */
+            owner_group_id: number;
+            owner_group_name: string;
+            enabled: boolean;
+        };
+        CreateApplicationRequest: {
+            name: string;
+            /** @description Name of the owning Group */
+            owner_group: string;
+        };
+        UpdateApplicationRequest: {
+            enabled: boolean;
+        };
         /** @description Non-secret operator view — never includes the password hash. */
         Operator: {
             /** Format: int64 */
@@ -3105,6 +3270,9 @@ export interface components {
         };
         GroupList: components["schemas"]["ListEnvelope"] & {
             data?: components["schemas"]["Group"][];
+        };
+        ApplicationList: components["schemas"]["ListEnvelope"] & {
+            data?: components["schemas"]["Application"][];
         };
         OperatorList: components["schemas"]["ListEnvelope"] & {
             data?: components["schemas"]["Operator"][];

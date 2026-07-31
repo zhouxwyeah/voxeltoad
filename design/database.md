@@ -3,7 +3,7 @@
 > 管理面 PostgreSQL schema 的可视化与集中清单。ADR-0014 是决策源，本文件是单一事实来源（可视化 + 完整表清单 + 软引用关系 + 设计决定说明）。
 > **适用对象**：修改 schema、新增表、调整跨表引用关系时，先读本文件对齐全貌，再查相关 ADR 看决策背景。
 
-Schema 形状由 `internal/store/migrations/` 下的 26 个 goose 迁移定义（`00001`-`00027`，缺 `00018`）；本文件与之保持同步。其中 `00018` 因 trace 迁移重命名而跳过（见 git log `856613d`）。
+Schema 形状由 `internal/store/migrations/` 下的 27 个 goose 迁移定义（`00001`-`00028`，缺 `00018`）；本文件与之保持同步。其中 `00018` 因 trace 迁移重命名而跳过（见 git log `856613d`）。
 
 > **同步规则（门禁）**：任何 PR 若新增/修改/删除表、列、索引或约束（即触碰 `internal/store/migrations/` 下的 SQL 文件），**必须同步更新本文件**。检查清单：
 > - §1 表分类矩阵：新表归入正确分类，业务表计数同步
@@ -19,12 +19,12 @@ Schema 形状由 `internal/store/migrations/` 下的 26 个 goose 迁移定义�
 
 ### 表分类矩阵
 
-21 张业务表 + 2 张 goose 隐式表，按作用域分 4 类：
+22 张业务表 + 2 张 goose 隐式表，按作用域分 4 类：
 
 | 分类 | 表 | RBAC 边界 | 备注 |
 |---|---|---|---|
 | **全局资源** | `providers` `models` `routes` `plugins` `config_snapshots` `data_plane_nodes` `provider_credentials` `gateway_settings` | super-admin (wildcard) 管理；支持自定义角色通过 `requirePermission()` 授权 | 平台级，无 `tenant_id`，所有租户共享 |
-| **租户作用域** | `tenants` `groups` `api_keys` `quotas` `usage_records` `request_logs` `trace_payloads` | tenant-admin 管自己；super-admin 管所有；自定义租户角色按 permissions 授权 | 三级层级 Tenant→Group→APIKey（ADR-0005） |
+| **租户作用域** | `tenants` `groups` `applications` `api_keys` `quotas` `usage_records` `request_logs` `trace_payloads` | tenant-admin 管自己；super-admin 管所有；自定义租户角色按 permissions 授权 | 三级层级 Tenant→Group→APIKey（ADR-0005）；Application 是 tenant-scoped workload identity（ADR-0051） |
 | **运营** | `operators` `sessions` `audit_logs` `roles` `role_permissions` | super-admin 管所有 operators 和 roles；各 operator 管自己 sessions | 邮箱+密码登录，与 client API Key 是两套系统 |
 | **元数据** | `config_generation` `goose_db_version` | 系统内部，无直接 API | 两条独立版本线（ADR-0015） |
 
@@ -116,7 +116,7 @@ erDiagram
 
 每张 config 表的 `spec` 列存整个 Go 结构体的 JSON 序列化（`internal/config/schema.go`）：
 
-- `providers.spec` → `config.Provider`（Name/Type/Adapter/BaseURL/APIKeyRef/Timeouts/Weight）
+- `providers.spec` → `config.Provider`（Name/Type/Enabled + `Endpoints[]`，每个 endpoint 含 Adapter/BaseURL/APIKeyRef/Timeouts；ADR-0049 multi-endpoint）
 - `models.spec` → `config.Model`（Alias + `Upstreams[]`，每个 upstream 含 Provider/UpstreamModel/DefaultMaxTokens/Pricing）
 - `routes.spec` → `config.Route`（ModelAlias + `Providers[].{Name,Weight}` + Strategy）
 - `plugins.spec` → `config.PluginConfig`（Name/Phase/Params/Enabled/Scope）
@@ -191,6 +191,9 @@ erDiagram
     tenants ||--o{ groups : "tenant_id FK"
     tenants ||--o{ api_keys : "tenant_id FK"
     groups ||--o{ api_keys : "group_id FK (nullable)"
+    tenants ||--o{ applications : "tenant_id FK"
+    groups ||--o{ applications : "owner_group_id FK (NOT NULL)"
+    applications ||--o{ api_keys : "application_id FK (nullable)"
     tenants ||..o{ quotas : "scope='tenant:<name>' (软引用)"
     groups ||..o{ quotas : "scope='group:<name>/<group>' (软引用)"
     api_keys ||..o{ quotas : "scope='key:<id>' (软引用)"
@@ -218,12 +221,25 @@ erDiagram
         unique "UNIQUE(tenant_id, name)"
     }
 
+    applications {
+        bigint id PK
+        bigint tenant_id FK "NOT NULL"
+        varchar name
+        bigint owner_group_id FK "NOT NULL"
+        boolean enabled "disable → 所有绑定 key 在 LookupByHash 被拒"
+        timestamptz created_at
+        timestamptz updated_at
+        unique "UNIQUE(tenant_id, name)"
+    }
+
     api_keys {
         bigint id PK
         varchar key_id UNIQUE "公开标识"
         char hash UNIQUE "SHA-256 hex, 64 字符"
         bigint tenant_id FK "NOT NULL"
         bigint group_id FK "NULLABLE, 可无 group"
+        bigint application_id FK "NULLABLE, 迁移期允许 unbound (ADR-0051)"
+        varchar environment "dev/staging/prod/'', 受控属性"
         timestamptz expires_at
         jsonb allowed_models "JSONB, 空=全部允许"
         timestamptz revoked_at "软删"

@@ -2,9 +2,6 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const EMAIL = process.env.VOXELTOAD_ADMIN_EMAIL ?? "root@adminstack";
 const PASSWORD = process.env.VOXELTOAD_ADMIN_PASSWORD ?? "adminstack-pass-123";
-const tenantName = `e2e-grp-tenant-${Date.now()}`;
-const taEmail = `e2e-grp-ta-${Date.now()}@test`;
-const groupName = "e2e-group";
 
 /**
  * comboboxFor locates the custom Select primitive
@@ -32,8 +29,11 @@ async function selectCombo(trigger: Locator, optionText: string) {
 
 /**
  * Setup: create tenant + tenant-admin via super-admin, login as tenant-admin.
+ * Mirrors groups.spec.ts setupTenantAdmin.
  */
 async function setupTenantAdmin(page: Page) {
+  const tenantName = `e2e-app-tenant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const taEmail = `e2e-app-ta-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@test`;
   await page.goto("/login");
   await page.fill('input[name="email"]', EMAIL);
   await page.fill('input[name="password"]', PASSWORD);
@@ -64,30 +64,53 @@ async function setupTenantAdmin(page: Page) {
   await page.click('button[type="submit"]');
 }
 
-test("tenant-admin: create group → toggle enabled → delete", async ({
+/**
+ * Create a group via the Groups page, so the Application form has an
+ * owner_group to select.
+ */
+async function createGroup(page: Page, name: string) {
+  await page.click('a:has-text("Groups")');
+  await expect(page).toHaveURL(/\/groups$/);
+  await page.getByRole("button", { name: "Create Group" }).click();
+  const modal = page.getByRole("dialog", { name: "Create Group" });
+  await modal.getByLabel("Name *").fill(name);
+  await modal.getByRole("button", { name: "Save" }).click();
+  await expect(modal).not.toBeVisible();
+}
+
+test("tenant-admin: create application → toggle enabled → delete", async ({
   page,
 }) => {
+  const groupName = "e2e-owner-group";
+  const appName = "e2e-application";
   await setupTenantAdmin(page);
   await expect(page).toHaveURL(/\/api-keys$/);
 
-  // Navigate to groups.
-  await page.click('a:has-text("Groups")');
-  await expect(page).toHaveURL(/\/groups$/);
+  // Pre-requisite: create an owner group.
+  await createGroup(page, groupName);
 
-  // Create group.
-  await page.getByRole("button", { name: "Create Group" }).click();
-  const createModal = page.getByRole("dialog", { name: "Create Group" });
-  await createModal.getByLabel("Name *").fill(groupName);
+  // Navigate to applications.
+  await page.click('a:has-text("Applications")');
+  await expect(page).toHaveURL(/\/applications$/);
+
+  // Create application.
+  await page.getByRole("button", { name: "Create Application" }).click();
+  const createModal = page.getByRole("dialog", { name: "Create Application" });
+  await createModal.getByLabel("Name *").fill(appName);
+  // owner_group uses the custom Select primitive (combobox + hidden input).
+  await selectCombo(comboboxFor(createModal, "owner_group"), groupName);
   await createModal.getByRole("button", { name: "Save" }).click();
   await expect(createModal).not.toBeVisible();
 
-  const row = page.getByRole("row", { name: new RegExp(groupName) });
+  const row = page.getByRole("row", { name: new RegExp(appName) });
   await expect(row).toBeVisible();
+  // Owner Group column shows the group name.
+  await expect(row.getByText(groupName)).toBeVisible();
   await expect(row.getByText("Enabled")).toBeVisible();
 
   // Disable.
   await row.getByRole("button", { name: "Disable" }).click();
-  const disableModal = page.getByRole("dialog", { name: "Disable Group" });
+  const disableModal = page.getByRole("dialog", { name: "Disable Application" });
   await disableModal.getByRole("button", { name: "Disable" }).click();
   await expect(disableModal).not.toBeVisible();
   await expect(row.getByText("Disabled")).toBeVisible();
@@ -100,5 +123,35 @@ test("tenant-admin: create group → toggle enabled → delete", async ({
   await row.getByRole("button", { name: "Delete" }).click();
   const deleteModal = page.getByRole("dialog", { name: "Confirm Delete" });
   await deleteModal.getByRole("button", { name: "Delete" }).click();
-  await expect(page.getByRole("cell", { name: groupName })).toHaveCount(0);
+  await expect(page.getByRole("cell", { name: appName })).toHaveCount(0);
+});
+
+test("tenant-admin: duplicate application name rejected", async ({ page }) => {
+  await setupTenantAdmin(page);
+  await expect(page).toHaveURL(/\/api-keys$/);
+
+  await createGroup(page, "dup-group");
+
+  await page.click('a:has-text("Applications")');
+  await expect(page).toHaveURL(/\/applications$/);
+
+  // First create succeeds.
+  await page.getByRole("button", { name: "Create Application" }).click();
+  let modal = page.getByRole("dialog", { name: "Create Application" });
+  await modal.getByLabel("Name *").fill("dup-app");
+  await selectCombo(comboboxFor(modal, "owner_group"), "dup-group");
+  await modal.getByRole("button", { name: "Save" }).click();
+  await expect(modal).not.toBeVisible();
+
+  // Second create with same name fails.
+  await page.getByRole("button", { name: "Create Application" }).click();
+  modal = page.getByRole("dialog", { name: "Create Application" });
+  await modal.getByLabel("Name *").fill("dup-app");
+  await selectCombo(comboboxFor(modal, "owner_group"), "dup-group");
+  await modal.getByRole("button", { name: "Save" }).click();
+  // Error message visible inside the modal.
+  await expect(modal.locator("[role='alert']")).toBeVisible();
+  // Modal stays open (form not dismissed).
+  await expect(modal).toBeVisible();
+  await modal.getByRole("button", { name: "Cancel" }).click();
 });

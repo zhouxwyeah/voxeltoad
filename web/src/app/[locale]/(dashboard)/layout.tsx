@@ -101,6 +101,7 @@ export default async function DashboardLayout({
             <>
               <NavLink href="/api-keys">{t("nav.apiKeys")}</NavLink>
               <NavLink href="/groups">{t("nav.groups")}</NavLink>
+              <NavLink href="/applications">{t("nav.applications")}</NavLink>
               <NavLink href="/quotas">{t("nav.quotas")}</NavLink>
             </>
           )}

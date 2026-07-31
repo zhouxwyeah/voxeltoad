@@ -305,3 +305,57 @@ i18n 文件是并行 worktree 的高频冲突点。约定如下：
   确认。
 - **新增 namespace 零代码改动**：`request.ts` 自动发现，不需要也不应该多人改同一行。
 
+## 13. Playwright e2e Pitfalls
+
+> 随开发推进持续补充——把每个调试半天才发现的陷阱固化成规范。
+
+### `comboboxFor` 与表单字段名耦合
+
+`comboboxFor(container, name)` 通过 `label:has(input[name="${name}"])` 定位 custom
+Select 组件。它依赖表单组件中 `<input type="hidden" name={name}>` 的**确切 name 属性**。
+当表单重构重命名字段时，e2e 测试不会编译失败——它会在运行时 30s 超时，报
+`waiting for ... getByRole('combobox')`。
+
+**已发生的重命名**：
+
+| 表单 | 旧字段名 | 新字段名 | 变更原因 | 影响的测试 |
+|---|---|---|---|---|
+| Operator 创建 | `role` | `_role_select` | 表单重构 | groups/api-keys/quotas/applications.spec.ts 的 `setupTenantAdmin` |
+| Provider 创建 | `adapter` | `endpoint_adapter` | ADR-0049 multi-endpoint | providers/routes/models.spec.ts 的 `createProvider` |
+
+**规则**：
+- 重命名表单字段的 PR **必须**同步搜索 `web/tests/e2e/*.spec.ts` 中的
+  `comboboxFor` / `comboboxesFor` 调用并更新字段名。
+- 运行 `make web-e2e` 验证全绿后再合并。
+- 新增表单字段时，在对应 spec 中用 `comboboxFor(container, "exact_name")` 引用。
+
+### ConfirmModal 定位
+
+ConfirmModal 渲染为独立的 `role="dialog"`，**不在**触发行的内部。删除确认按钮的
+文案是 `t("actions.delete")`（即 "Delete"），不是 "Confirm"。
+
+**错误写法**（30s 超时）：
+```ts
+await deleteRow.getByText("Confirm").click(); // Confirm 按钮不在 row 内
+```
+
+**正确写法**：
+```ts
+const deleteModal = page.getByRole("dialog", { name: "Delete role" });
+await deleteModal.getByRole("button", { name: "Delete" }).click();
+```
+
+### `setupTenantAdmin` 租户名唯一性
+
+如果多个测试用例都调用 `setupTenantAdmin`，模块级的 `tenantName` 常量会导致第二个
+测试创建重复租户失败（modal 不关闭）。**必须在函数内生成唯一名**：
+
+```ts
+async function setupTenantAdmin(page: Page) {
+  const tenantName = `e2e-xxx-tenant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const taEmail = `e2e-xxx-ta-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@test`;
+  // ...
+}
+```
+
+

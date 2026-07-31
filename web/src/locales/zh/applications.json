@@ -1,0 +1,32 @@
+{
+  "heading": "应用",
+  "subtitle": "消费 AI 的长期业务系统。每个应用有一个所属团队，可被多个团队的 API Key 消费。",
+  "columns": {
+    "id": "ID",
+    "name": "名称",
+    "ownerGroup": "所属团队",
+    "status": "状态"
+  },
+  "status": {
+    "enabled": "已启用",
+    "disabled": "已停用"
+  },
+  "form": {
+    "name": { "label": "名称 *" },
+    "ownerGroup": { "label": "所属团队 *" }
+  },
+  "modal": {
+    "createTitle": "创建应用",
+    "disableTitle": "停用应用"
+  },
+  "actions": {
+    "create": "创建应用",
+    "save": "保存",
+    "emptyState": "暂无应用。",
+    "disable": "停用",
+    "enable": "启用",
+    "delete": "删除",
+    "disableConfirm": "停用应用「{name}」？所有绑定的 API Key 将被拒绝。",
+    "deleteConfirm": "删除应用「{name}」？除非没有 API Key 引用它，否则此操作无法撤销。"
+  }
+}

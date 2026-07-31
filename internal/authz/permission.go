@@ -43,10 +43,12 @@ const (
 	PermSettingsRead      Permission = "settings.read"
 
 	// Tenant-scope: manage api-keys and groups within a tenant.
-	PermAPIKeyRead  Permission = "api_key.read"
-	PermAPIKeyWrite Permission = "api_key.write"
-	PermGroupRead   Permission = "group.read"
-	PermGroupWrite  Permission = "group.write"
+	PermAPIKeyRead       Permission = "api_key.read"
+	PermAPIKeyWrite      Permission = "api_key.write"
+	PermGroupRead        Permission = "group.read"
+	PermGroupWrite       Permission = "group.write"
+	PermApplicationRead  Permission = "application.read"
+	PermApplicationWrite Permission = "application.write"
 
 	// Both-scope: read-only cross-cutting views (scope governs the view width).
 	PermUsageRead      Permission = "usage.read"
@@ -101,6 +103,8 @@ func AllPermissions() []Entry {
 		{PermAPIKeyWrite, ScopeTenant, "Write API keys"},
 		{PermGroupRead, ScopeTenant, "Read groups"},
 		{PermGroupWrite, ScopeTenant, "Write groups"},
+		{PermApplicationRead, ScopeTenant, "Read applications"},
+		{PermApplicationWrite, ScopeTenant, "Write applications"},
 		// Both-scope
 		{PermUsageRead, ScopeGlobal, "Read usage stats"}, // global → all; tenant → own
 		{PermAuditRead, ScopeGlobal, "Read audit trail"},

@@ -150,3 +150,89 @@ func repeat(s string, n int) string {
 	}
 	return string(out)
 }
+
+// --- ADR-0051: Application binding and environment ---
+
+func TestKeyRepo_LookupByHash_BoundApp(t *testing.T) {
+	ctx := context.Background()
+	db := mustMigratedDB(t)
+	repo := store.NewKeyRepo(db)
+	hash := "f" + repeat("0", 63)
+	seedKeyWithApplication(t, db, "key_bound_app", hash, "acme-bound", "team-bound", "app-bound", "prod", true)
+
+	rec, ok, err := repo.LookupByHash(ctx, hash)
+	if err != nil || !ok {
+		t.Fatalf("LookupByHash: ok=%v err=%v", ok, err)
+	}
+	if rec.ApplicationID == nil {
+		t.Error("ApplicationID = nil, want non-nil")
+	}
+	if rec.Environment != "prod" {
+		t.Errorf("Environment = %q, want prod", rec.Environment)
+	}
+}
+
+func TestKeyRepo_LookupByHash_UnboundKey(t *testing.T) {
+	ctx := context.Background()
+	db := mustMigratedDB(t)
+	repo := store.NewKeyRepo(db)
+
+	// Insert a key with no application binding (migration debt).
+	var tenantID, groupID int64
+	if err := db.Raw(`INSERT INTO tenants (name) VALUES ('acme-unbound') RETURNING id`).Scan(&tenantID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Raw(`INSERT INTO groups (tenant_id, name) VALUES (?, 'team-unbound') RETURNING id`, tenantID).Scan(&groupID).Error; err != nil {
+		t.Fatal(err)
+	}
+	hash := "g" + repeat("0", 63)
+	if err := db.Exec(
+		`INSERT INTO api_keys (key_id, hash, tenant_id, group_id, allowed_models) VALUES (?, ?, ?, ?, '[]'::jsonb)`,
+		"key_unbound", hash, tenantID, groupID,
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	rec, ok, err := repo.LookupByHash(ctx, hash)
+	if err != nil || !ok {
+		t.Fatalf("LookupByHash: ok=%v err=%v", ok, err)
+	}
+	if rec.ApplicationID != nil {
+		t.Errorf("ApplicationID = %v, want nil (unbound)", rec.ApplicationID)
+	}
+	if rec.Environment != "" {
+		t.Errorf("Environment = %q, want empty", rec.Environment)
+	}
+}
+
+func TestKeyRepo_DisabledAppNotFound(t *testing.T) {
+	ctx := context.Background()
+	db := mustMigratedDB(t)
+	repo := store.NewKeyRepo(db)
+	hash := "h" + repeat("0", 63)
+	seedKeyWithApplication(t, db, "key_disabled_app", hash, "acme-disapp", "team-disapp", "app-disapp", "", false)
+
+	_, ok, err := repo.LookupByHash(ctx, hash)
+	if err != nil {
+		t.Fatalf("LookupByHash: %v", err)
+	}
+	if ok {
+		t.Error("key bound to a disabled application must not be found")
+	}
+}
+
+func TestKeyRepo_EnvironmentPropagated(t *testing.T) {
+	ctx := context.Background()
+	db := mustMigratedDB(t)
+	repo := store.NewKeyRepo(db)
+	hash := "i" + repeat("0", 63)
+	seedKeyWithApplication(t, db, "key_env", hash, "acme-env", "team-env", "app-env", "staging", true)
+
+	rec, ok, err := repo.LookupByHash(ctx, hash)
+	if err != nil || !ok {
+		t.Fatalf("LookupByHash: ok=%v err=%v", ok, err)
+	}
+	if rec.Environment != "staging" {
+		t.Errorf("Environment = %q, want staging", rec.Environment)
+	}
+}

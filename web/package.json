@@ -14,11 +14,12 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
-    "@voxeltoad/gateway-sdk": "file:../sdk/typescript",
     "@tanstack/react-table": "^8.20.5",
+    "@voxeltoad/gateway-sdk": "file:../sdk/typescript",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "geist": "^1.7.2",
     "iron-session": "^8.0.4",
     "lucide-react": "^1.23.0",
     "next": "16.2.10",

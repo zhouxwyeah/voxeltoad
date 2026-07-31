@@ -100,6 +100,20 @@ and refined through `grill-with-docs` sessions.
 - **Key cache** — the data plane's local, short-TTL cache of key records;
   authentication is cache-first with a fallback lookup on miss, so keys are
   real-time without bloating the config snapshot. (See ADR-0006.)
+- **Application** — a long-lived, tenant-scoped business system or product that
+  consumes AI. The stable workload identity for usage attribution and future
+  budget/routing/model-access policy; distinct from a Group (organizational
+  consumer/owner), APIKey (credential), Agent Run (transient execution), and
+  Workload Profile (per-request routing context). Has one owning Group but may be
+  consumed by keys from multiple Groups in the same Tenant. (See ADR-0051.)
+- **Application binding** — the trusted association from an APIKey (or a future
+  server-resolved workload credential) to at most one Application. The data plane
+  derives `application_id` from the authenticated credential; a caller-supplied
+  header cannot establish this governance identity. Legacy unbound keys are
+  recorded as unattributed. (See ADR-0051.)
+- **Application environment** — a controlled credential attribute such as `dev`,
+  `staging`, or `prod`, snapshotted into request/usage records. It does not create
+  a separate Application or an `ApplicationDeployment` entity. (See ADR-0051.)
 - **Internal trust secret** — the shared secret authenticating the data
   plane ↔ management plane channel (e.g. the config snapshot request), carried
   in bootstrap config and resolved via `config.ResolveSecret`. Distinct from
@@ -140,6 +154,22 @@ and refined through `grill-with-docs` sessions.
 - **Routing strategy** — how a Route picks among candidate providers: `priority`
   (first healthy), `weighted` (per-route/provider weight), `round_robin`
   (per-instance cursor in P0). (See ADR-0011.)
+- **RoutingPolicy** — a versioned Application policy that first filters candidates
+  by hard eligibility constraints, then applies an approved Quality Tier and an
+  ordered objective (`cost_first`, `latency_first`, or `quality_first`) before the
+  existing health/failover execution path. (See ADR-0053.)
+- **Quality Tier** — an operator-approved candidate class such as `economy`,
+  `balanced`, or `premium`. It is backed initially by catalog metadata and offline
+  evaluation, not inferred from traffic, price, or latency. (See ADR-0053.)
+- **RoutingDecision** — an immutable, metadata-only ledger record explaining a
+  request's policy version, candidate set, rejection reasons, signal snapshot,
+  selection, budget degradation, attempts, and final outcome. Stored separately
+  from `request_logs` and joined through the gateway `request_id`.
+  (See ADR-0053.)
+- **Workload Profile** — bounded per-request routing context such as modality,
+  estimated token shape, latency objective, quality floor, and capability needs.
+  It is not an identity and does not contain raw prompt/completion bodies in the
+  RoutingDecision ledger. (See ADR-0051, ADR-0053.)
 - **Circuit / health state** — per-provider healthy/unhealthy state that
   failover consults to skip bad providers; in-memory and per-instance in P0
   (like rate limiting). (See ADR-0011.)
@@ -171,10 +201,23 @@ and refined through `grill-with-docs` sessions.
   completion/1_000_000×CompletionPer1M, using the actually-hit provider's
   ModelUpstream.Pricing (aligns with llm.provider; failover bills the serving
   provider). (See ADR-0012.)
-- **Quota** — a *balance* (total spend until reset/top-up, NOT self-recovering),
-  distinct from the TPM *rate* limit. Denominated in cost (money), checked
-  allow-then-debit at ingress (reject only if already ≤ 0; debit real cost after
-  the response). (See ADR-0012.)
+- **Quota** — the current implementation term for a non-recurring Cost Budget
+  balance. It maps to a `non_recurring` BudgetAccount in the enterprise budget
+  model; distinct from rate limits and Token Allowance. (See ADR-0012, ADR-0052.)
+- **BudgetPolicy** — enterprise configuration defining a cost or token boundary,
+  governance scope, calendar/non-recurring period, hard/soft behavior, warning
+  thresholds, timezone, and allowed overage action. (See ADR-0052.)
+- **BudgetAccount** — one concrete BudgetPolicy period with limit, reserved,
+  committed, released, and period start/end state. Hard accounts participate in
+  atomic reservation/settlement; soft accounts emit events only. (See ADR-0052.)
+- **Token Allowance** — an optional token-total boundary independent from the
+  authoritative Cost Budget and from TPM rate limiting. Final accounting uses
+  provider-reported actual Usage rather than a fabricated local count.
+  (See ADR-0052.)
+- **ResourceUsage** — an accounting envelope whose source is explicitly either
+  `provider_billed` or `self_hosted_compute`. Provider token/cost facts must not be
+  misrepresented as GPU use; self-hosted allocation requires explicit resource
+  measurements and an internal pricing rule. (See ADR-0052.)
 - **Quota store** — the shared, strongly-consistent backend (PG row update /
   Redis atomic) holding balances. Required from P0 because quota is money;
   multi-instance overspend is not acceptable — diverges from the in-memory
@@ -211,6 +254,42 @@ and refined through `grill-with-docs` sessions.
 - **session_id** — client-supplied session key extracted from the `X-Voxeltoad-Session` header (or configured `sessionHeaders`). Stored in `request_logs.session_id` with a `(session_id, created_at)` index, enabling per-session request chain queries via `GET /api/v1/request-logs?session_id=X`.
 - **trace_id** — W3C trace id parsed from the `traceparent` header (the `00-<trace_id>-<span_id>-<trace_flags>` format). Stored in `request_logs.trace_id` and `trace_payloads.trace_id` (both `DEFAULT ''`). The gateway does NOT emit a synthetic `llm.trace_id` OTel span attribute — trace_id is a W3C standard carried by the OTel trace context itself, so a separate attribute would be redundant. Empty when the client sent no `traceparent` or it was malformed. Unlike `request_id`, trace_id is structurally unique per W3C spec, but the gateway does not enforce uniqueness at the DB level (it relies on the W3C contract). Captured alongside `X-Trace-Id` as a secondary trace-correlation header; see ADR-0040 for the entry-id resolution chain.
 - **request_logs** — the data-plane per-request audit ledger. One row per LLM request (success or rejection), written asynchronously fail-open. Read API: `GET /api/v1/request-logs` (offset paginated, CSV exportable). Distinct from `usage_records` (billing) and `audit_logs` (management-plane mutations). (See ADR-0021.)
+
+## Enterprise governance, data assets & harness
+
+- **FeedbackEvent** — an immutable, tenant/application-scoped metadata record
+  associating a gateway request or session with an outcome signal (metric, value,
+  source, trust level, evaluator version, evidence ref). Does not copy prompt or
+  completion bodies. The gateway owns the ledger and lineage; external evaluators
+  own judge/experiment/training execution. (See ADR-0054.)
+- **Dataset** — a named, tenant-scoped governed collection of examples with an
+  owning Application or Group, data classification, and retention policy.
+  (See ADR-0055.)
+- **DatasetVersion** — an immutable snapshot of a dataset's item manifest. Edits
+  produce a new version; versions are never mutated in place. (See ADR-0055.)
+- **DatasetItem** — one example within a version, carrying provenance references
+  to `request_logs`/`trace_payloads`/`FeedbackEvent` and a `PayloadRef` to stored
+  content. A promoted item is a governed copy with its own retention independent
+  of the trace ledger. (See ADR-0055.)
+- **Payload Promotion** — the management-plane operation that copies a trace
+  payload into a DatasetItem. Requires tenant opt-in, scoped permission, redaction
+  check, and mutation/read/delete audit. (See ADR-0055.)
+- **Agent Label** — an Application-scoped, operator-controlled metadata attribute
+  for attribution and soft policy. Distinct from the User-Agent-inferred
+  `agent_type` observation tag. Not an independent authorization principal in this
+  phase. (See ADR-0051, ADR-0056.)
+- **Run Summary** — a read-only aggregation of gateway events sharing a
+  client-supplied session identifier, providing per-session cost, token, and error
+  visibility. Because the session identifier is forgeable, Run Summary is a
+  statistical projection, not a trusted safety boundary. (See ADR-0056.)
+- **ToolCallAudit** — a metadata-only audit event recording tool-call visibility
+  (tool name, call id, outcome class) from forwarded requests/responses. The
+  gateway does not execute tools or host MCP/A2A runtime. (See ADR-0056.)
+- **Kill Switch** — synchronous emergency stop available only at trusted
+  governance boundaries: Tenant disablement, Application disablement (stops all
+  bound keys), or APIKey revocation. Takes effect within key cache TTL.
+  Session-level stop is not a safety control because the session identifier is
+  forgeable. (See ADR-0056.)
 
 ## Engineering environment
 

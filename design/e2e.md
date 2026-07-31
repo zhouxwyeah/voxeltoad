@@ -189,3 +189,4 @@ test("streamed chat completion stitches chunks and bills usage", async () => {
 - **usage 来源**：计费**以上游响应返回的 usage 为准**；本地 tokenizer 仅用于限流前置预估，不要用本地估算入账。
 - **超时分层**：连接超时、首字超时、整体超时是三个不同配置，错配会导致长流式请求被误杀。
 - **降级后的计费**：故障切换到备用供应商后，入账的 provider 字段要记实际命中的供应商，不是路由首选。
+- **Playwright UI e2e 字段名耦合**：`web/tests/e2e/` 中的 `comboboxFor` 依赖表单 `<input name="...">` 的确切字段名。表单重构重命名字段（如 `adapter` → `endpoint_adapter`、`role` → `_role_select`）时必须同步更新所有 spec，否则 30s 超时。详见 `design/frontend.md` §13 Playwright e2e Pitfalls。

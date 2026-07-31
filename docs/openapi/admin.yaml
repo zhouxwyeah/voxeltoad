@@ -1412,6 +1412,82 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
 
   # ---------------------------------------------------------------------------
+  # Tenant-scoped applications (tenant-admin). CRUD + enable/disable toggle
+  # (ADR-0051). Delete is rejected when api_keys reference the application (409).
+  # Writes are audited as resource_type=application.
+  # ---------------------------------------------------------------------------
+  /api/v1/applications:
+    get:
+      tags: [tenancy]
+      summary: List the caller tenant's applications
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Application list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApplicationList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [tenancy]
+      summary: Create an application in the caller's tenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateApplicationRequest' }
+      responses:
+        '201':
+          description: Application created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Application' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/applications/{name}:
+    patch:
+      tags: [tenancy]
+      summary: Enable or disable an application (reversible)
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateApplicationRequest' }
+      responses:
+        '200':
+          description: Application updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Application' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [tenancy]
+      summary: Delete an application (rejected if api_keys reference it — 409)
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: >
+            Refused — api_keys reference this application (via
+            api_keys.application_id FK). Repoint or revoke them first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ---------------------------------------------------------------------------
   # Current operator identity (/me). Available to both roles (super-admin,
   # tenant-admin). Returns role + (for tenant-admin) tenant_name.
   # ---------------------------------------------------------------------------
@@ -1933,6 +2009,28 @@ components:
       properties:
         enabled: { type: boolean }
 
+    # --- Applications (ADR-0051) ---
+    Application:
+      type: object
+      required: [id, name, owner_group_id, owner_group_name, enabled]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        owner_group_id: { type: integer, format: int64 }
+        owner_group_name: { type: string }
+        enabled: { type: boolean }
+    CreateApplicationRequest:
+      type: object
+      required: [name, owner_group]
+      properties:
+        name: { type: string }
+        owner_group: { type: string, description: Name of the owning Group }
+    UpdateApplicationRequest:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+
     # --- Operators ---
     Operator:
       type: object
@@ -2204,6 +2302,12 @@ components:
         - type: object
           properties:
             data: { type: array, items: { $ref: '#/components/schemas/Group' } }
+    ApplicationList:
+      allOf:
+        - $ref: '#/components/schemas/ListEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/Application' } }
     OperatorList:
       allOf:
         - $ref: '#/components/schemas/ListEnvelope'

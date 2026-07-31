@@ -220,7 +220,7 @@ func (a *rbac) affectedTenant(ctx context.Context, resourceType, resourceID stri
 		}
 		name := resourceID
 		return &name
-	case "api_key", "group":
+	case "api_key", "group", "application":
 		// These endpoints are tenant-admin scoped; the affected tenant is the
 		// operator's own tenant.
 		if op.TenantID == nil {

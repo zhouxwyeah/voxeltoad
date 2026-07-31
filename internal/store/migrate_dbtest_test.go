@@ -15,7 +15,7 @@ func TestMigrateCreatesAllTables(t *testing.T) {
 
 	want := []string{
 		"providers", "models", "routes", "plugins",
-		"tenants", "groups", "api_keys", "quotas",
+		"tenants", "groups", "applications", "api_keys", "quotas",
 		"usage_records", "audit_logs", "config_generation",
 		"config_snapshots", "data_plane_nodes",
 		"trace_payloads", "gateway_settings",
@@ -241,7 +241,7 @@ func mustMigratedDB(t *testing.T) *store.DB {
 			TRUNCATE TABLE
 				usage_records, request_logs, trace_payloads,
 				providers, models, routes, plugins,
-				tenants, groups, api_keys, quotas,
+				tenants, groups, applications, api_keys, quotas,
 				audit_logs, operators, sessions,
 				config_snapshots, data_plane_nodes, gateway_settings
 			RESTART IDENTITY CASCADE

@@ -1,0 +1,32 @@
+{
+  "heading": "Applications",
+  "subtitle": "Long-lived business systems consuming AI. Each application has an owning group and can be consumed by API keys across multiple groups.",
+  "columns": {
+    "id": "ID",
+    "name": "Name",
+    "ownerGroup": "Owner Group",
+    "status": "Status"
+  },
+  "status": {
+    "enabled": "Enabled",
+    "disabled": "Disabled"
+  },
+  "form": {
+    "name": { "label": "Name *" },
+    "ownerGroup": { "label": "Owner Group *" }
+  },
+  "modal": {
+    "createTitle": "Create Application",
+    "disableTitle": "Disable Application"
+  },
+  "actions": {
+    "create": "Create Application",
+    "save": "Save",
+    "emptyState": "No applications yet.",
+    "disable": "Disable",
+    "enable": "Enable",
+    "delete": "Delete",
+    "disableConfirm": "Disable application \"{name}\"? All bound API keys will be rejected.",
+    "deleteConfirm": "Delete application \"{name}\"? This cannot be undone unless no API keys reference it."
+  }
+}

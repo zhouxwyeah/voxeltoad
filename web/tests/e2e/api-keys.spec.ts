@@ -57,7 +57,7 @@ test("tenant-admin: create API key → see it → revoke → gone", async ({
   const opModal = page.getByRole("dialog", { name: "Create Operator" });
   await opModal.getByLabel("Email").fill(taEmail);
   await opModal.getByLabel("Password").fill("test-password-123");
-  await selectCombo(comboboxFor(opModal, "role"), "Tenant Admin");
+  await selectCombo(comboboxFor(opModal, "_role_select"), "Tenant Admin");
   await selectCombo(comboboxFor(opModal, "tenant_id"), tenantName);
   await opModal.getByRole("button", { name: "Save" }).click();
   await expect(opModal).not.toBeVisible();

@@ -94,13 +94,13 @@ flowchart TD
 ```
 不存在→（TopUp）→ 有余额→（数据面扣减/后台充值）→ 更新
                        ↑
-                 余额可降至 0（拒绝请求）或负数（欠费,不计）
+                 余额可降至 0（拒绝后续请求）；流式 in-flight 估算误差可短暂为负
 ```
 
 - **原子增量**：充值用 `TopUp`（`balance += delta`,单条 SQL）,绝不覆盖。data plane 扣减用 `TryDebit`（条件 UPDATE, `balance >= est` 才扣）。
 - **无存在性要求**：scope 是自由字符串（`tenant:X`/`group:X/Y`/`key:Z`/裸串）。`tenant:X` 格式的 X 必须为存在的租户名（防拼错），其余格式不校验存在（允许预充值）。
 - **currency**：余额带有币种字段,多币种独立计数(eg, usd / cny)。
-- **余额 0 或不存在 == unlimited** （对于 TryDebit）；TopUp 会创建不存在的 scope。
+- **零余额语义**：scope 行**不存在** == unlimited（TryDebit 跳过,视为无限）；scope 行**存在且 balance=0** == 拒绝（TryDebit 条件 `balance >= est` 不满足）。TopUp 会创建不存在的 scope。流式请求因 in-flight 估算误差可短暂出现负余额,但这不等于"欠费不计"——后续请求会被拒绝直到余额恢复。
 
 ## 3. 空状态 / 引导 UX 约定
 

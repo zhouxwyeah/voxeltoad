@@ -58,3 +58,9 @@ Produced and refined through `grill-with-docs` sessions.
 | [0048](0048-ingress-toggle.md) | Anthropic ingress global toggle (GatewaySettings.Ingress.AnthropicDisabled, 404 on disable) | Accepted |
 | [0049](0049-multi-endpoint-provider.md) | Multi-endpoint Provider — protocol-aware routing at endpoint granularity (supersedes ADR-0047) | Accepted |
 | [0050](0050-client-request-id-split.md) | Client request ID split — gateway always generates, client original preserved as `client_request_id` (revises ADR-0021 §5) | Accepted |
+| [0051](0051-application-governance-identity.md) | Application as a first-class governance identity | Accepted |
+| [0052](0052-enterprise-budgets-and-resource-accounting.md) | Enterprise budgets and resource accounting (Cost Budget, Token Allowance, ResourceUsage) | Accepted |
+| [0053](0053-explainable-application-routing.md) | Explainable Application routing and decision ledger | Accepted |
+| [0054](0054-feedback-event-and-evaluation-boundary.md) | FeedbackEvent and the evaluation boundary | Accepted |
+| [0055](0055-dataset-lineage-promotion-and-storage.md) | Dataset lineage, payload promotion, and storage | Accepted |
+| [0056](0056-harness-run-and-tool-audit-boundary.md) | Harness, Run, and tool-audit boundary | Accepted |

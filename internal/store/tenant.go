@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+
+	"gorm.io/gorm"
 )
 
 // TenantRepo is a tenant-scoped repository for tenant-owned resources (groups,
@@ -235,6 +238,11 @@ type APIKeySpec struct {
 	Hash          string
 	GroupID       *int64
 	AllowedModels []string
+	// ApplicationID binds the key to an Application (ADR-0051). nil = unbound
+	// (migration debt). At most one Application per key.
+	ApplicationID *int64
+	// Environment is a controlled credential attribute (dev/staging/prod/'').
+	Environment string
 }
 
 // APIKeyInfo is a non-secret view of an API key (for listing).
@@ -242,6 +250,9 @@ type APIKeyInfo struct {
 	KeyID         string   `json:"key_id"`
 	Revoked       bool     `json:"revoked"`
 	AllowedModels []string `json:"allowed_models,omitempty"`
+	// ApplicationID is nil for unbound keys (migration debt).
+	ApplicationID *int64 `json:"application_id,omitempty"`
+	Environment   string `json:"environment,omitempty"`
 }
 
 // CreateAPIKey inserts an API key owned by the bound tenant.
@@ -255,9 +266,9 @@ func (r *TenantRepo) CreateAPIKey(ctx context.Context, spec APIKeySpec) error {
 		return err
 	}
 	return r.db.WithContext(ctx).Exec(
-		`INSERT INTO api_keys (key_id, hash, tenant_id, group_id, allowed_models)
-		 VALUES (?, ?, ?, ?, ?::jsonb)`,
-		spec.KeyID, spec.Hash, r.tenantID, spec.GroupID, string(models),
+		`INSERT INTO api_keys (key_id, hash, tenant_id, group_id, allowed_models, application_id, environment)
+		 VALUES (?, ?, ?, ?, ?::jsonb, ?, ?)`,
+		spec.KeyID, spec.Hash, r.tenantID, spec.GroupID, string(models), spec.ApplicationID, spec.Environment,
 	).Error
 }
 
@@ -282,9 +293,14 @@ func (r *TenantRepo) ListAPIKeys(ctx context.Context, cursor string, limit int) 
 		InternalID    int64
 		KeyID         string
 		AllowedModels string
+		ApplicationID sql.NullInt64
+		Environment   string
 	}
 	if err := r.db.WithContext(ctx).Raw(
-		`SELECT id AS internal_id, key_id, COALESCE(allowed_models::text, '[]') AS allowed_models FROM api_keys
+		`SELECT id AS internal_id, key_id,
+		        COALESCE(allowed_models::text, '[]') AS allowed_models,
+		        application_id, environment
+		 FROM api_keys
 		 WHERE tenant_id = ? AND id > ? AND revoked_at IS NULL
 		 ORDER BY id ASC LIMIT ?`,
 		r.tenantID, afterID, limit+1,
@@ -296,7 +312,17 @@ func (r *TenantRepo) ListAPIKeys(ctx context.Context, cursor string, limit int) 
 	for _, row := range rows {
 		var models []string
 		_ = json.Unmarshal([]byte(row.AllowedModels), &models)
-		out = append(out, APIKeyInfo{KeyID: row.KeyID, Revoked: false, AllowedModels: models})
+		info := APIKeyInfo{
+			KeyID:         row.KeyID,
+			Revoked:       false,
+			AllowedModels: models,
+			Environment:   row.Environment,
+		}
+		if row.ApplicationID.Valid {
+			appID := row.ApplicationID.Int64
+			info.ApplicationID = &appID
+		}
+		out = append(out, info)
 	}
 
 	next := ""
@@ -337,6 +363,66 @@ func (r *TenantRepo) SetAPIKeyAllowedModels(ctx context.Context, keyID string, m
 		`UPDATE api_keys SET allowed_models = ?::jsonb
 		 WHERE key_id = ? AND tenant_id = ? AND revoked_at IS NULL`,
 		string(js), keyID, r.tenantID,
+	)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
+// SetAPIKeyApplication binds or unbinds a key to an Application within the
+// bound tenant (ADR-0051). nil applicationID = unbind. The application must
+// belong to the same tenant; a cross-tenant applicationID is rejected (no rows
+// affected) because the application row is not visible in this tenant's scope.
+// ok is false when the key_id is unknown, belongs to another tenant, has been
+// revoked, or the application does not exist in this tenant.
+//
+// The existence check and UPDATE run in a single transaction so a concurrent
+// Application deletion cannot leave the key pointing at a deleted row (the FK
+// RESTRICT would block the deletion, but the error surface stays consistent).
+func (r *TenantRepo) SetAPIKeyApplication(ctx context.Context, keyID string, applicationID *int64) (bool, error) {
+	var ok bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// If binding, verify the application exists in this tenant (holds a
+		// row lock for the duration of the transaction).
+		if applicationID != nil {
+			var exists bool
+			if err := tx.Raw(
+				`SELECT EXISTS (SELECT 1 FROM applications WHERE id = ? AND tenant_id = ? FOR SHARE)`,
+				*applicationID, r.tenantID,
+			).Scan(&exists).Error; err != nil {
+				return err
+			}
+			if !exists {
+				return nil
+			}
+		}
+		res := tx.Exec(
+			`UPDATE api_keys SET application_id = ?
+			 WHERE key_id = ? AND tenant_id = ? AND revoked_at IS NULL`,
+			applicationID, keyID, r.tenantID,
+		)
+		if res.Error != nil {
+			return res.Error
+		}
+		ok = res.RowsAffected > 0
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return ok, nil
+}
+
+// SetAPIKeyEnvironment updates the environment label (controlled attribute,
+// ADR-0051) for an active (non-revoked) key within the bound tenant. Returns
+// false when the key_id is unknown, belongs to another tenant, or has been
+// revoked.
+func (r *TenantRepo) SetAPIKeyEnvironment(ctx context.Context, keyID, environment string) (bool, error) {
+	res := r.db.WithContext(ctx).Exec(
+		`UPDATE api_keys SET environment = ?
+		 WHERE key_id = ? AND tenant_id = ? AND revoked_at IS NULL`,
+		environment, keyID, r.tenantID,
 	)
 	if res.Error != nil {
 		return false, res.Error

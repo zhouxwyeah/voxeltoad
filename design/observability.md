@@ -14,6 +14,7 @@
 | 字段 | 说明 | 来源 |
 |---|---|---|
 | `llm.tenant` | 租户标识 | 鉴权层 |
+| `llm.group` | 消费方 Group 标识 | 鉴权层 |
 | `llm.api_key_id` | API Key（脱敏后的 id，非明文） | 鉴权层 |
 | `llm.model.requested` | 业务方请求的模型别名 | 请求 |
 | `llm.model.resolved` | 路由后实际命中的供应商模型 | 路由层 |
@@ -67,7 +68,7 @@
 - 每条请求一个根 span，关键阶段（鉴权、限流、插件链、路由、上游转发、响应适配）各开子 span。
 - 上游转发 span 必须记录 `llm.provider` 与 `llm.ttft_ms`。
 - 流式请求：首 chunk 到达时记录 TTFT 事件；流结束时记录 usage 事件。
-- **`request_id`**: span attribute `llm.request_id` 取自上行 trace header 或 gateway 生成，用于跨服务串联。当上游传入 `X-Request-Id` / `X-Trace-Id` / `traceparent` 时，gateway 使用该值作为 `request_id`；否则用 chi 中间件自动生成的 UUID。
+- **`request_id`**: span attribute `llm.request_id` 取自 chi 中间件生成的 UUID，用于跨服务串联。ADR-0050 之后网关**总是**生成自己的 `request_id`，**不再采纳**客户端 `X-Request-Id` / `X-Trace-Id` / `traceparent` 的值作为 `request_id`；客户端原值保留到 `client_request_id`。W3C `traceparent` 仍用于 OTel trace context 传播，但不作为 `request_id` 来源。
 - **`upstream_request_id`**: span attribute `llm.upstream_request_id` 取自上游响应头（或 body 兜底），用于售后/对账时定位到 provider 侧的请求记录。仅记录最终成功尝试的 ID。
 
 ## Metric 约定（Prometheus）

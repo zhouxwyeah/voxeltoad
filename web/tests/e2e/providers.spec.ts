@@ -73,7 +73,7 @@ test("login → create provider → see it → edit it → delete it", async ({ 
   // Fill form inside the Modal.
   await createModal.getByLabel("Name *").fill(providerName);
   await selectCombo(comboboxFor(createModal, "_type_select"), "openai");
-  await selectCombo(comboboxFor(createModal, "adapter"), "openai");
+  await selectCombo(comboboxFor(createModal, "endpoint_adapter"), "openai");
   await createModal.getByLabel("Base URL").fill("https://api.openai.com/v1");
   await createModal.getByLabel("API key ref").fill("env://E2E_KEY");
   await createModal.getByRole("button", { name: "Create" }).click();

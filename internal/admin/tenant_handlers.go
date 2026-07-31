@@ -300,6 +300,8 @@ func mountTenantScoped(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 		setResourceID(c, name)
 		c.Status(http.StatusNoContent)
 	})
+
+	mountApplications(g, db, auth)
 }
 
 // newClientKey generates a random client API key (plaintext), prefixed for
