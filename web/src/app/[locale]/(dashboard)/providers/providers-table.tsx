@@ -75,12 +75,8 @@ export function ProvidersTable({
               {eps.map((ep, i) => {
                 const v = ep.adapter ?? "";
                 const label = v === "claude" ? "Anthropic" : v === "openai" ? "OpenAI" : v;
-                const color =
-                  v === "claude"
-                    ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
-                    : "bg-blue-500/10 text-blue-600 dark:text-blue-400";
                 return (
-                  <span key={i} className={`rounded-full px-2 py-0.5 text-xs font-medium ${color}`}>
+                  <span key={i} className="rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
                     {label}
                   </span>
                 );

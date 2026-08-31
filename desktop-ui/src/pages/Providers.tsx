@@ -147,13 +147,9 @@ export function Providers() {
                     <div className="flex flex-col gap-1">
                       {p.endpoints.map((ep, i) => {
                         const label = ep.adapter === "claude" ? "Anthropic" : ep.adapter === "openai" ? "OpenAI" : ep.adapter;
-                        const color =
-                          ep.adapter === "claude"
-                            ? "bg-orange-500/10 text-orange-600"
-                            : "bg-blue-500/10 text-blue-600";
                         return (
                           <div key={i} className="flex items-center gap-2">
-                            <span className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-xs font-medium ${color}`}>
+                            <span className="inline-flex w-fit items-center rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
                               {label}
                             </span>
                             <span className="text-xs text-muted-foreground">{ep.base_url}</span>

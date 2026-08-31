@@ -301,22 +301,22 @@ func (r *QueryRepo) ListSessions(ctx context.Context, f SessionListFilter, page,
 // only, WITHOUT the large message/raw bodies (fetched on demand by
 // GetTraceByRowID / GetTraceByRequestID).
 type TraceSummary struct {
-	ID             int64     `gorm:"column:id" json:"id"`
-	RequestID      string    `gorm:"column:request_id" json:"request_id"`
-	SessionID      string    `gorm:"column:session_id" json:"session_id"`
-	TraceID        string    `gorm:"column:trace_id" json:"trace_id"`
-	Tenant         string    `gorm:"column:tenant" json:"tenant"`
-	Provider       string    `gorm:"column:provider" json:"provider"`
-	ModelRequested string    `gorm:"column:model_requested" json:"model_requested"`
-	Stream         bool      `gorm:"column:stream" json:"stream"`
-	AgentType      string    `gorm:"column:agent_type" json:"agent_type"`
-	IngressProtocol string   `gorm:"column:ingress_protocol" json:"ingress_protocol"`
-	ProviderEndpoint string  `gorm:"column:provider_endpoint" json:"provider_endpoint"`
-	StatusCode     int       `gorm:"column:status_code" json:"status_code"`
-	StopReason     string    `gorm:"column:stop_reason" json:"stop_reason"`
-	NMessages      int       `gorm:"column:n_messages" json:"n_messages"`
-	NToolUse       int       `gorm:"column:n_tool_use" json:"n_tool_use"`
-	CreatedAt      time.Time `gorm:"column:created_at" json:"created_at"`
+	ID               int64     `gorm:"column:id" json:"id"`
+	RequestID        string    `gorm:"column:request_id" json:"request_id"`
+	SessionID        string    `gorm:"column:session_id" json:"session_id"`
+	TraceID          string    `gorm:"column:trace_id" json:"trace_id"`
+	Tenant           string    `gorm:"column:tenant" json:"tenant"`
+	Provider         string    `gorm:"column:provider" json:"provider"`
+	ModelRequested   string    `gorm:"column:model_requested" json:"model_requested"`
+	Stream           bool      `gorm:"column:stream" json:"stream"`
+	AgentType        string    `gorm:"column:agent_type" json:"agent_type"`
+	IngressProtocol  string    `gorm:"column:ingress_protocol" json:"ingress_protocol"`
+	ProviderEndpoint string    `gorm:"column:provider_endpoint" json:"provider_endpoint"`
+	StatusCode       int       `gorm:"column:status_code" json:"status_code"`
+	StopReason       string    `gorm:"column:stop_reason" json:"stop_reason"`
+	NMessages        int       `gorm:"column:n_messages" json:"n_messages"`
+	NToolUse         int       `gorm:"column:n_tool_use" json:"n_tool_use"`
+	CreatedAt        time.Time `gorm:"column:created_at" json:"created_at"`
 }
 
 // TraceDetail is the full payload for a single request: the message + raw
@@ -542,13 +542,13 @@ type errorAgg struct {
 
 // scalarsAgg is the raw scan target for the single-row scalar aggregates.
 type scalarsAgg struct {
-	TotalRequests int     `gorm:"column:total_requests"`
-	ErrorCount    int     `gorm:"column:error_count"`
-	FallbackCount int     `gorm:"column:fallback_count"`
-	StreamCount   int     `gorm:"column:stream_count"`
-	CacheHitCount int     `gorm:"column:cache_hit_count"`
-	AvgDurationMs int     `gorm:"column:avg_duration_ms"`
-	AvgTTFTms     int     `gorm:"column:avg_ttft_ms"`
+	TotalRequests int `gorm:"column:total_requests"`
+	ErrorCount    int `gorm:"column:error_count"`
+	FallbackCount int `gorm:"column:fallback_count"`
+	StreamCount   int `gorm:"column:stream_count"`
+	CacheHitCount int `gorm:"column:cache_hit_count"`
+	AvgDurationMs int `gorm:"column:avg_duration_ms"`
+	AvgTTFTms     int `gorm:"column:avg_ttft_ms"`
 }
 
 // Overview returns a multi-dimension rollup over the optional time window:

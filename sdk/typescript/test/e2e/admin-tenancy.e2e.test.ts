@@ -169,8 +169,7 @@ describe.skipIf(!enabled)("admin tenancy contract", () => {
         body: {
           name: pName,
           type: "o",
-          adapter: "openai",
-          base_url: "u",
+          endpoints: [{ adapter: "openai", base_url: "u" }],
           api_key_ref: "plain://k",
         },
       }),

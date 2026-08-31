@@ -184,8 +184,11 @@ func main() {
 	dyn := &config.Dynamic{
 		Version: "devstack-v1",
 		Providers: []config.Provider{{
-			Name: "mock-openai", Type: "openai", Adapter: "openai",
-			BaseURL: mock.URL(), APIKeyRef: "plain://" + upstreamKey,
+			Name: "mock-openai", Type: "openai",
+			Endpoints: []config.ProviderEndpoint{{
+				ID: "openai", Adapter: "openai", BaseURL: mock.URL(),
+			}},
+			APIKeyRef: "plain://" + upstreamKey,
 			Timeouts: config.ProviderTimeouts{
 				Connect: 2 * time.Second, FirstByte: 5 * time.Second, Overall: 30 * time.Second,
 			},

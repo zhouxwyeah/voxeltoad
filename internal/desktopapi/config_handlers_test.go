@@ -135,9 +135,9 @@ func TestProviders_CRUD(t *testing.T) {
 	// Create p2.
 	code, b = reqBody(t, "POST", ts.URL, "/api/v1/providers", map[string]any{
 		"name": "p2", "type": "openai",
-		"endpoints": []map[string]any{{"id": "openai", "adapter": "openai", "base_url": "http://127.0.0.1:2"}},
+		"endpoints":   []map[string]any{{"id": "openai", "adapter": "openai", "base_url": "http://127.0.0.1:2"}},
 		"api_key_ref": "plain://k2", "weight": 1,
-		"timeouts":    map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
+		"timeouts": map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
 	})
 	if code != 201 {
 		t.Fatalf("create p2: %d %s", code, b)
@@ -151,8 +151,8 @@ func TestProviders_CRUD(t *testing.T) {
 
 	// Update p2's weight.
 	code, b = reqBody(t, "PUT", ts.URL, "/api/v1/providers/p2", map[string]any{
-		"type": "openai",
-		"endpoints": []map[string]any{{"id": "openai", "adapter": "openai", "base_url": "http://127.0.0.1:2"}},
+		"type":        "openai",
+		"endpoints":   []map[string]any{{"id": "openai", "adapter": "openai", "base_url": "http://127.0.0.1:2"}},
 		"api_key_ref": "plain://k2", "weight": 99,
 		"timeouts": map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
 	})
@@ -206,9 +206,9 @@ func TestConfigWrite_PreservesGatewaySection(t *testing.T) {
 
 	code, b := reqBody(t, "POST", ts.URL, "/api/v1/providers", map[string]any{
 		"name": "p2", "type": "openai",
-		"endpoints": []map[string]any{{"id": "openai", "adapter": "openai", "base_url": "http://127.0.0.1:2"}},
+		"endpoints":   []map[string]any{{"id": "openai", "adapter": "openai", "base_url": "http://127.0.0.1:2"}},
 		"api_key_ref": "plain://k2", "weight": 1,
-		"timeouts":    map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
+		"timeouts": map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
 	})
 	if code != 201 {
 		t.Fatalf("create p2: %d %s", code, b)
@@ -230,9 +230,9 @@ func TestProviders_CreateDuplicate(t *testing.T) {
 	ts, _ := newConfigTestServer(t)
 	code, _ := reqBody(t, "POST", ts.URL, "/api/v1/providers", map[string]any{
 		"name": "p1", "type": "x",
-		"endpoints": []map[string]any{{"id": "openai", "adapter": "openai", "base_url": "u"}},
+		"endpoints":   []map[string]any{{"id": "openai", "adapter": "openai", "base_url": "u"}},
 		"api_key_ref": "plain://k", "weight": 1,
-		"timeouts":    map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
+		"timeouts": map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
 	})
 	if code != 409 {
 		t.Errorf("duplicate create: %d, want 409", code)
@@ -244,9 +244,9 @@ func TestProviders_ValidateProvider(t *testing.T) {
 	// Empty endpoints → 400.
 	code, b := reqBody(t, "POST", ts.URL, "/api/v1/providers", map[string]any{
 		"name": "bad1", "type": "x",
-		"endpoints": []map[string]any{},
+		"endpoints":   []map[string]any{},
 		"api_key_ref": "plain://k", "weight": 1,
-		"timeouts":    map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
+		"timeouts": map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
 	})
 	if code != 400 {
 		t.Errorf("empty endpoints: %d %s, want 400", code, b)
@@ -254,9 +254,9 @@ func TestProviders_ValidateProvider(t *testing.T) {
 	// Unknown adapter → 400.
 	code, b = reqBody(t, "POST", ts.URL, "/api/v1/providers", map[string]any{
 		"name": "bad2", "type": "x",
-		"endpoints": []map[string]any{{"id": "x", "adapter": "bogus", "base_url": "u"}},
+		"endpoints":   []map[string]any{{"id": "x", "adapter": "bogus", "base_url": "u"}},
 		"api_key_ref": "plain://k", "weight": 1,
-		"timeouts":    map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
+		"timeouts": map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
 	})
 	if code != 400 {
 		t.Errorf("unknown adapter: %d %s, want 400", code, b)
@@ -385,7 +385,7 @@ func TestConfig_HotReloadNewProviderUsable(t *testing.T) {
 	// Add a new provider + model + route via CRUD.
 	code, b := reqBody(t, "POST", ts.URL, "/api/v1/providers", map[string]any{
 		"name": "p-new", "type": "openai",
-		"endpoints": []map[string]any{{"id": "openai", "adapter": "openai", "base_url": "http://127.0.0.1:9"}},
+		"endpoints":   []map[string]any{{"id": "openai", "adapter": "openai", "base_url": "http://127.0.0.1:9"}},
 		"api_key_ref": "plain://k", "weight": 1,
 		"timeouts": map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
 	})

@@ -17,7 +17,7 @@ import (
 // each. In the multi-endpoint model (ADR-0049) the candidate is a
 // (provider, endpoint) pair; the endpoint's adapter drives normalization.
 type modelPreparer struct {
-	dyn          *config.Dynamic
+	dyn            *config.Dynamic
 	endpointsByPvd map[string][]config.ProviderEndpoint // provider name → its endpoints (ordered)
 }
 

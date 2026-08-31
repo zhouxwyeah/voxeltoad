@@ -151,7 +151,7 @@ func (a *Adapter) ParseResponse(body []byte) (*adapter.UnifiedResponse, error) {
 		}},
 		Usage:             usageOf(wr.Usage.InputTokens, wr.Usage.CacheCreationInputTokens, wr.Usage.CacheReadInputTokens, wr.Usage.OutputTokens),
 		UpstreamRequestID: wr.RequestID, // body fallback; Forwarder overrides with the response header when present
-		Raw:               body, // preserved for passthrough (ADR-0047): when the client's ingress protocol is anthropic and this claude adapter was hit, the anthropic codec emits Raw verbatim.
+		Raw:               body,         // preserved for passthrough (ADR-0047): when the client's ingress protocol is anthropic and this claude adapter was hit, the anthropic codec emits Raw verbatim.
 		RawProtocol:       "anthropic",
 	}, nil
 }

@@ -35,9 +35,9 @@ type yamlProvider struct {
 }
 
 type yamlProviderEndpoint struct {
-	ID       string              `yaml:"id,omitempty" json:"id,omitempty"`
-	Adapter  string              `yaml:"adapter" json:"adapter"`
-	BaseURL  string              `yaml:"base_url" json:"base_url"`
+	ID       string                `yaml:"id,omitempty" json:"id,omitempty"`
+	Adapter  string                `yaml:"adapter" json:"adapter"`
+	BaseURL  string                `yaml:"base_url" json:"base_url"`
 	Timeouts *yamlProviderTimeouts `yaml:"timeouts,omitempty" json:"timeouts,omitempty"`
 }
 

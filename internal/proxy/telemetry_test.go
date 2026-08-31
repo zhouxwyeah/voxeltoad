@@ -202,7 +202,7 @@ func TestTelemetry_FailoverRecordsModelResolvedAndFallback(t *testing.T) {
 	}
 	d := proxy.NewDispatcher(
 		[]config.Route{{ModelAlias: "gpt-4o", Strategy: "priority", Providers: []config.RouteProvider{{Name: "p-bad"}, {Name: "p-good"}}}},
-		map[proxy.EndpointKey]*proxy.Forwarder{proxy.EndpointKey{Provider: "p-bad", Endpoint: "default"}: fwdTo(t, bad.URL), proxy.EndpointKey{Provider: "p-good", Endpoint: "default"}: fwdTo(t, good.URL)},
+		map[proxy.EndpointKey]*proxy.Forwarder{{Provider: "p-bad", Endpoint: "default"}: fwdTo(t, bad.URL), {Provider: "p-good", Endpoint: "default"}: fwdTo(t, good.URL)},
 		proxy.DispatcherConfig{FailureThreshold: 3, Cooldown: time.Minute},
 	).WithModelPreparation(dyn)
 

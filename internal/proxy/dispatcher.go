@@ -30,7 +30,7 @@ type Dispatcher struct {
 	router     *router
 	breaker    *circuitBreaker
 	forwarders map[EndpointKey]*Forwarder
-	preparer   *modelPreparer // optional; nil = pass the request through unchanged
+	preparer   *modelPreparer   // optional; nil = pass the request through unchanged
 	observer   DispatchObserver // optional; nil = no observation (ADR-0051)
 }
 
@@ -118,7 +118,7 @@ func (d *Dispatcher) prepare(req *adapter.UnifiedRequest, key EndpointKey) (*ada
 // dispatch path. It is a read-only observation of a decision already made; the
 // observer must not influence routing. ADR-0051.
 type DispatchStepEvent struct {
-	Ordinal           int    // 0-based candidate index (post breaker filtering)
+	Ordinal           int // 0-based candidate index (post breaker filtering)
 	Provider          string
 	Endpoint          string
 	Action            string // "skipped" | "attempted"

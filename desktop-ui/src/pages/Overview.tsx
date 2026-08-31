@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Check } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -473,7 +474,7 @@ function SetupCard({
                       : "border border-border text-muted-foreground"
                 }`}
               >
-                {s.done ? "✓" : i + 1}
+                {s.done ? <Check className="h-4 w-4" /> : i + 1}
               </div>
               <span className={`text-sm ${s.done ? "text-muted-foreground line-through" : nextStep === s ? "font-medium text-foreground" : "text-muted-foreground"}`}>
                 {s.label}

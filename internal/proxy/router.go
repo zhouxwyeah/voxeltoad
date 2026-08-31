@@ -552,14 +552,6 @@ func mapForwardError(err error) (status int, errType string) {
 	return http.StatusBadGateway, "upstream_error"
 }
 
-// writeError emits an OpenAI-compatible error envelope: {"error":{...}}.
-// It delegates to the OpenAI ingress codec so the wire shape lives in one
-// place. For protocol-aware error responses (e.g. Anthropic inbound), use
-// writeCodecErr with the request's ingress codec.
-func writeError(w http.ResponseWriter, status int, errType, message string) {
-	writeCodecErr(w, ingress.Lookup(ingress.ProtocolOpenAI), status, errType, message)
-}
-
 // writeCodecErr emits an error body in the codec's wire format and writes the
 // HTTP status. Used by handlers and middleware that know the inbound protocol
 // (e.g. /v1/messages → anthropic codec).
@@ -588,20 +580,6 @@ func logForwardFailure(r *http.Request, rid, sid, model, provider, errType strin
 		"error_type", errType,
 		"error", truncate([]byte(err.Error()), 256),
 	)
-}
-
-// writeAppErr emits the same envelope as writeError, driven by an apperr.Error.
-// The message is the i18n key (the client resolves it); the type is the stable
-// code. Use this in favor of inline writeError(...) so each domain lives in its
-// own apperr file. Uses the OpenAI envelope by default.
-func writeAppErr(w http.ResponseWriter, e *apperr.Error) {
-	writeAppErrCodec(w, ingress.Lookup(ingress.ProtocolOpenAI), e, "")
-}
-
-// writeAppErrMsg is writeAppErr when the handler needs to append runtime context
-// to the message (e.g. the underlying cause).
-func writeAppErrMsg(w http.ResponseWriter, e *apperr.Error, ctx string) {
-	writeAppErrCodec(w, ingress.Lookup(ingress.ProtocolOpenAI), e, ctx)
 }
 
 // writeAppErrCodec is the protocol-aware variant: it uses codec's envelope

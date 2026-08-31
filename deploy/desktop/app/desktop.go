@@ -89,11 +89,11 @@ func (a *App) Run() error {
 	}
 
 	return wails.Run(&options.App{
-		Title:             "桌面网关助手",
-		Width:             1280,
-		Height:            800,
-		MinWidth:          900,
-		MinHeight:         600,
+		Title:     "桌面网关助手",
+		Width:     1280,
+		Height:    800,
+		MinWidth:  900,
+		MinHeight: 600,
 		// X hides to the dock on macOS (native hide in windowShouldClose, see
 		// below); a real quit elsewhere — Windows/Linux have no tray to reveal
 		// a hidden window from, so a hidden process would just squat on the
