@@ -25,7 +25,7 @@
 - [x] **数据库**：26 个迁移文件、21 张业务表 + 2 张 goose 隐式表、月度分区；database.md 与 migrations 同步纪律好
 - [x] **前端控制台**：Next.js 16 + React 19 + RSC，20 个 dashboard 页面全部「真实可用」档
 - [x] **SDK**：`@voxeltoad/gateway-sdk` 双产物（数据面 client + 管理面 admin），web 强依赖
-- [x] **测试**：145 个 `_test.go`、`test/e2e/` 20 个文件；`make ci` 覆盖 Go、契约、前端门禁与 stack tests
+- [x] **测试**：145 个 `_test.go`、`test/e2e/` 20 个文件；`make ci` 覆盖 Go、契约与 stack tests，前端门禁在 `ci-web` / `ci-desktop-ui`（CI light job 每 PR 运行）
 - [x] **CI**：GitHub Actions 三 job（ci-light / ci-heavy / desktop-windows-build）
 
 ---

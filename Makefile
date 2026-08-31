@@ -3,6 +3,7 @@ GATEWAY_BIN := bin/gateway
 ADMIN_BIN := bin/admin
 SDK_DIR := sdk/typescript
 WEB_DIR := web
+DESKTOP_UI_DIR := desktop-ui
 
 # Pinned tool versions (keep in sync with .tool-versions).
 GOVULNCHECK_VERSION := v1.1.4
@@ -17,8 +18,9 @@ GOLANGCI_LINT_VERSION := v1.62.2
         arch-check tidy \
         sdk-install sdk-build sdk-test sdk-typecheck sdk-lint sdk-codegen-check \
         web-install web-build web-typecheck web-lint web-e2e web-dev start-stack start-gateway \
+        desktop-ui-install desktop-ui-typecheck desktop-ui-test-unit desktop-ui-build \
         docker docker-gateway docker-admin dev-deps dev-deps-down \
-        ci ci-web ci-heavy clean
+        ci ci-web ci-desktop-ui ci-heavy clean
 
 # Show available targets (grouped by the ## comments below).
 help:
@@ -261,6 +263,30 @@ web-e2e: ## Run the Control Panel slice-0 e2e (auto start/stop)
 # check-i18n verifies en/zh locale key alignment (prevents parallel worktrees
 # from silently diverging message keys); jq is a dev-tool prerequisite.
 ci-web: check-i18n check-i18n-keys check-ui web-typecheck web-lint web-test-unit web-build ## Run web quality gates (i18n + typecheck + lint + unit tests + build)
+
+## ---- Desktop UI (desktop-ui) ----
+# React + Vite SPA embedded into the Wails .app (design/desktop.md §10). Kept
+# out of `ci` for the same reason as web: npm install is heavy and `ci` stays
+# npm-free. Gated via ci-desktop-ui in the CI light job — without it a broken
+# .tsx only surfaces at release time when scripts/build-desktop.sh runs
+# `npm run build`.
+desktop-ui-install: ## Install desktop-ui dependencies
+	cd $(DESKTOP_UI_DIR) && npm ci
+
+desktop-ui-typecheck: ## Type-check the desktop UI (tsc --noEmit)
+	cd $(DESKTOP_UI_DIR) && npx tsc --noEmit
+
+desktop-ui-test-unit: ## Run desktop-ui unit tests (vitest; pure-function modules like lib/format.ts)
+	cd $(DESKTOP_UI_DIR) && npm test
+
+desktop-ui-build: ## Build the desktop UI SPA (tsc --noEmit && vite build)
+	cd $(DESKTOP_UI_DIR) && npm run build
+
+## ---- Aggregate desktop-ui ----
+# Requires desktop-ui-install first. desktop-ui-build re-runs tsc, but the
+# standalone typecheck stays in the chain so a type error fails with a clear
+# step name instead of inside the bundler.
+ci-desktop-ui: desktop-ui-typecheck desktop-ui-test-unit desktop-ui-build ## Run desktop-ui quality gates (typecheck + unit tests + build)
 
 check-i18n: ## Verify locale key alignment across all locales (en is baseline)
 	@./scripts/check-i18n.sh

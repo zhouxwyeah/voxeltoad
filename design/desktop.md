@@ -386,8 +386,11 @@ ADR-0051 的目标语义：
 - **`internal/desktopapi/server_test.go`**：真 SQLite + `httptest` 真读 API 服务端,覆盖 7 个端点 + `%2F` request_id 边界。
 - **`internal/desktopapp/wiring_test.go`**（**关联影响守卫**）：in-process 装配完整桌面链路（`proxy.Router` + desktop SQLite sinks + `config.Load` 闭包 + mock 上游）,真打 `/v1/chat/completions`（流式 + 非流式）,断言 `request_logs`/`trace_payloads` 落 SQLite 且读 API 能取回。**这是唯一验证"组装后真能跑通"的测试**——若共享接口签名/语义变更未被编译器抓住,这里会抓住。模式对照 `design/e2e.md` 的 desktop 节。
 
-**已存在但尚未进入每 PR 门禁：**
-- **`desktop-ui/src/lib/format.test.ts`**：前端纯函数冒烟（vitest）；当前 `make ci` 不安装或运行 `desktop-ui` 测试。组件渲染/Playwright 继续延后。
+**desktop-ui 前端门禁（`make ci-desktop-ui`，CI light job 每 PR 运行）**：
+- `desktop-ui-typecheck`（`tsc --noEmit`）+ `desktop-ui-test-unit`（vitest 纯函数：`src/lib/format.test.ts`、`json-tree.test.ts` 等）+ `desktop-ui-build`（`tsc --noEmit && vite build`）。
+- 需先 `make desktop-ui-install`。与 `ci-web` 同样不挂进 `make ci`——默认门禁保持 npm-free。
+- **为什么必须有**：`desktop-ui` 的 `.tsx` 此前只在发布时被 `scripts/build-desktop.sh` 的 `npm run build` 编译，破坏性改动可以长期潜伏在 main 上直到打包才暴露。
+- 组件渲染测试与 Playwright 继续延后。
 
 **手动测试脚本**：
 - `scripts/desktop-test.sh`：build → 后台启动 → curl 真打 → 读 API 验证 → 清理（对照 `scripts/devstack-test.sh` 形态）。
