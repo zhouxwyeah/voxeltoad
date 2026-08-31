@@ -63,7 +63,7 @@ devstack-test: ## Run the devstack e2e smoke test (auto start/stop)
 # .app build (CGO_ENABLED=1, Wails CLI). See design/desktop.md §11,
 # design/architecture.md §三入口依赖矩阵.
 desktop-test: ## Run desktop gateway Go tests (wiring + store + server)
-	go test ./cmd/desktop/...
+	go test ./cmd/desktop/... ./internal/desktopapp/... ./internal/desktopstore/... ./internal/desktopapi/...
 
 desktop-e2e: ## Manual smoke test of the desktop gateway (build mock + desktop, curl, cleanup)
 	./scripts/desktop-test.sh
