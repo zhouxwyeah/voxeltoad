@@ -268,6 +268,7 @@ ADR-0051 的目标语义：
 ## 8. 鉴权（K1：种子默认 key）
 
 - 种子 1 个 API key：`KeyRecord{ KeyID:"default", Tenant:"default", Group:"default", Hash:sha256(key), ExpiresAt:nil, AllowedModels:[] }`。
+- **种子与轮换的持久化语义**：默认明文（`GATEWAY_DESKTOP_KEY` 未设置时为内置常量）仅在 `default` 行缺失时创建，**永不覆盖已存在行**——用户经设置页轮换出的 key 重启后仍然有效。`GATEWAY_DESKTOP_KEY` 显式设置视为运维者对本进程 key 的显式指定，会替换已发散的存储哈希并记日志。启动时若存储哈希与启动明文不一致（历史轮换），KeyState 以未知明文初始化，不再打印失效旧明文，提示到设置页重新轮换。
 - 第三方 Agent 配置：`base_url=http://127.0.0.1:<port>/v1`，`Authorization: Bearer <默认key>`。
 - `authMiddleware`（`internal/proxy/auth_middleware.go:59`）真跑真通过；`modelAllowed` 因空 `AllowedModels` 全部放行。
 - **proxy 零改动**。Agent 身份靠 `AgentType` 探测（已内建，覆盖 codebuddy/codex/opencode/workbuddy/claude-code）。

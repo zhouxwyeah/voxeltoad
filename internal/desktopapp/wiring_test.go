@@ -85,7 +85,7 @@ func startDesktopGateway(t *testing.T) (gatewayURL, apiKey string, cleanup func(
 
 	// Seed the default key (K1).
 	plaintext := seed.DefaultKey()
-	if err := seed.Key(context.Background(), db, plaintext); err != nil {
+	if err := seed.Key(context.Background(), db, plaintext, false); err != nil {
 		t.Fatalf("seed key: %v", err)
 	}
 

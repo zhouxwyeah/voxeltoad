@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 
 	"voxeltoad/internal/desktopstore"
@@ -23,11 +24,37 @@ func DefaultKey() string {
 	return "desktop-local-default-key"
 }
 
+// UsingEnvKey reports whether GATEWAY_DESKTOP_KEY was explicitly set. An
+// explicit env key is the operator's deliberate choice for this process and
+// may overwrite a rotated stored hash on startup; the built-in default
+// constant never does, so a key rotated via the settings UI survives
+// restarts.
+func UsingEnvKey() bool {
+	return os.Getenv("GATEWAY_DESKTOP_KEY") != ""
+}
+
+// HashKey returns the hex SHA-256 of a plaintext key.
+func HashKey(plaintext string) string {
+	sum := sha256.Sum256([]byte(plaintext))
+	return hex.EncodeToString(sum[:])
+}
+
+// KeyMatches reports whether the startup plaintext still corresponds to the
+// stored hash (i.e. the key has not been rotated away under this process).
+func KeyMatches(plaintext, storedHash string) bool {
+	return HashKey(plaintext) == storedHash
+}
+
 // Key hashes the plaintext key and upserts the single default API key row.
 // Empty AllowedModels ("[]") grants unrestricted model access.
-func Key(ctx context.Context, db *desktopstore.DB, plaintext string) error {
-	sum := sha256.Sum256([]byte(plaintext))
-	hash := hex.EncodeToString(sum[:])
+//
+// The row is only created when missing. An existing row is never overwritten
+// by the built-in default plaintext (that would silently revert a key the
+// user rotated via the settings UI); with overwrite=true — the explicit
+// GATEWAY_DESKTOP_KEY case — a divergent stored hash is replaced and the
+// change is logged.
+func Key(ctx context.Context, db *desktopstore.DB, plaintext string, overwrite bool) error {
+	hash := HashKey(plaintext)
 	row := desktopstore.APIKeyRow{
 		KeyID:         "default",
 		Hash:          hash,
@@ -36,13 +63,23 @@ func Key(ctx context.Context, db *desktopstore.DB, plaintext string) error {
 		ExpiresAt:     nil,
 		AllowedModels: "[]",
 	}
-	// Idempotent upsert: keep the same default key across restarts. The row
-	// uses an auto-increment PK, so Save would always INSERT and collide on the
-	// unique key_id after the first run; FirstOrCreate+Assign upserts instead.
-	return db.WithContext(ctx).
+	res := db.WithContext(ctx).
 		Where(desktopstore.APIKeyRow{KeyID: "default"}).
-		Assign(row).
-		FirstOrCreate(&row).Error
+		Attrs(row).
+		FirstOrCreate(&row)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 && overwrite && row.Hash != hash {
+		if err := db.WithContext(ctx).
+			Model(&desktopstore.APIKeyRow{}).
+			Where("key_id = ?", "default").
+			Update("hash", hash).Error; err != nil {
+			return err
+		}
+		log.Printf("seed: GATEWAY_DESKTOP_KEY set — replaced the rotated default key hash")
+	}
+	return nil
 }
 
 // ConfigTemplate is the default dynamic config written on first run. It seeds

@@ -101,15 +101,27 @@ func Main() {
 	}
 	defer db.Close()
 
-	// Seed the single default API key (K1) and log its plaintext for agents.
+	// Seed the single default API key (K1). The built-in default plaintext
+	// only creates the row — it never overwrites one — so a key rotated via
+	// the settings UI survives restarts. An explicit GATEWAY_DESKTOP_KEY is
+	// the operator's deliberate choice and does replace a divergent hash.
 	// The KeyState is shared between the read API (rotate endpoint) and the
 	// Wails "Copy API key" menu so a rotation via one is visible to the other.
 	plaintextKey := seed.DefaultKey()
-	if err := seed.Key(context.Background(), db, plaintextKey); err != nil {
+	if err := seed.Key(context.Background(), db, plaintextKey, seed.UsingEnvKey()); err != nil {
 		log.Fatalf("seed default key: %v", err)
 	}
-	keyState := desktopapi.NewKeyState(plaintextKey)
-	log.Printf("desktop gateway API key: %s", plaintextKey)
+	storedHash, err := desktopstore.NewKeyStore(db).DefaultKeyHash(context.Background())
+	if err != nil {
+		log.Fatalf("read default key hash: %v", err)
+	}
+	keyState := desktopapi.NewKeyState("")
+	if seed.KeyMatches(plaintextKey, storedHash) {
+		keyState = desktopapi.NewKeyState(plaintextKey)
+		log.Printf("desktop gateway API key: %s", plaintextKey)
+	} else {
+		log.Printf("desktop gateway API key: previously rotated — plaintext unknown; rotate again in 设置 → API 密钥 to obtain a new key")
+	}
 
 	// Dynamic config closure — replaces the enterprise admin-snapshot poller.
 	dynFn, err := config.Load(cfgPath)

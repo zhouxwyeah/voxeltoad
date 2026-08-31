@@ -17,7 +17,7 @@ import (
 
 func TestAPIKey_GetAndRotate(t *testing.T) {
 	db := openTestDB(t)
-	if err := desktopseed.Key(context.Background(), db, desktopseed.DefaultKey()); err != nil {
+	if err := desktopseed.Key(context.Background(), db, desktopseed.DefaultKey(), false); err != nil {
 		t.Fatalf("seed key: %v", err)
 	}
 	ks := NewKeyState(desktopseed.DefaultKey())

@@ -51,6 +51,20 @@ func (k *KeyStore) LookupByHash(ctx context.Context, hash string) (auth.KeyRecor
 	}, true, nil
 }
 
+// DefaultKeyHash returns the stored hash of the seeded "default" key, so the
+// startup path can tell whether the configured plaintext still matches (or
+// whether the key was rotated in an earlier run and the plaintext is
+// unrecoverable).
+func (k *KeyStore) DefaultKeyHash(ctx context.Context) (string, error) {
+	var row APIKeyRow
+	if err := k.db.WithContext(ctx).
+		Where("key_id = ?", "default").
+		First(&row).Error; err != nil {
+		return "", err
+	}
+	return row.Hash, nil
+}
+
 // RotateDefaultKey replaces the stored hash of the seeded "default" key (the
 // desktop has exactly one key, design/desktop.md §8). Only the hash changes —
 // tenant/group/permissions stay. An error is returned when the default row is
