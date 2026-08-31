@@ -45,7 +45,7 @@
 - [x] Model/Route CRUD + 配置热重载
 - [x] 请求日志、Session/Trace、Prompt 收藏、运行日志、设置与连通性测试
 - [x] macOS `.app` + Windows NSIS `.exe` 打包链路
-- [ ] Provider UI 对齐 ADR-0049 `endpoints[]`（当前旧 `adapter/base_url` 契约会阻断 UI 创建/编辑）
+- [x] Provider UI 对齐 ADR-0049 `endpoints[]`（Batch A 修复，提交/编辑均走每端点 `id/adapter/base_url`）
 - [x] 桌面 SQLite 同步共享 request/trace 新字段（ingress_protocol / provider_endpoint）
 
 **当前演进批次**：

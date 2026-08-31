@@ -37,9 +37,9 @@
 |---|---|---|---|
 | 路由 / 模型 / 提供商 / failover | 复用 | `internal/proxy` + `internal/adapter` | **原样 import，零差异** |
 | 请求录制（元数据） | 复用 + SQLite sink | `request_logs` (ADR-0021) | 复用 `RequestLogSink` 接口；客户端请求是统计单位 |
-| 分发路径（目标） | 共享可选观测契约 + SQLite sink | Dispatcher (ADR-0011 / 0051) | **待落地**；有序记录候选跳过与真实上游尝试，不改变路由决策 |
-| Trace 捕获（消息/原始体） | 复用 + SQLite sink | `trace_payloads` (ADR-0039) | 已有正文开关与定时留存；主动清理待落地 |
-| Session 聚合 | 复用 + 桌面元数据 | ADR-0018 / 0040 / 0051 | 自动只读聚合已落地；收藏与整会话留存豁免待落地 |
+| 分发路径（目标） | 共享可选观测契约 + SQLite sink | Dispatcher (ADR-0011 / 0051) | 已落地（Batch B）；有序记录候选跳过与真实上游尝试，不改变路由决策 |
+| Trace 捕获（消息/原始体） | 复用 + SQLite sink | `trace_payloads` (ADR-0039) | 已有正文开关、定时留存与主动清理（Batch C） |
+| Session 聚合 | 复用 + 桌面元数据 | ADR-0018 / 0040 / 0051 | 自动只读聚合、收藏与整会话留存豁免均已落地 |
 | 供应商适配 | 复用 | `internal/adapter/*` | 原样 |
 | 治理插件（缓存/提示词注入等） | 按需复用 | `internal/plugin/*` | 原样，默认关 |
 | 凭证加密 | 简化 | ADR-0031 AES-256-GCM | 桌面本地单用户，密钥存本地文件/Keychain，可简化 |
@@ -187,7 +187,7 @@ Session 由 session key 自动聚合，用户不能手工合并/拆分；收藏�
 | 鉴权结构 | 复用 | `internal/auth/{auth,apikey}.go` | `KeyRecord`/`Authenticator`/`KeyStore` 接口复用 |
 | 配置 schema | 复用 | `internal/config/schema.go` | Provider/Model/Route/GatewaySettings 直接复用 |
 | RequestLogSink (PG) | **新增 SQLite** | `internal/desktopstore/requestlog_sink.go` | 对应 `internal/store/requestlog.go` 的原生 SQL |
-| DispatchStep observer/sink | **共享契约 + SQLite 实现（待落地）** | `internal/proxy` + `internal/desktopstore` | 只观测既有选择/重试/failover，不参与决策（ADR-0051） |
+| DispatchStep observer/sink | **共享契约 + SQLite 实现（已落地）** | `internal/proxy` + `internal/desktopstore` | 只观测既有选择/重试/failover，不参与决策（ADR-0051） |
 | TracePayloadSink (PG) | **新增 SQLite** | `internal/desktopstore/tracepayload_sink.go` | 对应 `internal/store/tracepayload.go` |
 | KeyStore (PG) | **新增 SQLite** | `internal/desktopstore/keystore.go` | 对应 `internal/store/key.go` |
 | 读查询 | **新增** | `internal/desktopstore/query.go` | 复用 `requestlog_query.go`/`tracepayload_query.go` 的查询语义（SQL 需重写，PG 占位符 `$1`/JSONB 不兼容） |
@@ -217,7 +217,7 @@ Session 由 session key 自动聚合，用户不能手工合并/拆分；收藏�
 | `TIMESTAMPTZ` | `DATETIME` / `INTEGER`(unix) |
 | `$1` 占位符 | `?` 占位符 |
 
-### 6.3 建表 SQL（当前 4 张业务表，目标新增 2 张）
+### 6.3 建表 SQL（当前 6 张业务表）
 
 **当前已落地：**
 - `request_logs`：已持久化 tenant/group/api_key_id/provider/model_*/tokens/ttft/duration/error_type/blocked_by/fallback/cache_*/request_id/client_request_id/session_id/trace_id/upstream_request_id/session_source/agent_type/ingress_protocol/provider_endpoint/created_at。
@@ -225,10 +225,10 @@ Session 由 session key 自动聚合，用户不能手工合并/拆分；收藏�
 - `api_keys`：字段对齐 `migrations/00001_initial_schema.sql:77` —— key_id/hash(CHAR64)/tenant_id/group_id/expires_at/allowed_models(TEXT JSON)/revoked_at。桌面仅 1 行种子。
 - `prompt_templates`（§10.3 Prompt 收藏，已落地）：title/content(TEXT)/tags(JSON TEXT)/session_id/source_trace_row_id/note/timestamps。
 
-**ADR-0051 目标增量（待落地）：**
-- `request_logs` 增加 nullable `serving_step_ordinal` 与 `delivery_outcome`（`completed` / `stream_error` / `client_cancelled` / `request_error`），让流式最终结果可在重启后与 serving DispatchStep 关联。
-- `dispatch_steps`：request_log_id/ordinal/provider/endpoint/action/skip_reason/selection_outcome/retryable/status_code/error_type/upstream_request_id/started_at/selection_duration_ms；`UNIQUE(request_log_id, ordinal)`。关联 `request_logs.id` 而非非唯一的 `request_id`；流式 `selected` 只表示锁定，最终 delivery outcome 归父 RequestOutcome。
-- `session_favorites`：session_id(PRIMARY KEY)/created_at；存在即让该 session 的 `request_logs`、`trace_payloads` 与 `dispatch_steps` 豁免普通留存。
+**ADR-0051 增量落地情况：**
+- `request_logs` 增加 nullable `serving_step_ordinal` 与 `delivery_outcome`（`completed` / `stream_error` / `client_cancelled` / `request_error`），让流式最终结果可在重启后与 serving DispatchStep 关联。**未落地**（后续增强；当前 delivery outcome 只在内存态 RequestOutcome 中）。
+- `dispatch_steps`（已落地）：request_log_id/ordinal/provider/endpoint/action/skip_reason/selection_outcome/retryable/status_code/error_type/upstream_request_id/started_at/selection_duration_ms；`UNIQUE(request_log_id, ordinal)`。关联 `request_logs.id` 而非非唯一的 `request_id`；流式 `selected` 只表示锁定，最终 delivery outcome 归父 RequestOutcome。
+- `session_favorites`（已落地）：session_id(PRIMARY KEY)/created_at；存在即让该 session 的 `request_logs`、`trace_payloads` 与 `dispatch_steps` 豁免普通留存。
 
 索引至少包含：`request_logs(session_id, created_at)`、`request_logs(agent_type, created_at)`、`dispatch_steps(request_log_id, ordinal)`、`dispatch_steps(provider, started_at)`。
 
@@ -282,8 +282,8 @@ ADR-0051 的目标语义：
 - **Session 三级链**（ADR-0018）：`X-Voxeltoad-Session` 头（桌面可配置候选头名，覆盖各 Agent 框架）> body `prompt_cache_key`/`user` > 前缀哈希回退。
 - **AgentType 探测**：`RequestLog.AgentType` / `TracePayload.AgentType` 已内建，UI 可按 Agent 过滤；AgentType 只用于观测，不进入路由治理。
 - **SessionSource 可观测**：可知一条记录是靠显式头还是前缀哈希聚的（模糊聚类的坑可诊断，非黑盒）。
-- **SessionFavorite（待落地）**：Session 仍是只读投影，不支持手工合并/拆分；收藏提供置顶与整会话留存豁免。
-- **分发路径（待落地，ADR-0051）**：Request 下展示有序 DispatchStep；区分“候选跳过”和“真实上游尝试”，并记录切换原因、耗时、状态与可用的 upstream request ID。
+- **SessionFavorite（已落地，Batch C）**：Session 仍是只读投影，不支持手工合并/拆分；收藏提供置顶与整会话留存豁免。
+- **分发路径（已落地，ADR-0051 / Batch B）**：Request 下展示有序 DispatchStep；区分“候选跳过”和“真实上游尝试”，并记录切换原因、耗时、状态与可用的 upstream request ID。
 - **四层 Trace**（ADR-0039）：Session → Request → Messages → Raw，展示完整 messages/request_raw/response_raw/error_raw，支持复制与 Prompt 收藏。桌面单用户本地场景默认开启正文采集，但必须显式显示敏感性、保留期和关闭/清理入口；该默认值不改变企业版默认关闭策略。
 
 ---
@@ -306,7 +306,7 @@ ADR-0051 的目标语义：
 - `GET /api/v1/trace/rows/{id}` —— 单条 trace 完整 messages/raw(ADR-0040)
 - `GET /api/v1/trace/requests/{request_id...}` —— 按 request_id 查 trace(多段通配,因 request_id 含 `/`)
 
-**ADR-0051 目标端点（待落地）**：
+**ADR-0051 端点（已落地）：**
 - `GET /api/v1/request-logs/{id}/dispatch-steps` —— 按请求日志行主键读取有序分发路径
 - `PUT/DELETE /api/v1/session-favorites/{session_id...}` —— 收藏/取消收藏 Session
 - `DELETE /api/v1/sessions/{session_id...}` —— 删除单个 Session 的 request/trace/dispatch steps
@@ -330,18 +330,18 @@ ADR-0051 的目标语义：
 - `GET/POST /api/v1/prompts` + `GET/PUT/DELETE /api/v1/prompts/{id}` —— Prompt 收藏（§10.3）
 
 ### 10.3 核心页面
-1. **概览（部分落地）**：配置向导卡片已落地（Provider → Model → Route → Test 四步进度）；请求级统计已落地（总调用/成功率/平均延迟/平均TTFT/Token + Provider/Model/Agent 分布 + 错误类型分布 + 估算成本）。actual failover rate / 首次尝试成功率 / 首选候选命中率等待 Batch B-2 DispatchStep。
+1. **概览（已落地）**：配置向导卡片已落地（Provider → Model → Route → Test 四步进度）；请求级统计已落地（总调用/成功率/平均延迟/平均TTFT/Token + Provider/Model/Agent 分布 + 错误类型分布 + 估算成本）。actual failover rate / 首次尝试成功率 / 首选候选命中率等 DispatchStep 派生指标为后续增强（依赖 dispatch_steps 聚合查询）。
 2. **首次配置引导（已落地）**：无可用链路时，概览顶部显示配置向导卡片（Provider → Model → Route → Test 四步进度 + 唯一下一步 CTA）；三步配置完成后卡片隐藏，退化为普通运行态摘要。前端组合 listProviders/listModels/listRoutes，零后端改动。
-3. **Session 浏览器（部分落地）**：按 Agent 过滤、SessionSource 展示和 Trace 下钻已落地；收藏、置顶与留存豁免待落地。不支持手工合并/拆分。
-4. **请求/分发路径查看器（目标，待落地）**：请求时间线先展示客户端最终结果，再展开有序 DispatchStep，明确候选跳过、真实尝试、切换原因、耗时和上游关联 ID。
-5. **Trace 查看器（已落地）**：单 session 内请求时间线；点开看完整 messages(system/user/assistant/tool_use)、request_raw、response_raw、error_raw；支持复制 prompt。正文采集默认开启但可关闭；敏感性与清理反馈待补。
-6. **供应商（当前阻断，Batch A 修复）**：后端已使用 ADR-0049 `endpoints[]`，但当前桌面 UI 仍提交旧顶层 `adapter/base_url`。目标 Modal 必须提交每项 `id/adapter/base_url`；weight/timeouts 不在 UI 暴露，创建时写默认值、编辑时保留原值；明文 key 以 `plain://` 存本地 YAML。
+3. **Session 浏览器（已落地）**：按 Agent 过滤、SessionSource 展示、Trace 下钻、收藏、置顶与留存豁免均已落地（收藏为 Batch C）。不支持手工合并/拆分。
+4. **请求/分发路径查看器（已落地，Batch B）**：请求时间线先展示客户端最终结果，再展开有序 DispatchStep，明确候选跳过、真实尝试、切换原因、耗时和上游关联 ID。
+5. **Trace 查看器（已落地）**：单 session 内请求时间线；点开看完整 messages(system/user/assistant/tool_use)、request_raw、response_raw、error_raw；支持复制 prompt。正文采集默认开启但可关闭；敏感性与清理反馈已补（Batch C）。
+6. **供应商（已修复，Batch A）**：UI 已对齐 ADR-0049 `endpoints[]`——Modal 提交每项 `id/adapter/base_url`；weight/timeouts 不在 UI 暴露，创建时写默认值、编辑时保留原值；明文 key 以 `plain://` 存本地 YAML。
 7. **模型**：表格展示 alias + upstreams 行内 pill(provider · 上游模型 · 输入/输出价格 · cache %)；Modal 支持描述、context_length、capabilities、tags 与动态 upstream 行；价格显示美元、提交转 micro，币种为 USD。
 8. **路由**：表格展示 model_alias + strategy pill + providers pill；Modal 支持 priority/weighted/round_robin/session_affinity，候选 provider 按所选模型的 upstream 过滤。
 9. **收藏/打标签好 prompt（已落地）**：`prompt_templates` 表 + `/prompts` 列表页（搜索/标签筛选/复制/编辑/删除），Trace 查看器可从 messages 预填收藏。Prompt 收藏与 Session 收藏是两个概念。
 10. **请求日志（已落地）**：`/request-logs`——多维过滤 + 分页表格；ADR-0051 增量是在行详情中展开分发路径与估算成本。
 11. **运行日志（已落地）**：`/logs`——进程日志查看（3s 轮询、tail 档位、客户端关键字过滤），完整历史在 `logs/desktop.log`。
-12. **设置（部分落地）**：已有网关监听、Trace 正文采集开关/上限/留存天数和 API key 管理；待补敏感性说明、按时间立即清理与清空全部观测数据。
+12. **设置（已落地，Batch C）**：网关监听、Trace 正文采集开关/上限/留存天数、API key 管理、敏感性说明、按时间立即清理与清空全部观测数据均已齐备。
 13. **连通性测试（已落地）**：`/playground`——选模型发小请求，展示响应/耗时/命中供应商/token 用量，上游错误原样展示。
 
 > **UI 对齐原则(2026-07)**：desktop-ui 的布局、表格、表单字段、按钮变体、Modal 结构镜像 admin web(`web/`)，唯一事实来源是 `design/design-system.md` + `web/src`。有意偏差包括：无 tenant/billing/quota 视图、成本仅作本地估算、provider 的 weight/timeouts 隐藏但随提交保留、明文凭证映射 `plain://`、品牌名「桌面网关助手」+ zh-CN 单语言。
@@ -411,10 +411,10 @@ ADR-0051 的目标语义：
 - `internal/proxy`（必要时配合 `internal/observability`）只新增可选 DispatchStep observer/event 契约及发布点。
 - 不在共享层加入 SQLite、Session 收藏、桌面 API、首页投影或首次引导逻辑。
 
-**桌面目标增量：**
+**桌面增量（已落地）：**
 - `internal/desktopstore/`：`dispatch_steps`、`session_favorites`、收藏感知留存与主动清理。
 - `internal/desktopapi/`：setup readiness、分发路径、Session 收藏/删除、观测数据 purge。
-- `desktop-ui/`：先修 Provider `endpoints[]` 契约，再做首次引导、运行态首页、分发路径、Session 收藏与清理。
+- `desktop-ui/`：Provider `endpoints[]` 契约、首次引导、运行态首页、分发路径、Session 收藏与清理。
 
 其余 `internal/adapter`、`internal/plugin`、`internal/auth`、`internal/config` 继续原样复用。
 
@@ -433,7 +433,7 @@ ADR-0051 的目标语义：
 
 ## 14. 当前演进批次
 
-基础网关、SQLite、配置 CRUD、请求/Trace/运行日志、Playground 与双平台 Wails 打包已经落地。下一阶段不再按“搭骨架”推进，而按产品成熟度收敛：
+基础网关、SQLite、配置 CRUD、请求/Trace/运行日志、Playground 与双平台 Wails 打包已经落地。下一阶段不再按“搭骨架”推进，而按产品成熟度收敛。**当前状态：Batch A/B/C 全部完成，进入发布准备阶段**（desktop `.dmg` 打包 + 面向个人开发者的安装与使用文档，见 roadmap）：
 
 ### Batch A — 可用性（最高优先级）
 - [x] 修复桌面 Provider UI 与 ADR-0049 `endpoints[]` 的阻断性契约漂移。
@@ -442,7 +442,7 @@ ADR-0051 的目标语义：
 - 验收：用户仅通过桌面 UI 能建立一条真实可调用链路，不能依赖手改 YAML。
 
 ### Batch B — 可解释性
-- [x] 首页改为请求级可靠性与用量总览：最终成功率、错误、延迟/TTFT、token、Provider/Model/Agent 分布、次级估算成本。fallback 率（legacy coarse）已展示，actual failover rate 待 DispatchStep。
+- [x] 首页改为请求级可靠性与用量总览：最终成功率、错误、延迟/TTFT、token、Provider/Model/Agent 分布、次级估算成本。fallback 率（legacy coarse）已展示；actual failover rate 等派生指标依赖 dispatch_steps 聚合，为后续增强。
 - [x] 共享 Dispatcher 发布可选 DispatchStep；桌面 SQLite/API/UI 展示有序分发路径。熔断跳过的 skipped steps 留待后续（需 router 层面改动）。
 - [x] 提供被动 ProviderHealth，明确最后观测时间，不主动产生探测请求。
 - 验收：任一发生 failover 的请求都能说明"评估了谁、跳过/调用了谁、为何切换、最终谁响应"。
