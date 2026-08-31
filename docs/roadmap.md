@@ -53,7 +53,7 @@
 1. **Batch A — 可用性**：修 Provider 契约漂移；补 SQLite 字段同步；补 Provider → Model → Route → Test 四步 SetupReadiness 首页引导。**已完成**。
 2. **Batch B — 可解释性**：请求级运行态首页已落地；DispatchStep observer + SQLite/API/UI 已落地；被动 ProviderHealth 已落地（Providers 页状态列）。**Batch B 已完成**。
 3. **Batch C — 整理能力**：Session 收藏与整会话留存豁免；按 Session/时间/全部清理本地观测数据；Trace 设置敏感性说明与清理反馈。**Batch C 已完成**。
-4. **发布准备**：在前三批达到产品可用后完成 desktop `.dmg`、面向个人开发者的安装与使用文档。
+4. **发布准备**：在前三批达到产品可用后完成 desktop `.dmg`、面向个人开发者的安装与使用文档。**已完成**（`make desktop-build` 产出 ad-hoc 签名 `.app` + `.dmg`；用户文档见 [docs/desktop/getting-started.md](desktop/getting-started.md)；Developer ID 正式签名 + 公证、Windows 签名/ARM64 为后续可选升级）。
 
 **复用关系**：差异仍收敛在 `internal/desktopstore`（SQLite）、`internal/desktopapi`（本地 API）、`cmd/desktop`/`internal/desktopapp`（组合与生命周期）和 `desktop-ui`。ADR-0051 仅允许在共享 Dispatcher 增加可选、fail-open、只观测不决策的 DispatchStep 契约；企业版无需同步持久化。
 

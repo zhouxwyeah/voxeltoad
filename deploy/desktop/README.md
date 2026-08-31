@@ -2,7 +2,8 @@
 
 This directory is the Wails v2 packaging layer that turns the desktop personal
 gateway (`cmd/desktop`, `internal/desktopstore`, `internal/desktopapi`) into a
-standard macOS `.app` bundle. See `design/desktop.md` §10 and ADR-0041.
+standard macOS `.app` bundle. See `design/desktop.md` §10, ADR-0041, and
+`docs/desktop/getting-started.md` (end-user install & usage guide).
 
 ## What lives here
 
