@@ -59,7 +59,8 @@ go install github.com/wailsapp/wails/v2/cmd/wails@latest
 make desktop-build
 ```
 
-Output: `deploy/desktop/build/bin/voxeltoad-desktop.app`.
+Output: `deploy/desktop/build/bin/voxeltoad-desktop.app` (ad-hoc signed) and
+`deploy/desktop/build/bin/voxeltoad-desktop.dmg`.
 
 The build script (`scripts/build-desktop.sh`) does in order:
 1. `cd desktop-ui && npm ci && npm run build` → `desktop-ui/dist/`
@@ -67,18 +68,24 @@ The build script (`scripts/build-desktop.sh`) does in order:
 3. `cd deploy/desktop && wails build` → reads `wails.json`, compiles the
    `package main` in this directory (`main.go` imports `internal/desktopapp`),
    embeds `app/dist/`, produces `.app`
+4. (darwin) `codesign --force --deep --sign -` — ad-hoc signature
+5. (darwin) `hdiutil create` — wraps the `.app` into a `.dmg`
 
 ## Signing & notarization (distribution)
 
-For a distributable build (vs. local dev):
+Current default is **ad-hoc signing** (no Apple Developer account needed):
+the bundle is signed with a local identity (`Signature=adhoc`), runs fine on
+the build machine, and the `.dmg` can be shared as-is. Recipients hit
+Gatekeeper on first launch (unsigned-by-a-known-CA) — right-click → Open to
+bypass. This is the pragmatic path for personal distribution; see
+`docs/desktop/getting-started.md` for the end-user instructions.
+
+For a properly signed, notarized build later:
 
 1. Get a Developer ID Application certificate from Apple Developer Program.
 2. Replace `dev.entitlements.plist` usage with a hardened-runtime entitlements
    set in `wails.json` (`darwin/signandnotarise` section).
 3. `wails build -platform darwin/universal -sign <identity> -notarize`.
-
-Local dev builds (just `make desktop-build`) are unsigned and will trigger
-Gatekeeper on first launch — right-click → Open to bypass.
 
 ## Reuse vs the enterprise gateway
 

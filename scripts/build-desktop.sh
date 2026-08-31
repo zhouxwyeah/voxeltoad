@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Build the desktop personal gateway as a native installer.
 #
-# Three stages:
+# Five stages:
 #   1. Build the SPA (desktop-ui/) → desktop-ui/dist/
 #   2. Sync dist/ → deploy/desktop/app/dist/ (the //go:embed source)
 #   3. `wails build` under deploy/desktop/ → bundles the platform installer
+#   4. (darwin only) ad-hoc codesign the .app bundle
+#   5. (darwin only) wrap the .app into a distributable .dmg via hdiutil
 #
 # Platform selection:
 #   ./scripts/build-desktop.sh                  # default: darwin
@@ -21,7 +23,8 @@
 #   - Linux/WSL2: sudo apt install mingw-w64 nsis
 #
 # Output:
-#   darwin:         deploy/desktop/build/bin/voxeltoad-desktop.app
+#   darwin:         deploy/desktop/build/bin/voxeltoad-desktop.app (ad-hoc signed)
+#                   deploy/desktop/build/bin/voxeltoad-desktop.dmg
 #   windows*:       deploy/desktop/build/bin/voxeltoad-desktop-amd64-installer.exe
 set -euo pipefail
 
@@ -75,6 +78,17 @@ cd deploy/desktop
 case "$TARGET" in
   darwin)
     CGO_ENABLED=1 "$WAILS_BIN" build -tags desktop -ldflags "$LDFLAGS" -platform darwin/universal
+    # Ad-hoc codesign (no Apple Developer account): the bundle runs locally
+    # and satisfies Wails' hardened-runtime expectations; other machines need
+    # the right-click→open Gatekeeper bypass on first launch. A Developer ID
+    # signature + notarization can replace this later without script changes
+    # beyond the identity argument.
+    APP_UNSIGNED="$ROOT/deploy/desktop/build/bin/voxeltoad-desktop.app"
+    if [ -d "$APP_UNSIGNED" ]; then
+      echo
+      echo "== stage 4: ad-hoc codesign =="
+      codesign --force --deep --sign - "$APP_UNSIGNED"
+    fi
     ;;
   windows)
     # Run on Windows. NSIS must be installed (choco install nsis).
@@ -109,14 +123,22 @@ echo
 case "$TARGET" in
   darwin)
     APP="$ROOT/deploy/desktop/build/bin/voxeltoad-desktop.app"
-    if [ -d "$APP" ]; then
-      echo "✓ built: $APP"
-      echo "  size: $(du -sh "$APP" | awk '{print $1}')"
-      echo "  open with: open '$APP'"
-    else
+    if [ ! -d "$APP" ]; then
       echo "✗ expected output not found at $APP"
       exit 1
     fi
+    # .dmg for distribution (hdiutil ships with macOS — no external deps).
+    DMG="$ROOT/deploy/desktop/build/bin/voxeltoad-desktop.dmg"
+    echo
+    echo "== stage 5: create .dmg =="
+    hdiutil create -volname voxeltoad-desktop -srcfolder "$APP" -ov -format UDZO "$DMG"
+    echo
+    echo "✓ built: $APP"
+    echo "  size: $(du -sh "$APP" | awk '{print $1}')"
+    echo "  open with: open '$APP'"
+    echo "✓ built: $DMG"
+    echo "  size: $(du -sh "$DMG" | awk '{print $1}')"
+    echo "  signature: $(codesign -dv "$APP" 2>&1 | grep -o 'Signature=.*' || echo unknown)"
     ;;
   windows|windows-cross)
     # Wails names the installer <wails.json:name>-amd64-installer.exe.
