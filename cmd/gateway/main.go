@@ -188,6 +188,7 @@ func main() {
 	// snapshot (cfgStore.Current) so it tracks config changes.
 	authn := auth.NewAuthenticator(stores.KeyStore, auth.Options{})
 	billingPlugin := billing.NewPlugin(cfgStore.Current, stores.Quota, stores.UsageRecorder,
+		billing.WithAccounting(stores.Accounting),
 		billing.WithMaxTokensCeiling(cfg.Gateway.MaxTokensCeiling))
 
 	// Governance plugins in Pre order: rate limiting first (reject over-limit

@@ -15,7 +15,8 @@ flowchart TD
     C --> D[4. super-admin 创建 Route]
     
     A --> E[5. super-admin 创建 tenant-admin Operator<br/>需 tenant 存在，否则 FK→400]
-    E --> F[6. tenant-admin 创建 API Key]
+    E --> J[6a. 创建同租户 Group 与 Application<br/>Application 指定 owner Group]
+    J --> F[6b. 创建 API Key<br/>绑定消费 Group/Application/dev-staging-prod]
     
     A --> G[7. super-admin 充值 quota<br/>scope tenant:name 需 tenant 存在→400<br/>key:/裸串 可预充值]
     G --> H[8. 客户端带 API Key 请求网关]
@@ -88,19 +89,59 @@ flowchart TD
 - **plaintext 仅创建时返回一次**：创建响应含 `api_key`(明文),之后**无法再次获取**。遗失需重新创建。
 - **key_id 唯一且人类可读**：与明文 key 不同。明文 key 是 `sk-` + 24 随机字节(hex)。
 - **created_at** 记录创建时间,可用于清理旧 key。
+- **企业新 Key 强绑定**：消费 Group、Application、`environment`（dev/staging/prod）全部必填，事务内校验同租户、实体存在与应用启用。应用 owner Group 不必等于消费 Group。调用方 header 不能覆盖可信 Key 身份。
+- **历史补齐而非重新绑定**：`GET /api/v1/api-keys?unbound=true` 分页列出缺少治理身份的未撤销 Key；`PATCH /api/v1/api-keys/{key_id}` 仅补齐缺失身份，已有非空 Group/Application/environment 不能改变，完整绑定后不能解绑。迁移到别的应用/环境须发新 Key；已存在账本快照不回填。
+- **授权分离**：读取检查 api_key.read，创建/补齐/撤销检查 api_key.write；Application 相应检查 application.read/write。tenant-admin 内置权限已补齐，但自定义只读角色不会因此得到写权限。
 
 ### 2.5 Quota
 
 ```
 不存在→（TopUp）→ 有余额→（数据面扣减/后台充值）→ 更新
                        ↑
-                 余额可降至 0（拒绝请求）或负数（欠费,不计）
+                 余额可降至 0（拒绝后续请求）；流式 in-flight 估算误差可短暂为负
 ```
 
-- **原子增量**：充值用 `TopUp`（`balance += delta`,单条 SQL）,绝不覆盖。data plane 扣减用 `TryDebit`（条件 UPDATE, `balance >= est` 才扣）。
-- **无存在性要求**：scope 是自由字符串（`tenant:X`/`group:X/Y`/`key:Z`/裸串）。`tenant:X` 格式的 X 必须为存在的租户名（防拼错），其余格式不校验存在（允许预充值）。
-- **currency**：余额带有币种字段,多币种独立计数(eg, usd / cny)。
-- **余额 0 或不存在 == unlimited** （对于 TryDebit）；TopUp 会创建不存在的 scope。
+- **原子增量**：充值用 `TopUp`（`balance += delta`），绝不覆盖。企业数据面由 `AccountingRepo` 在同一事务预留/结算旧余额与新预算，不再叠加一次旧 `TryDebit/Settle`。
+- **scope**：保留 `tenant:X` / `group:X/Y` / `key:Z` / 裸串；tenant 前缀校验存在，其余允许预充值。Group 的租户名/组名分别 path-escape，创建与消费统一用 `billing.GroupScope` / `ParseGroupScope`；`group:<group>` 歧义历史项须显式核对，不能误判为无限额。
+- **currency**：一个 scope 只有一种币种（如 usd/cny），不是一个 scope 内多币种账户；充值不得改变已有币种。所有可达候选价格及参与资金账户须同币种，不隐式换汇。
+- **零余额语义**：scope 行不存在 == 该维度未限额；已存在余额 `<= 0` 时，即使估算为零也拒绝新请求。实际成本超过预留仍照实结算，可出现负余额，后续拒绝到余额恢复。输出估算不是全成本上界。
+
+### 2.6 Application
+
+应用属于一个 Tenant，有一个同租户 owner Group；owner 表示维护责任，Key 的 Group 表示消费归属。当前 PATCH 只切换 enabled，不提供名称/owner 修改；禁用拒绝所有绑定 Key，但不改写 Key 或历史账本。PATCH 返回更新后的 Application 对象。停用 Tenant/Application 或撤销 Key 均受鉴权缓存 TTL 约束（当前默认 1 分钟），不保证跨实例即时失效、不终止已开始的流。删除受已有 Key 引用保护。
+
+### 2.7 周期预算（E1）
+
+- **创建**：平台操作员选定租户与作用域（tenant/group/application/application_env/key）、日/周/月、IANA 时区（默认 UTC、周一起算）、币种、微单位限额、soft/enforce 与整数百分比阈值。Group/Application 用同租户实体 ID，Key 用 key_id。应用 owner 不自动参与消费预算。
+- **生效与周期**：策略从创建后接单起记账，不倒推不完整的历史 usage。每周期首笔预留惰性建账户；不定时清零、不结转剩余额。reservation 固定原周期账户，晚结算仍回原账户。
+- **修改**：仅允许携带当前 version 修改 limit/enabled，版本冲突返回 409；修改本周期限额保留 committed/reserved，历史账户不变。策略停用不清账、重启不重置；无硬删除、无直接余额 PATCH、无原地 scope/币种/周期修改。
+- **enforce**：`available = limit - committed - reserved` 原子检查；所有适用预算和旧余额整笔成功或回滚。耗尽时零估算也拒绝。允许在途实际成本超出预留并使 available 为负；不是严格硬预算，不承诺固定超额上界。
+- **soft**：同样持有预留、记录实际 committed、触发阈值与超额事件，但不因预算不足阻断。事件按账户/阈值去重，本期不发送邮件/webhook 等外部通知。
+
+预算管理 API（均位于 `/api/v1`，平台角色显式携带 tenant，租户角色绑定自己的租户）：
+
+| 操作 | 端点 | 权限 |
+|---|---|---|
+| 策略列表/详情/周期账户 | `GET /budgets`、`GET /budgets/{id}`、`GET /budgets/{id}/accounts` | budget.read |
+| 创建/调整限额或启停 | `POST /budgets`、`PATCH /budgets/{id}` | budget.write 且 global scope |
+| 事件/资金请求列表 | `GET /budget-events`、`GET /billing-reservations` | budget.read |
+| 人工核对 | `POST /billing-reservations/{id}/resolve` | budget.resolve 且 global scope |
+
+### 2.8 reservation 结算与未知费用
+
+```
+reserved → dispatched → settled（已知 Usage/费用）
+    └──→ released（未外呼/证实零费）
+reserved/dispatched → unknown（保留占用，待核对）
+unknown → settled / released / released_unknown（平台带证据核对）
+released_unknown → settled（后续确认费用后补账）
+```
+
+- 每次真实调用使用独立服务端 reservation ID；request_id 是关联字段，client_request_id 不提供跨 HTTP 请求资金幂等。
+- 请求固定 dispatcher/价格快照，failover 不二次预留。已知 Usage 按冻结的实际命中价格结算；只因缺 Usage 不能按零费用释放。失败尝试费用不明时，最终 fallback 成功也不能证明之前免费。
+- 已知 result 先持久化，资金应用失败可重试；结果尚未写入即崩溃仍可能 unknown。应用后台启动时及每分钟运行 RetryPending/MarkStale，24 小时 stale 只标待核对，绝不自动退款。
+- 人工核对要求 version、理由、证据，操作者来自认证会话。`settle` 明确 actual；`release` 表示证实零费；`release_unknown` 仅释放占用并承担风险，不声明零费用、不生成虚假的 usage。已风险释放可后续 settle，按累计 held/committed/released 算差额，不重复扣退。
+- reservation/account 是财务事实；usage/request/trace 异步账本各有产生条件，不能要求每个失败请求三表均有行。
 
 ## 3. 空状态 / 引导 UX 约定
 
@@ -111,10 +152,12 @@ flowchart TD
 | **route 列表** | 无 provider 或 model → 提示依赖链；齐备后显示创建表单 | |
 | **tenant 列表** | 无 tenant → 创建表单 | 需 super-admin |
 | **operator 列表** | 至少总有一个(bootstrap 的 super-admin) | 创建新 operator |
-| **api-key 列表** | 无 key → "你还没有 API key,单击创建" | tenant-admin 自管理界面 |
-| **usage 页** | 无记录 → "尚无用量数据,配置完成后发送请求即可看到" | 被动展示,非可操作 |
+| **api-key 列表** | 无 Group/Application 时先引导创建依赖，再发 Key | 未绑定历史 Key 提供补齐入口；不要将“未绑定”当可用的新建默认值 |
+| **application 列表** | 无 Group 时先建 owner Group；无应用时引导创建 | 标明 owner 与消费 Group 不同，停用受 key cache TTL 约束 |
+| **usage 页** | 无记录不代表费用为零 | `unattributed=true` 展示未归因请求/费用；空币种标未知，异步明细可能不完整 |
+| **预算页** | 无策略与“策略存在但暂无周期账户”分别展示 | global 写/核对按钮按权限显示，租户只读；显示在途超额说明和未知费用状态 |
 | **audit 页** | 刚部署→无记录→"尚无审计日志,创建或修改资源后将自动记录" | 被动展示 |
-| **quota 余额** | 未充值→余额 0 → "尚未为当前 scope 充值" + 充值按钮 | super-admin 可见充值 |
+| **quota 余额** | 未配置 scope 与已配置零余额要区分，前者无限额、后者拒绝新请求 | 平台可充值；旧余额与周期 available 分别展示，不混算 |
 
 ## 4. 校验错误 UX 约定
 
@@ -132,6 +175,7 @@ design/frontend.md §12）。`message` 是 i18n key（如 `errors.tenant.tenantN
 | 凭据无效 | 401 | `invalid_credentials` | 表单内错误提示 | `errors.auth.invalidCredentials` |
 | 不存在 | 404 | `tenant_not_found` / `api_key_not_found_in_tenant` / `operator_not_found` / `plugin_not_found` | Toast | `errors.tenant.tenantNotFound` |
 | 配额不足 | 402 | `quota_insufficient` | Toast / 跳转充值 | `errors.quota.insufficient` |
+| 预算版本冲突 | 409 | `budget_conflict` | 提示刷新后重新核对，不能静默覆盖他人变更 | `errors.budget.conflict` |
 | 运行时(DB 等) | 500 | `unexpected` / `snapshot_failed` | 通用错误页面 / 日志 | `errors.common.unexpected` |
 
 **UI 层不重写值级校验规则**（design/frontend.md §8）。所有值级约束（delta>0、role/tenant 校验、email 格式等）依赖后端 400 typed error 展示。前端通过生成的 `AdminError`/`unwrap` 获得类型化错误。

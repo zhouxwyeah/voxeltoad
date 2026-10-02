@@ -33,7 +33,8 @@ func TestAudit_TenantAdminSeesSuperAdminActionsOnIt(t *testing.T) {
 		t.Fatalf("topup: %d %s", rr.Code, rr.Body.String())
 	}
 	if rr := doAuth(t, h, saTok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "p1", "adapter": "openai", "base_url": "u", "api_key_ref": "plain://k",
+		"name": "p1", "api_key_ref": "plain://k",
+		"endpoints": []map[string]any{{"adapter": "openai", "base_url": "u"}},
 	}); rr.Code != http.StatusCreated {
 		t.Fatalf("create provider: %d %s", rr.Code, rr.Body.String())
 	}
@@ -71,7 +72,8 @@ func TestAudit_SuperAdminSeesAll(t *testing.T) {
 
 	_ = doAuth(t, h, tok, http.MethodPost, "/api/v1/tenants", map[string]any{"name": "acme"})
 	_ = doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "p1", "adapter": "openai", "base_url": "u", "api_key_ref": "plain://k",
+		"name": "p1", "api_key_ref": "plain://k",
+		"endpoints": []map[string]any{{"adapter": "openai", "base_url": "u"}},
 	})
 
 	rr := doAuth(t, h, tok, http.MethodGet, "/api/v1/audit", nil)
@@ -89,7 +91,8 @@ func TestAudit_FilterByResourceType(t *testing.T) {
 	h, _, tok := authedAdmin(t)
 	_ = doAuth(t, h, tok, http.MethodPost, "/api/v1/tenants", map[string]any{"name": "acme"})
 	_ = doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "p1", "adapter": "openai", "base_url": "u", "api_key_ref": "plain://k",
+		"name": "p1", "api_key_ref": "plain://k",
+		"endpoints": []map[string]any{{"adapter": "openai", "base_url": "u"}},
 	})
 
 	rr := doAuth(t, h, tok, http.MethodGet, "/api/v1/audit?resource_type=provider", nil)

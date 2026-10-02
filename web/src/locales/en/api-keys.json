@@ -1,6 +1,25 @@
 {
   "heading": "API Keys",
   "subtitle": "Manage client API keys for this tenant. The plaintext key is shown once on creation and cannot be retrieved afterwards.",
+  "identity": {
+    "group": "Consumption Group",
+    "application": "Application",
+    "environment": "Environment",
+    "unbound": "Unbound",
+    "emptyUnbound": "No active API keys need identity binding.",
+    "completeBinding": "Complete binding",
+    "showAll": "All API keys",
+    "showUnbound": "Unbound API keys",
+    "unboundHint": "Active keys with incomplete identity. Complete their binding once; historical requests are not reattributed.",
+    "bindingHint": "Choose a consumption group, enabled application and environment. The consumption group may differ from the application's owner group. Existing identity fields cannot change.",
+    "immutable": "This identity is fixed. Issue a new key to change its group, application or environment.",
+    "createGroup": "Create a consumption group first",
+    "createApplication": "Create or enable an application first"
+  },
+  "state": {
+    "error": "Unable to load API keys or their dependencies.",
+    "retry": "Retry"
+  },
   "columns": {
     "keyId": "Key ID",
     "revoked": "Status"
@@ -10,7 +29,10 @@
     "revoked": "Revoked"
   },
   "form": {
-    "keyId": { "label": "Key ID *", "placeholder": "e.g. prod-app-1" },
+    "keyId": {
+      "label": "Key ID *",
+      "placeholder": "e.g. prod-app-1"
+    },
     "allowedModels": {
       "label": "Allowed Models (optional)",
       "placeholder": "Select models…",
@@ -33,6 +55,7 @@
   "actions": {
     "create": "Create Key",
     "save": "Save",
+    "saved": "API key updated",
     "revoke": "Revoke",
     "emptyState": "No API keys yet. Click \"Create Key\" to issue one."
   }

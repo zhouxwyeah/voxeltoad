@@ -48,8 +48,8 @@ func TestProviderConnTest(t *testing.T) {
 	// Create a provider with a plaintext key: it is stored encrypted and the
 	// ref becomes db://provider/p1 (ADR-0030/0031).
 	rr := doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "p1", "type": "openai", "adapter": "openai",
-		"base_url": baseURL, "api_key": "secret-k",
+		"name": "p1", "type": "openai", "api_key": "secret-k",
+		"endpoints": []map[string]any{{"adapter": "openai", "base_url": baseURL}},
 	})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create: status = %d, want 201; body=%s", rr.Code, rr.Body.String())

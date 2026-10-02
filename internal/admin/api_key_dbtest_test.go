@@ -21,9 +21,7 @@ import (
 func TestAPIKey_CreateAndRevoke(t *testing.T) {
 	h, _, taTok := seededTenantAdmin(t)
 
-	rr := doAuth(t, h, taTok, http.MethodPost, "/api/v1/api-keys", map[string]any{
-		"key_id": "k1",
-	})
+	rr := doAuth(t, h, taTok, http.MethodPost, "/api/v1/api-keys", enterpriseKeyBody(t, h, taTok, "k1"))
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create key: %d %s", rr.Code, rr.Body.String())
 	}
@@ -81,10 +79,9 @@ func TestAPIKey_CreateWithAllowedModels(t *testing.T) {
 		t.Fatalf("seed models: %v", err)
 	}
 
-	rr := doAuth(t, h, taTok, http.MethodPost, "/api/v1/api-keys", map[string]any{
-		"key_id":         "k2",
-		"allowed_models": []string{"m1", "m2"},
-	})
+	body := enterpriseKeyBody(t, h, taTok, "k2")
+	body["allowed_models"] = []string{"m1", "m2"}
+	rr := doAuth(t, h, taTok, http.MethodPost, "/api/v1/api-keys", body)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create: %d %s", rr.Code, rr.Body.String())
 	}
@@ -119,15 +116,12 @@ func TestAPIKey_RejectsSuperAdmin(t *testing.T) {
 func TestAPIKey_DuplicateKeyId(t *testing.T) {
 	h, _, taTok := seededTenantAdmin(t)
 
-	if rr := doAuth(t, h, taTok, http.MethodPost, "/api/v1/api-keys", map[string]any{
-		"key_id": "dup-key",
-	}); rr.Code != http.StatusCreated {
+	body := enterpriseKeyBody(t, h, taTok, "dup-key")
+	if rr := doAuth(t, h, taTok, http.MethodPost, "/api/v1/api-keys", body); rr.Code != http.StatusCreated {
 		t.Fatalf("create: %d %s", rr.Code, rr.Body.String())
 	}
 
-	rr := doAuth(t, h, taTok, http.MethodPost, "/api/v1/api-keys", map[string]any{
-		"key_id": "dup-key",
-	})
+	rr := doAuth(t, h, taTok, http.MethodPost, "/api/v1/api-keys", body)
 	if rr.Code < 400 || rr.Code >= 500 {
 		t.Errorf("duplicate key_id status = %d, want 4xx; body=%s", rr.Code, rr.Body.String())
 	}

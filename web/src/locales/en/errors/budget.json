@@ -1,0 +1,11 @@
+{
+  "invalidBody": "Invalid budget request. Check the required fields; unknown fields and null values are not accepted.",
+  "invalidPolicy": "Invalid budget policy or resolution. Check the scope, period, timezone, currency, amount, and required evidence.",
+  "invalidQuery": "Invalid budget query or resource identifier.",
+  "tenantRequired": "Select a tenant before viewing or managing budgets.",
+  "tenantMismatch": "You can only access your own tenant's budgets.",
+  "notFound": "The budget or reservation was not found in this tenant.",
+  "conflict": "The budget or reservation changed, or its state does not allow this operation. Refresh before retrying.",
+  "currencyMismatch": "The budget currency does not match the applicable funding accounts. Currency conversion is not supported.",
+  "insufficient": "The funding account has insufficient available funds."
+}

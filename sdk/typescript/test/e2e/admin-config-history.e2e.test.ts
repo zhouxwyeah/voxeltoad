@@ -24,8 +24,13 @@ describe.skipIf(!enabled)("admin config history contract", () => {
         body: {
           name: unique("hist-p"),
           type: "o",
-          adapter: "openai",
-          base_url: "u",
+          endpoints: [
+            {
+              id: "openai",
+              adapter: "openai",
+              base_url: "http://localhost:9999",
+            },
+          ],
           api_key_ref: "plain://k",
         },
       }),
@@ -157,8 +162,13 @@ describe.skipIf(!enabled)("admin config history contract", () => {
           {
             name: unique("prev-p"),
             type: "o",
-            adapter: "openai",
-            base_url: "u",
+            endpoints: [
+              {
+                id: "openai",
+                adapter: "openai",
+                base_url: "http://localhost:9999",
+              },
+            ],
             api_key_ref: "plain://k",
           },
         ],

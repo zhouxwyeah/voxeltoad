@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
-import { Button } from "@/components/ui";
+import { Button, Card, DetailField } from "@/components/ui";
 import { TraceCategories } from "@/components/trace/trace-categories";
 
 export type TraceDetail = {
@@ -11,6 +11,8 @@ export type TraceDetail = {
   client_request_id?: string;
   session_id?: string;
   tenant?: string;
+  application_id?: number | null;
+  environment?: string;
   provider?: string;
   model_requested?: string;
   stream?: boolean;
@@ -100,6 +102,7 @@ export function TraceDetailClient({
         </div>
       </div>
 
+      {current && <TraceIdentity detail={current} />}
       {!current ? (
         <p className="text-sm text-muted-foreground">{t("detail.notFound")}</p>
       ) : view === "messages" ? (
@@ -109,6 +112,14 @@ export function TraceDetailClient({
       )}
     </>
   );
+}
+
+export function TraceIdentity({ detail }: { detail: TraceDetail }) {
+  const ti = useTranslations("trace.identity");
+  return <Card className="mb-3 grid grid-cols-2 gap-x-6 gap-y-4 p-4">
+    <DetailField label={ti("application")}>{detail.application_id ?? ti("unattributed")}</DetailField>
+    <DetailField label={ti("environment")}>{detail.environment || ti("unattributed")}</DetailField>
+  </Card>;
 }
 
 function RawView({

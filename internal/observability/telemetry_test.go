@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -41,6 +42,58 @@ func newTestMetrics(t *testing.T) *sdkmetric.ManualReader {
 		initInstruments()
 	})
 	return reader
+}
+
+func TestRecordTelemetry_AttributionIsSpanOnly(t *testing.T) {
+	sr := newTestTracing(t)
+	reader := newTestMetrics(t)
+	id := int64(901)
+	for _, appID := range []*int64{&id, nil} {
+		ctx, span := otel.Tracer("test").Start(context.Background(), "attribution")
+		RecordTelemetry(ctx, RequestTelemetry{
+			Tenant: "acme", Provider: "openai", ModelRequested: "chat", ApplicationID: appID, Environment: "prod",
+			PromptTokens: 10, CompletionTokens: 5, TTFT: time.Millisecond, Duration: time.Second,
+			CacheHit: true, ErrorType: "upstream_error",
+		})
+		span.End()
+	}
+	for i, span := range sr.Ended() {
+		attrs := attribute.NewSet(span.Attributes()...)
+		value, found := attrs.Value(attribute.Key(AttrApplicationID))
+		if found != (i == 0) || (found && value.AsInt64() != id) {
+			t.Fatalf("span application = %v, found=%v", value, found)
+		}
+		value, _ = attrs.Value(attribute.Key(AttrEnvironment))
+		if value.AsString() != "prod" {
+			t.Fatalf("span environment = %v", value)
+		}
+	}
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	assertNoAttribution := func(attrs attribute.Set) {
+		t.Helper()
+		for _, key := range []string{AttrApplicationID, AttrEnvironment, "application_id", "environment"} {
+			if attrs.HasValue(attribute.Key(key)) {
+				t.Fatalf("metric contains attribution label %s", key)
+			}
+		}
+	}
+	for _, scope := range rm.ScopeMetrics {
+		for _, metric := range scope.Metrics {
+			switch data := metric.Data.(type) {
+			case metricdata.Sum[int64]:
+				for _, point := range data.DataPoints {
+					assertNoAttribution(point.Attributes)
+				}
+			case metricdata.Histogram[float64]:
+				for _, point := range data.DataPoints {
+					assertNoAttribution(point.Attributes)
+				}
+			}
+		}
+	}
 }
 
 func TestRecordTelemetry_SetsSpanAttributes(t *testing.T) {

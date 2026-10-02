@@ -28,6 +28,9 @@ func NewRequestLogQueryRepo(db *DB, tenant string) *RequestLogQueryRepo {
 // search UI (P1); the bound tenant scope (NewRequestLogQueryRepo) still applies
 // structurally — a tenant-admin cannot widen its view via these fields.
 type RequestLogFilter struct {
+	ApplicationID     *int64
+	Environment       string
+	Unattributed      bool
 	Provider          string
 	ModelRequested    string
 	ErrorType         string
@@ -55,6 +58,8 @@ type RequestLogRow struct {
 	Tenant             string    `json:"tenant"`
 	GroupName          string    `json:"group_name"`
 	APIKeyID           string    `json:"api_key_id"`
+	ApplicationID      *int64    `json:"application_id"`
+	Environment        string    `json:"environment"`
 	Provider           string    `json:"provider"`
 	ModelRequested     string    `json:"model_requested"`
 	ModelResolved      string    `json:"model_resolved"`
@@ -93,6 +98,17 @@ func (r *RequestLogQueryRepo) buildWhere(f RequestLogFilter) (where []string, ar
 	if r.tenant != "" {
 		where = append(where, "tenant = ?")
 		args = append(args, r.tenant)
+	}
+	if f.ApplicationID != nil {
+		where = append(where, "application_id = ?")
+		args = append(args, *f.ApplicationID)
+	}
+	if f.Unattributed {
+		where = append(where, "application_id IS NULL")
+	}
+	if f.Environment != "" {
+		where = append(where, "environment = ?")
+		args = append(args, f.Environment)
 	}
 	if f.Provider != "" {
 		where = append(where, "provider = ?")
@@ -194,7 +210,7 @@ func (r *RequestLogQueryRepo) List(ctx context.Context, f RequestLogFilter, curs
 
 	// Fetch limit+1 to detect whether another page exists.
 	args = append(args, limit+1)
-	q := `SELECT id, tenant, group_name, api_key_id, provider,
+	q := `SELECT id, tenant, group_name, api_key_id, application_id, environment, provider,
 	             model_requested, model_resolved, stream,
 	             prompt_tokens, completion_tokens, total_tokens,
 	             ttft_ms, duration_ms, error_type, blocked_by, fallback,
@@ -247,7 +263,7 @@ func (r *RequestLogQueryRepo) ListPage(ctx context.Context, f RequestLogFilter, 
 
 	offset := (page - 1) * pageSize
 	pageArgs := append(args, pageSize, offset)
-	q := `SELECT id, tenant, group_name, api_key_id, provider,
+	q := `SELECT id, tenant, group_name, api_key_id, application_id, environment, provider,
 	             model_requested, model_resolved, stream,
 	             prompt_tokens, completion_tokens, total_tokens,
 	             ttft_ms, duration_ms, error_type, blocked_by, fallback,
@@ -287,7 +303,7 @@ func (r *RequestLogQueryRepo) ListBySession(ctx context.Context, sessionID strin
 	whereSQL := strings.Join(where, " AND ")
 	args = append(args, limit)
 
-	q := `SELECT id, tenant, group_name, api_key_id, provider,
+	q := `SELECT id, tenant, group_name, api_key_id, application_id, environment, provider,
 	             model_requested, model_resolved, stream,
 	             prompt_tokens, completion_tokens, total_tokens,
 	             ttft_ms, duration_ms, error_type, blocked_by, fallback,
@@ -312,21 +328,24 @@ func (r *RequestLogQueryRepo) ListBySession(ctx context.Context, sessionID strin
 // SessionSummary is one row of the session-list aggregation: per-session
 // totals over request_logs (tokens, duration, request count) plus the latest
 // detected agent type. The Cost field is filled separately from usage_records
-// by the handler (it lives in a different table) and is 0 when no usage rows
-// matched. Drives the trace UI's session-list view.
+// by the handler (it lives in a different table), is 0 when no usage rows
+// matched, and is nil for mixed currencies (see CostsByCurrency). Drives the
+// trace UI's session-list view.
 type SessionSummary struct {
-	SessionID        string    `json:"session_id"`
-	AgentType        string    `json:"agent_type"`
-	UserAgent        string    `json:"user_agent"`
-	RequestCount     int       `json:"request_count"`
-	PromptTokens     int       `json:"prompt_tokens"`
-	CompletionTokens int       `json:"completion_tokens"`
-	TotalTokens      int       `json:"total_tokens"`
-	DurationMs       int       `gorm:"column:duration_ms" json:"duration_ms"`
-	Cost             int64     `json:"cost"` // micro-units, merged from usage_records
-	StartedAt        time.Time `json:"started_at"`
-	LastSeen         time.Time `json:"last_seen"`
-	HasErrors        bool      `json:"has_errors"`
+	SessionID        string         `json:"session_id"`
+	AgentType        string         `json:"agent_type"`
+	UserAgent        string         `json:"user_agent"`
+	RequestCount     int            `json:"request_count"`
+	PromptTokens     int            `json:"prompt_tokens"`
+	CompletionTokens int            `json:"completion_tokens"`
+	TotalTokens      int            `json:"total_tokens"`
+	DurationMs       int            `gorm:"column:duration_ms" json:"duration_ms"`
+	Cost             *int64         `json:"cost"` // nil for mixed currencies
+	Currency         string         `json:"currency"`
+	CostsByCurrency  []CurrencyCost `gorm:"-" json:"costs_by_currency"`
+	StartedAt        time.Time      `json:"started_at"`
+	LastSeen         time.Time      `json:"last_seen"`
+	HasErrors        bool           `json:"has_errors"`
 }
 
 // SessionListFilter narrows a session-list aggregation. Empty fields are

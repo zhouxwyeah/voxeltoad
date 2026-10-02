@@ -16,6 +16,7 @@ import (
 
 	"voxeltoad/internal/apperr"
 	"voxeltoad/internal/authz"
+	"voxeltoad/internal/billing"
 	"voxeltoad/internal/operator"
 	"voxeltoad/internal/store"
 )
@@ -157,8 +158,25 @@ func (a *rbac) requireTenantAdmin() gin.HandlerFunc {
 		}
 		// Under Phase-2: the operator must hold at least one tenant-scoped or
 		// both-scoped permission (not just be any operator with a tenant_id).
-		if op.Permissions == nil || !op.Permissions[string(authz.PermAPIKeyRead)] {
-			appErr(c, apperr.TenantAdminRequired)
+		for _, permission := range []authz.Permission{
+			authz.PermAPIKeyRead, authz.PermAPIKeyWrite,
+			authz.PermGroupRead, authz.PermGroupWrite,
+			authz.PermApplicationRead, authz.PermApplicationWrite,
+		} {
+			if op.Permissions[string(permission)] {
+				c.Next()
+				return
+			}
+		}
+		appErr(c, apperr.TenantAdminRequired)
+	}
+}
+
+func (a *rbac) requirePermission(permission authz.Permission) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		op := operatorFrom(c)
+		if !op.Permissions[string(permission)] && !op.Permissions[string(authz.Wildcard)] {
+			appErr(c, apperr.PermissionDenied)
 			return
 		}
 		c.Next()
@@ -192,12 +210,18 @@ func (a *rbac) auditMutation(resourceType string, idFrom func(c *gin.Context) st
 		action := actionFor(c.Request.Method)
 		op := operatorFrom(c)
 		resourceID := idFrom(c)
+		auditTenant := a.affectedTenant(c.Request.Context(), resourceType, resourceID, op)
+		if tenant, ok := c.Get("emg.audit_tenant"); ok {
+			if name, ok := tenant.(string); ok && name != "" {
+				auditTenant = &name
+			}
+		}
 		_ = a.audit.Record(c.Request.Context(), store.AuditEntry{
 			OperatorID:   &op.ID,
 			Action:       action,
 			ResourceType: resourceType,
 			ResourceID:   resourceID,
-			Tenant:       a.affectedTenant(c.Request.Context(), resourceType, resourceID, op),
+			Tenant:       auditTenant,
 			After:        after,
 		})
 	}
@@ -220,7 +244,7 @@ func (a *rbac) affectedTenant(ctx context.Context, resourceType, resourceID stri
 		}
 		name := resourceID
 		return &name
-	case "api_key", "group":
+	case "api_key", "group", "application":
 		// These endpoints are tenant-admin scoped; the affected tenant is the
 		// operator's own tenant.
 		if op.TenantID == nil {
@@ -268,11 +292,11 @@ func tenantFromScope(scope string) string {
 	case strings.HasPrefix(scope, "tenant:"):
 		return strings.TrimPrefix(scope, "tenant:")
 	case strings.HasPrefix(scope, "group:"):
-		rest := strings.TrimPrefix(scope, "group:")
-		if i := strings.IndexByte(rest, '/'); i >= 0 {
-			return rest[:i]
+		tenant, _, err := billing.ParseGroupScope(scope)
+		if err != nil {
+			return ""
 		}
-		return rest
+		return tenant
 	default:
 		return ""
 	}

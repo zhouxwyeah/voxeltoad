@@ -644,6 +644,10 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
+        - name: unbound
+          in: query
+          schema: { type: boolean, default: false }
+          description: Only active legacy keys missing a complete group/application/environment identity.
       responses:
         '200':
           description: API key list (non-secret)
@@ -682,7 +686,11 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     patch:
       tags: [api-keys]
-      summary: Update an API key's allowed_models within the caller's tenant
+      summary: Update allowed models or complete a legacy key's governance identity
+      description: >
+        Requires api_key.write. A legacy key may receive group_id, application_id
+        and environment together exactly once. An already bound identity cannot
+        be changed or removed; issue a new key to move application or environment.
       parameters:
         - { name: key_id, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -701,6 +709,182 @@ paths:
   # Quotas. Balance read (super-admin any scope; tenant-admin own-tenant scope).
   # Top-up is an ATOMIC INCREMENT (ADR-0019), super-admin only, audited.
   # ---------------------------------------------------------------------------
+  /api/v1/budgets:
+    get:
+      tags: [budgets]
+      summary: List recurring budget policies within one tenant
+      description: Requires budget.read. Tenant-scoped operators cannot widen their scope.
+      parameters:
+        - $ref: '#/components/parameters/BudgetTenant'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/BudgetLimit'
+      responses:
+        '200':
+          description: Budget policy page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetPolicyList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [budgets]
+      summary: Create a recurring budget policy
+      description: >
+        Requires global scope and budget.write. Starts accounting at creation;
+        does not reconstruct prior spending from asynchronous usage records.
+        Enforce mode blocks new reservations when exhausted but in-flight actual
+        costs may exceed the limit. No strict total-cost ceiling is promised.
+      parameters:
+        - $ref: '#/components/parameters/BudgetWriteTenant'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BudgetSpec' }
+      responses:
+        '201':
+          description: Created budget policy
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetPolicy' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/budgets/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer, format: int64, minimum: 1 } }
+    get:
+      tags: [budgets]
+      summary: Read a recurring budget policy
+      description: Requires budget.read.
+      parameters:
+        - $ref: '#/components/parameters/BudgetTenant'
+      responses:
+        '200':
+          description: Budget policy
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetPolicy' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [budgets]
+      summary: Change a budget limit or enabled state with optimistic version checking
+      description: >
+        Requires global scope and budget.write. Existing committed and reserved
+        amounts are retained. Scope, currency, timezone and period are immutable;
+        create another policy instead. No account balance can be patched directly.
+      parameters:
+        - $ref: '#/components/parameters/BudgetWriteTenant'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BudgetPatch' }
+      responses:
+        '200':
+          description: Full updated policy
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetPolicy' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/budgets/{id}/accounts:
+    get:
+      tags: [budgets]
+      summary: Read current and historical period accounts for a policy
+      description: Requires budget.read. Accounts are created lazily; an unused policy can have no accounts. Accounts across policy scopes overlap and must not be summed as total spending.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64, minimum: 1 } }
+        - $ref: '#/components/parameters/BudgetTenant'
+      responses:
+        '200':
+          description: Period account list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetAccountList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/budget-events:
+    get:
+      tags: [budgets]
+      summary: Read persistent threshold and reconciliation events
+      description: Requires budget.read. Thresholds are based on committed cost, not reserved amounts, and are deduplicated per account and threshold.
+      parameters:
+        - $ref: '#/components/parameters/BudgetTenant'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/BudgetLimit'
+      responses:
+        '200':
+          description: Budget event page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetEventList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/billing-reservations:
+    get:
+      tags: [budgets]
+      summary: List financial reservations, including unknown outcomes awaiting reconciliation
+      description: Requires budget.read. Unknown amounts retain their reserved occupancy; release_unknown retains unknown cost and does not create zero-cost usage.
+      parameters:
+        - $ref: '#/components/parameters/BudgetTenant'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/BudgetLimit'
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ReservationStatus' }
+      responses:
+        '200':
+          description: Reservation page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingReservationList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/billing-reservations/{id}/resolve:
+    post:
+      tags: [budgets]
+      summary: Reconcile a reservation using evidence and a version check
+      description: >
+        Requires global scope and budget.resolve. Operator identity is derived
+        from the authenticated session, never supplied by the caller. Settlement
+        and its event are atomic. Repeated or stale resolutions return 409.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/BudgetWriteTenant'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReservationResolution' }
+      responses:
+        '200':
+          description: Reconciled reservation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingReservation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
   /api/v1/quotas:
     get:
       tags: [quotas]
@@ -778,6 +962,9 @@ paths:
       tags: [usage]
       summary: List usage records (keyset paginated, time-bounded)
       parameters:
+        - $ref: '#/components/parameters/ApplicationFilter'
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/UnattributedFilter'
         - $ref: '#/components/parameters/From'
         - $ref: '#/components/parameters/To'
         - $ref: '#/components/parameters/Cursor'
@@ -809,14 +996,49 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/UsageList' }
             text/csv:
-              schema: { type: string, description: "CSV with headers: id,tenant,group_name,api_key_id,provider,model,prompt_tokens,completion_tokens,cost,created_at" }
+              schema: { type: string, description: "CSV with headers: id,tenant,group_name,api_key_id,provider,model,prompt_tokens,completion_tokens,cost,created_at,application_id,environment,currency" }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/usage/attribution:
+    get:
+      tags: [usage]
+      summary: Tenant attribution overview for migration tracking
+      description: >
+        Requires usage.read. Global operators must explicitly select an existing tenant;
+        tenant-scoped operators are always bound to their own tenant. Key counts are
+        current non-revoked keys missing any governance identity field, not callable-key
+        counts and not bounded by from/to. Request counts come from request_logs;
+        recorded costs come from usage_records, in the same [from,to) window.
+        Historical missing attribution stays unknown. Asynchronous detail records may
+        lag or be incomplete; these figures are not an authoritative financial ledger.
+      parameters:
+        - name: tenant
+          in: query
+          schema: { type: string }
+          description: Required for global operators; ignored for tenant-scoped operators.
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+      responses:
+        '200':
+          description: Tenant attribution overview; absent time bounds are returned as null.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttributionSummary' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/usage/summary:
     get:
       tags: [usage]
       summary: Aggregate usage (grouped, summed), by currency
+      description: Currency is always part of the aggregate key; amounts in different currencies are never summed together. Empty currency identifies unknown historical currency.
       parameters:
+        - $ref: '#/components/parameters/ApplicationFilter'
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/UnattributedFilter'
+        - $ref: '#/components/parameters/UsageTenant'
+        - { name: provider, in: query, schema: { type: string } }
+        - { name: model, in: query, schema: { type: string } }
         - $ref: '#/components/parameters/From'
         - $ref: '#/components/parameters/To'
         - name: group_by
@@ -824,7 +1046,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [tenant, model, provider, api_key_id, group_name]
+            enum: [tenant, model, provider, api_key_id, group_name, application_id, environment, currency]
           description: Dimension to group aggregates by.
       responses:
         '200':
@@ -839,7 +1061,12 @@ paths:
     get:
       tags: [usage]
       summary: Time-bucketed usage trends (cost/tokens/requests per hour/day/week)
+      description: Separate rows per time bucket and currency; no currency conversion or mixed-currency total.
       parameters:
+        - $ref: '#/components/parameters/ApplicationFilter'
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/UnattributedFilter'
+        - $ref: '#/components/parameters/UsageTenant'
         - $ref: '#/components/parameters/From'
         - $ref: '#/components/parameters/To'
         - name: bucket
@@ -911,6 +1138,9 @@ paths:
       tags: [request-logs]
       summary: List data-plane request-audit entries (offset paginated, time-bounded)
       parameters:
+        - $ref: '#/components/parameters/ApplicationFilter'
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/UnattributedFilter'
         - $ref: '#/components/parameters/From'
         - $ref: '#/components/parameters/To'
         - $ref: '#/components/parameters/Page'
@@ -996,7 +1226,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RequestLogPage' }
             text/csv:
-              schema: { type: string, description: "CSV export with headers: id,tenant,group_name,api_key_id,provider,model_requested,model_resolved,stream,prompt_tokens,completion_tokens,total_tokens,ttft_ms,duration_ms,error_type,blocked_by,fallback,request_id,client_request_id,session_id,trace_id,session_source,agent_type,cache_hit,cache_tier,cache_source,cached_prompt_tokens,upstream_request_id,ingress_protocol,created_at" }
+              schema: { type: string, description: "CSV export with headers: id,tenant,group_name,api_key_id,provider,model_requested,model_resolved,stream,prompt_tokens,completion_tokens,total_tokens,ttft_ms,duration_ms,error_type,blocked_by,fallback,request_id,client_request_id,session_id,trace_id,session_source,agent_type,cache_hit,cache_tier,cache_source,cached_prompt_tokens,upstream_request_id,ingress_protocol,provider_endpoint,created_at,application_id,environment" }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
@@ -1412,6 +1642,82 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
 
   # ---------------------------------------------------------------------------
+  # Tenant-scoped applications (tenant-admin). CRUD + enable/disable toggle
+  # (ADR-0051). Delete is rejected when api_keys reference the application (409).
+  # Writes are audited as resource_type=application.
+  # ---------------------------------------------------------------------------
+  /api/v1/applications:
+    get:
+      tags: [tenancy]
+      summary: List the caller tenant's applications
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Application list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApplicationList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [tenancy]
+      summary: Create an application in the caller's tenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateApplicationRequest' }
+      responses:
+        '201':
+          description: Application created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Application' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/applications/{name}:
+    patch:
+      tags: [tenancy]
+      summary: Enable or disable an application (reversible)
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateApplicationRequest' }
+      responses:
+        '200':
+          description: Application updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Application' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [tenancy]
+      summary: Delete an application (rejected if api_keys reference it — 409)
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: >
+            Refused — api_keys reference this application (via
+            api_keys.application_id FK). Repoint or revoke them first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ---------------------------------------------------------------------------
   # Current operator identity (/me). Available to both roles (super-admin,
   # tenant-admin). Returns role + (for tenant-admin) tenant_name.
   # ---------------------------------------------------------------------------
@@ -1535,6 +1841,42 @@ components:
       description: Opaque operator session token from POST /auth/login.
 
   parameters:
+    BudgetTenant:
+      name: tenant
+      in: query
+      schema: { type: string, minLength: 1 }
+      description: Required for global operators (tenant name). Tenant operators read their own tenant automatically; a different name is rejected, not ignored.
+    BudgetLimit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      description: Page size; values above 200 are capped.
+    BudgetWriteTenant:
+      name: tenant
+      in: query
+      required: true
+      schema: { type: string, minLength: 1 }
+      description: Explicit tenant name for global budget.write or budget.resolve operations.
+    ApplicationFilter:
+      name: application_id
+      in: query
+      schema: { type: integer, format: int64, minimum: 1 }
+      description: Request-time application identity; cannot be combined with unattributed=true.
+    EnvironmentFilter:
+      name: environment
+      in: query
+      schema: { type: string, enum: [dev, staging, prod] }
+      description: Request-time environment snapshot.
+    UnattributedFilter:
+      name: unattributed
+      in: query
+      schema: { type: boolean, default: false }
+      description: Only historical records with application_id IS NULL. Incompatible with application_id.
+    UsageTenant:
+      name: tenant
+      in: query
+      schema: { type: string }
+      description: Global operator tenant filter; tenant operators remain scoped to their own tenant.
     Cursor:
       name: cursor
       in: query
@@ -1622,14 +1964,7 @@ components:
             message: { type: string }
             type:
               type: string
-              description: OpenAI-compatible error type.
-              enum:
-                - invalid_request_error
-                - authentication_error
-                - permission_error
-                - not_found
-                - rate_limit_error
-                - api_error
+              description: Stable management-plane error code from internal/apperr (for example budget_conflict); message is an i18n key.
     ListEnvelope:
       type: object
       description: Uniform list envelope. next_cursor="" means no further pages.
@@ -1712,7 +2047,10 @@ components:
           items: { $ref: '#/components/schemas/ProviderEndpoint' }
         api_key_ref: { type: string, description: 'SHARED credential ref for all endpoints: env://VAR | db://provider/<name> | plain://literal | bare literal. Masked in responses (env://***). See ADR-0031.' }
         api_key: { type: string, description: 'Write-only plaintext upstream key shared by all endpoints. When supplied, encrypted and stored in provider_credentials; api_key_ref is set to db://provider/<name>. Never returned.' }
-        timeouts: { $ref: '#/components/schemas/ProviderTimeouts', description: Provider-level default timeouts; each endpoint may override. }
+        timeouts:
+          allOf:
+            - $ref: '#/components/schemas/ProviderTimeouts'
+          description: Provider-level default timeouts; each endpoint may override.
         weight: { type: integer }
     ProviderEndpoint:
       type: object
@@ -1725,7 +2063,10 @@ components:
         id: { type: string, description: 'Optional endpoint slug. When empty, derived from adapter: openai→"openai", claude→"anthropic". Must be unique within the provider; explicitly required when two endpoints share an adapter. Used as breaker key component and audit provider_endpoint column.' }
         adapter: { type: string, description: 'Protocol adapter from the registry (openai|claude). ADR-0001.' }
         base_url: { type: string }
-        timeouts: { $ref: '#/components/schemas/ProviderTimeouts', description: 'Optional override of the provider-level default. Omitted = inherit.' }
+        timeouts:
+          allOf:
+            - $ref: '#/components/schemas/ProviderTimeouts'
+          description: 'Optional override of the provider-level default. Omitted = inherit.'
     ProviderPatch:
       type: object
       description: >
@@ -1765,7 +2106,7 @@ components:
       properties:
         ok: { type: boolean }
         latency_ms: { type: integer, format: int64 }
-        status: { type: integer, description: Upstream HTTP status, when the upstream answered. }
+        status: { type: integer, description: "Upstream HTTP status, when the upstream answered." }
         error: { type: string, description: Human-readable failure reason (empty on success). }
     ModelUpstream:
       type: object
@@ -1933,6 +2274,28 @@ components:
       properties:
         enabled: { type: boolean }
 
+    # --- Applications (ADR-0051) ---
+    Application:
+      type: object
+      required: [id, name, owner_group_id, owner_group_name, enabled]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        owner_group_id: { type: integer, format: int64 }
+        owner_group_name: { type: string }
+        enabled: { type: boolean }
+    CreateApplicationRequest:
+      type: object
+      required: [name, owner_group]
+      properties:
+        name: { type: string }
+        owner_group: { type: string, description: Name of the owning Group }
+    UpdateApplicationRequest:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+
     # --- Operators ---
     Operator:
       type: object
@@ -2007,19 +2370,26 @@ components:
     # --- API keys ---
     APIKeyInfo:
       type: object
-      required: [key_id, revoked]
+      required: [key_id, revoked, group_id, application_id, environment]
       properties:
         key_id: { type: string }
         revoked: { type: boolean }
+        group_id: { type: integer, format: int64, nullable: true }
+        application_id: { type: integer, format: int64, nullable: true }
+        environment: { type: string, enum: ['', dev, staging, prod], description: Empty only for legacy keys. }
         allowed_models:
           type: array
           items: { type: string }
           description: Models this key is restricted to (empty = all).
     CreateAPIKeyRequest:
       type: object
-      required: [key_id]
+      required: [key_id, group_id, application_id, environment]
+      description: Enterprise keys require a consuming group and an enabled application in the caller's tenant. The application's owner group may differ from the consuming group.
       properties:
-        key_id: { type: string }
+        key_id: { type: string, minLength: 1 }
+        group_id: { type: integer, format: int64, minimum: 1 }
+        application_id: { type: integer, format: int64, minimum: 1 }
+        environment: { type: string, enum: [dev, staging, prod] }
         allowed_models:
           type: array
           items: { type: string }
@@ -2032,12 +2402,176 @@ components:
         api_key: { type: string, description: "Plaintext key — returned exactly once, never retrievable again." }
     UpdateAPIKeyRequest:
       type: object
-      required: [allowed_models]
+      additionalProperties: false
+      description: >
+        Supply allowed_models and/or all three identity fields. The latter is a
+        one-time completion for legacy keys only, never a reassignment or unbind.
+      anyOf:
+        - type: object
+          required: [allowed_models]
+          properties:
+            allowed_models:
+              type: array
+              minItems: 1
+              items: { type: string }
+        - type: object
+          required: [group_id, application_id, environment]
+          properties:
+            group_id: { type: integer, format: int64, minimum: 1 }
+            application_id: { type: integer, format: int64, minimum: 1 }
+            environment: { type: string, enum: [dev, staging, prod] }
       properties:
         allowed_models:
           type: array
           items: { type: string }
-          description: Non-empty list of model aliases to restrict this key to.
+          minItems: 1
+          description: Model aliases to restrict this key to. When supplied for an update the array must be nonempty.
+        group_id: { type: integer, format: int64, minimum: 1 }
+        application_id: { type: integer, format: int64, minimum: 1 }
+        environment: { type: string, enum: [dev, staging, prod] }
+
+    # --- Recurring budgets: all money is integer micro-units in the stated currency. ---
+    BudgetSpec:
+      type: object
+      additionalProperties: false
+      required: [name, scope_kind, period, currency, limit, mode]
+      properties:
+        name: { type: string, minLength: 1 }
+        scope_kind: { type: string, enum: [tenant, group, application, application_env, key] }
+        scope_ref:
+          type: string
+          description: Empty (or omitted) for tenant; positive entity ID encoded as a string for group/application/application_env; key_id for key. All references must belong to the selected tenant.
+        environment:
+          type: string
+          enum: ['', dev, staging, prod]
+          description: Required and nonempty only for application_env; must be empty or omitted for other scopes.
+        period: { type: string, enum: [daily, weekly, monthly] }
+        timezone: { type: string, description: IANA timezone; defaults to UTC if omitted. Local is not accepted. Weeks start on Monday. }
+        currency: { type: string, pattern: '^[a-z]{3}$', description: Lowercase ISO 4217 currency code; no implicit conversion. }
+        limit: { type: integer, format: int64, minimum: 0, description: Period limit in micro-units. Zero in enforce mode rejects even a zero-estimate new reservation. }
+        mode: { type: string, enum: [enforce, soft] }
+        thresholds:
+          type: array
+          uniqueItems: true
+          items: { type: integer, minimum: 1, maximum: 100 }
+          description: Committed spending percentages, not fractions; persisted once per account and threshold.
+    BudgetPolicy:
+      type: object
+      required: [id, tenant_id, name, scope_kind, scope_ref, environment, period, timezone, currency, limit, mode, thresholds, enabled, version, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        tenant_id: { type: integer, format: int64 }
+        name: { type: string }
+        scope_kind: { type: string, enum: [tenant, group, application, application_env, key] }
+        scope_ref: { type: string }
+        environment: { type: string, enum: ['', dev, staging, prod] }
+        period: { type: string, enum: [daily, weekly, monthly] }
+        timezone: { type: string }
+        currency: { type: string }
+        limit: { type: integer, format: int64 }
+        mode: { type: string, enum: [enforce, soft] }
+        thresholds: { type: array, items: { type: integer, minimum: 1, maximum: 100 } }
+        enabled: { type: boolean }
+        version: { type: integer, format: int64, minimum: 1 }
+        created_at: { type: string, format: date-time, description: Policy accounting start; historical usage is not backfilled. }
+    BudgetPatch:
+      type: object
+      additionalProperties: false
+      required: [version]
+      anyOf:
+        - required: [limit]
+        - required: [enabled]
+      properties:
+        version: { type: integer, format: int64, minimum: 1 }
+        limit: { type: integer, format: int64, minimum: 0 }
+        enabled: { type: boolean }
+    BudgetAccount:
+      type: object
+      required: [id, policy_id, period_start, period_end, currency, limit, reserved, committed, released, available]
+      properties:
+        id: { type: integer, format: int64 }
+        policy_id: { type: integer, format: int64 }
+        period_start: { type: string, format: date-time }
+        period_end: { type: string, format: date-time }
+        currency: { type: string }
+        limit: { type: integer, format: int64 }
+        reserved: { type: integer, format: int64, description: Occupancy including unresolved unknown requests. }
+        committed: { type: integer, format: int64, description: Known actual spending; can exceed the limit due to in-flight costs. }
+        released: { type: integer, format: int64 }
+        available: { type: integer, format: int64, description: limit - committed - reserved; can be negative. }
+    BudgetEvent:
+      type: object
+      required: [id, tenant_id, account_id, reservation_id, kind, threshold, amount, operator_id, reason, evidence, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        tenant_id: { type: integer, format: int64 }
+        account_id: { type: integer, format: int64, nullable: true }
+        reservation_id: { type: string }
+        kind: { type: string }
+        threshold: { type: integer }
+        amount: { type: integer, format: int64 }
+        operator_id: { type: integer, format: int64, nullable: true }
+        reason: { type: string }
+        evidence: { type: string }
+        created_at: { type: string, format: date-time }
+    ReservationStatus:
+      type: string
+      enum: [reserved, dispatched, unknown, settled, released, released_unknown]
+    BillingReservation:
+      type: object
+      required: [id, request_id, tenant, group, api_key_id, application_id, environment, currency, estimate, price_snapshot, tenant_id, status, actual, reason, version, created_at, updated_at]
+      properties:
+        id: { type: string, description: Server-generated reservation ID; not a client idempotency key. }
+        request_id: { type: string }
+        tenant: { type: string }
+        group: { type: string }
+        api_key_id: { type: string }
+        application_id: { type: integer, format: int64, nullable: true }
+        environment: { type: string, enum: ['', dev, staging, prod] }
+        currency: { type: string }
+        estimate: { type: integer, format: int64 }
+        price_snapshot: { type: object, additionalProperties: true, description: Frozen dispatch-time pricing configuration. }
+        tenant_id: { type: integer, format: int64 }
+        status: { $ref: '#/components/schemas/ReservationStatus' }
+        actual: { type: integer, format: int64, nullable: true, description: "Null means unknown, not zero." }
+        reason: { type: string }
+        version: { type: integer, format: int64, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ReservationResolution:
+      type: object
+      additionalProperties: false
+      required: [version, action, reason, evidence]
+      properties:
+        version: { type: integer, format: int64, minimum: 1 }
+        action: { type: string, enum: [settle, release, release_unknown] }
+        actual: { type: integer, format: int64, minimum: 0, description: Required for settle; omitted for release and release_unknown. }
+        reason: { type: string, minLength: 1 }
+        evidence: { type: string, minLength: 1, description: Reconciliation evidence or explicit acknowledgement that cost remains unknown. }
+    BudgetPolicyList:
+      type: object
+      required: [data, next_cursor]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/BudgetPolicy' } }
+        next_cursor: { type: string }
+    BudgetAccountList:
+      type: object
+      required: [data, next_cursor]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/BudgetAccount' } }
+        next_cursor: { type: string, enum: [''] }
+    BudgetEventList:
+      type: object
+      required: [data, next_cursor]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/BudgetEvent' } }
+        next_cursor: { type: string }
+    BillingReservationList:
+      type: object
+      required: [data, next_cursor]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/BillingReservation' } }
+        next_cursor: { type: string }
 
     # --- Quotas ---
     QuotaBalance:
@@ -2097,6 +2631,23 @@ components:
         error_count: { type: integer, format: int64 }
 
     # --- Usage ---
+    AttributionSummary:
+      type: object
+      required: [unbound_key_count, request_count, unattributed_request_count, unattributed_request_ratio, recorded_unattributed_costs, from, to]
+      properties:
+        unbound_key_count:
+          type: integer
+          format: int64
+          description: Current non-revoked keys with group_id IS NULL, application_id IS NULL or empty environment. Includes expired keys and disabled tenants; not the number of callable keys.
+        request_count: { type: integer, format: int64, description: All recorded request_logs rows for the tenant in the window. }
+        unattributed_request_count: { type: integer, format: int64, description: Recorded request_logs rows with application_id IS NULL in the window. }
+        unattributed_request_ratio: { type: number, format: double, minimum: 0, maximum: 1, description: Unattributed request count divided by request count; zero when no requests are recorded. }
+        recorded_unattributed_costs:
+          type: array
+          description: Recorded usage_records costs with application_id IS NULL in the window, grouped by currency. Empty currency remains unknown; currencies are never summed together. Empty array means no matching cost records, not a guarantee of zero financial cost.
+          items: { $ref: '#/components/schemas/CurrencyCost' }
+        from: { type: string, format: date-time, nullable: true, description: Inclusive time bound; null when unbounded. }
+        to: { type: string, format: date-time, nullable: true, description: Exclusive time bound; null when unbounded. }
     UsageRecord:
       type: object
       properties:
@@ -2104,17 +2655,21 @@ components:
         tenant: { type: string }
         group_name: { type: string }
         api_key_id: { type: string }
+        application_id: { type: integer, format: int64, nullable: true, description: Immutable request-time application snapshot; null means unattributed. }
+        environment: { type: string, enum: ['', dev, staging, prod], description: Immutable request-time environment snapshot. }
         provider: { type: string }
         model: { type: string }
         prompt_tokens: { type: integer }
         completion_tokens: { type: integer }
         cost: { type: integer, format: int64, description: Micro-units. }
+        currency: { type: string, description: Request-time currency; empty means unknown historical currency and must not be inferred from current prices. }
         created_at: { type: string, format: date-time }
     UsageSummaryRow:
       type: object
-      description: One aggregate bucket. group_key is the value of the group_by dimension.
+      description: One aggregate bucket. group_key is the group_by dimension value (empty for unattributed application); currency is always an additional grouping dimension.
       properties:
         group_key: { type: string }
+        currency: { type: string, description: Empty for unknown historical currency. }
         prompt_tokens: { type: integer, format: int64 }
         completion_tokens: { type: integer, format: int64 }
         cost: { type: integer, format: int64, description: Summed micro-units. }
@@ -2145,6 +2700,8 @@ components:
         tenant: { type: string }
         group_name: { type: string }
         api_key_id: { type: string }
+        application_id: { type: integer, format: int64, nullable: true, description: Immutable request-time application snapshot; null means unattributed. }
+        environment: { type: string, enum: ['', dev, staging, prod], description: Immutable request-time environment snapshot. }
         provider: { type: string }
         model_requested: { type: string }
         model_resolved: { type: string, description: Upstream model name actually resolved to (ADR-0002). }
@@ -2204,6 +2761,12 @@ components:
         - type: object
           properties:
             data: { type: array, items: { $ref: '#/components/schemas/Group' } }
+    ApplicationList:
+      allOf:
+        - $ref: '#/components/schemas/ListEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/Application' } }
     OperatorList:
       allOf:
         - $ref: '#/components/schemas/ListEnvelope'
@@ -2211,11 +2774,11 @@ components:
           properties:
             data: { type: array, items: { $ref: '#/components/schemas/Operator' } }
     APIKeyList:
-      allOf:
-        - $ref: '#/components/schemas/ListEnvelope'
-        - type: object
-          properties:
-            data: { type: array, items: { $ref: '#/components/schemas/APIKeyInfo' } }
+      type: object
+      required: [data, next_cursor]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/APIKeyInfo' } }
+        next_cursor: { type: string }
     UsageList:
       allOf:
         - $ref: '#/components/schemas/ListEnvelope'
@@ -2230,8 +2793,9 @@ components:
             data: { type: array, items: { $ref: '#/components/schemas/UsageSummaryRow' } }
     UsageBucket:
       type: object
-      description: One time-bucketed aggregate for the timeseries endpoint.
+      description: One time-and-currency bucket for the timeseries endpoint.
       properties:
+        currency: { type: string, description: Empty for unknown historical currency. }
         bucket_start: { type: string, format: date-time }
         prompt_tokens: { type: integer, format: int64 }
         completion_tokens: { type: integer, format: int64 }
@@ -2255,14 +2819,22 @@ components:
         - type: object
           properties:
             data: { type: array, items: { $ref: '#/components/schemas/RequestLogEntry' } }
+    CurrencyCost:
+      type: object
+      required: [currency, cost]
+      properties:
+        currency: { type: string, description: Empty means unknown historical currency. }
+        cost: { type: integer, format: int64, description: Micro-units in this currency only. }
     SessionCostSummary:
       type: object
-      description: Aggregated cost/tokens for all usage_records rows in a session.
+      description: Aggregated tokens and separate currency totals for all usage_records rows in a session.
       properties:
         session_id: { type: string }
         prompt_tokens: { type: integer, format: int64 }
         completion_tokens: { type: integer, format: int64 }
-        cost: { type: integer, format: int64, description: int64 micro-units (ADR-0013). }
+        cost: { type: integer, format: int64, nullable: true, description: Null when currencies are mixed; use costs_by_currency. }
+        currency: { type: string, description: Empty for mixed currencies or unknown historical currency. }
+        costs_by_currency: { type: array, items: { $ref: '#/components/schemas/CurrencyCost' } }
         request_count: { type: integer, format: int64 }
     SessionTrace:
       type: object
@@ -2292,7 +2864,9 @@ components:
         completion_tokens: { type: integer, description: Sum of completion tokens across the session. }
         total_tokens: { type: integer, description: Sum of total tokens across the session. }
         duration_ms: { type: integer, description: Sum of per-request durations in ms. }
-        cost: { type: integer, format: int64, description: Total cost in micro-units (from usage_records). }
+        cost: { type: integer, format: int64, nullable: true, description: Total cost in micro-units for one currency; null for mixed currencies. }
+        currency: { type: string, description: Empty for mixed currencies or unknown historical currency. }
+        costs_by_currency: { type: array, items: { $ref: '#/components/schemas/CurrencyCost' } }
         started_at: { type: string, format: date-time, description: First request timestamp. }
         last_seen: { type: string, format: date-time, description: Most recent request timestamp. }
         has_errors: { type: boolean, description: Whether any request in the session errored. }
@@ -2313,6 +2887,8 @@ components:
         session_id: { type: string }
         trace_id: { type: string }
         tenant: { type: string }
+        application_id: { type: integer, format: int64, nullable: true, description: Immutable request-time application snapshot. }
+        environment: { type: string, enum: ['', dev, staging, prod], description: Immutable request-time environment snapshot. }
         provider: { type: string }
         model_requested: { type: string }
         stream: { type: boolean }

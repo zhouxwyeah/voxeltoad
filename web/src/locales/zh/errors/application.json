@@ -1,0 +1,6 @@
+{
+  "applicationNotFound": "应用不存在",
+  "applicationReferenced": "应用仍被 API Key 引用",
+  "applicationNameRequired": "应用名称为必填项",
+  "applicationOwnerRequired": "所属团队为必填项"
+}

@@ -80,9 +80,11 @@ and refined through `grill-with-docs` sessions.
   ADR-0031.)
 - **Usage** — token accounting (prompt/completion/total) taken from the upstream
   response, never from a local estimate. `internal/adapter.Usage`.
-- **Pricing** — per-million-token rates used to compute cost from Usage. Granularity
-  (alias vs per-provider) is deferred to step 6. (See ADR-0012; supersedes
-  ADR-0004.)
+- **Pricing** — per-upstream, per-million-token rates and cache multipliers used
+  to compute cost from upstream Usage. Enterprise requests freeze the dispatcher
+  candidate-price snapshot at reservation and use that same version at settlement.
+  An explicit zero price is distinct from missing pricing; currencies must agree
+  across reachable candidates and applicable funds. (See ADR-0012/0052.)
 
 ## Tenancy & client authentication
 
@@ -100,6 +102,27 @@ and refined through `grill-with-docs` sessions.
 - **Key cache** — the data plane's local, short-TTL cache of key records;
   authentication is cache-first with a fallback lookup on miss, so keys are
   real-time without bloating the config snapshot. (See ADR-0006.)
+- **Application** — a long-lived, tenant-scoped business system or product that
+  consumes AI. The stable workload identity for usage attribution and periodic
+  budgets (routing/model-access policy remain future work); distinct from a Group (organizational
+  consumer/owner), APIKey (credential), Agent Run (transient execution), and
+  Workload Profile (per-request routing context). Has one owning Group but may be
+  consumed by keys from multiple Groups in the same Tenant. (See ADR-0051.)
+- **Application binding** — the trusted association from an APIKey (or a future
+  server-resolved workload credential) to at most one Application. The data plane
+  derives `application_id` from the authenticated credential; a caller-supplied
+  header cannot establish this governance identity. New enterprise keys require
+  same-tenant consuming Group + Application + dev/staging/prod. Legacy keys may
+  complete missing identity once without changing nonempty fields; rebinding
+  requires a new key. Desktop nil Application remains valid. (See ADR-0051.)
+- **Unbound / unattributed** — `unbound=true` selects legacy keys with incomplete
+  governance identity for repair (non-revoked, not necessarily unexpired or still
+  callable); `unattributed=true` filters historical business ledgers missing
+  application attribution. Key counts are not request percentages.
+  Historical snapshots are never guessed from a later key binding.
+- **Application environment** — a controlled credential attribute such as `dev`,
+  `staging`, or `prod`, snapshotted into request/usage records. It does not create
+  a separate Application or an `ApplicationDeployment` entity. (See ADR-0051.)
 - **Internal trust secret** — the shared secret authenticating the data
   plane ↔ management plane channel (e.g. the config snapshot request), carried
   in bootstrap config and resolved via `config.ResolveSecret`. Distinct from
@@ -135,11 +158,28 @@ and refined through `grill-with-docs` sessions.
   injects when a request omits `max_tokens` (required by Claude). (See ADR-0009.)
 - **Failover** — trying a backup provider on a retryable upstream failure
   (connection/timeout/5xx only; never 4xx). Streaming fails over only before the
-  first byte is sent to the client; after that, errors propagate. Failed
-  attempts are not billed. (See ADR-0011.)
+  first byte is sent to the client; after that, errors propagate. Failed attempts
+  with uncertain charges keep the reservation unknown; a successful fallback does
+  not prove the earlier attempt was free. (See ADR-0011/0052 implementation.)
 - **Routing strategy** — how a Route picks among candidate providers: `priority`
   (first healthy), `weighted` (per-route/provider weight), `round_robin`
   (per-instance cursor in P0). (See ADR-0011.)
+- **RoutingPolicy** — a versioned Application policy that first filters candidates
+  by hard eligibility constraints, then applies an approved Quality Tier and an
+  ordered objective (`cost_first`, `latency_first`, or `quality_first`) before the
+  existing health/failover execution path. (See ADR-0053.)
+- **Quality Tier** — an operator-approved candidate class such as `economy`,
+  `balanced`, or `premium`. It is backed initially by catalog metadata and offline
+  evaluation, not inferred from traffic, price, or latency. (See ADR-0053.)
+- **RoutingDecision** — an immutable, metadata-only ledger record explaining a
+  request's policy version, candidate set, rejection reasons, signal snapshot,
+  selection, budget degradation, attempts, and final outcome. Stored separately
+  from `request_logs` and joined through the gateway `request_id`.
+  (See ADR-0053.)
+- **Workload Profile** — bounded per-request routing context such as modality,
+  estimated token shape, latency objective, quality floor, and capability needs.
+  It is not an identity and does not contain raw prompt/completion bodies in the
+  RoutingDecision ledger. (See ADR-0051, ADR-0053.)
 - **Circuit / health state** — per-provider healthy/unhealthy state that
   failover consults to skip bad providers; in-memory and per-instance in P0
   (like rate limiting). (See ADR-0011.)
@@ -171,21 +211,60 @@ and refined through `grill-with-docs` sessions.
   completion/1_000_000×CompletionPer1M, using the actually-hit provider's
   ModelUpstream.Pricing (aligns with llm.provider; failover bills the serving
   provider). (See ADR-0012.)
-- **Quota** — a *balance* (total spend until reset/top-up, NOT self-recovering),
-  distinct from the TPM *rate* limit. Denominated in cost (money), checked
-  allow-then-debit at ingress (reject only if already ≤ 0; debit real cost after
-  the response). (See ADR-0012.)
-- **Quota store** — the shared, strongly-consistent backend (PG row update /
-  Redis atomic) holding balances. Required from P0 because quota is money;
-  multi-instance overspend is not acceptable — diverges from the in-memory
-  default baseline. (See ADR-0012.)
-- **Usage record** — an audit/reconciliation row (`usage_records`) written
-  async/batched to PG; separate from the fast quota debit. A crash may lose a
-  not-yet-flushed record (under-bill) but must not corrupt the balance.
-  (See ADR-0012.)
-- **Partial-stream billing** — when a stream drops before the trailing usage
-  chunk, bill the usage actually received (best-effort, never zero when content
-  was delivered, never fabricated). (See ADR-0012.)
+- **Quota** — the retained non-recurring balance in `quotas`, not migrated into
+  BudgetAccount in E1. Top-ups cannot change an existing scope's currency. Group
+  scopes use `group:<tenant>/<group>` with each name path-escaped, not an ambiguous
+  unqualified group name. Distinct from periodic budgets, rate limits, and Token
+  Allowance. (See ADR-0012/0052 implementation clarification.)
+- **Period spend control** — E1's cost control: atomically reserve an output-cost
+  estimate, settle actual cost, and reject new requests after exhaustion. In-flight
+  actual cost can exceed the reservation and limit; this is not a strict hard
+  spending cap and has no promised fixed maximum overage.
+- **BudgetPolicy** — current cost configuration: same-tenant scope
+  (tenant/consuming Group/Application/Application+environment/Key), daily/weekly/
+  monthly period, IANA timezone (UTC default, Monday week start), currency, limit,
+  `soft`/`enforce`, thresholds, enabled state, and version. Only limit/enabled are
+  mutable; no hard delete. Token Allowance, automatic degradation, and external
+  notifications are not implemented in E1. (See ADR-0052.)
+- **BudgetAccount** — one policy period with limit, reserved, committed, released,
+  and start/end. `available = limit - committed - reserved` is derived, not stored.
+  Enforce accounts reject insufficient reservations; soft accounts record the same
+  spend and events without blocking. Accounts are created lazily; late settlement
+  always uses the originally reserved period, not the current period.
+- **Billing reservation** — a durable financial operation identified by a fresh
+  server-generated ID, never by client_request_id. Freezes authenticated identity,
+  currency, estimate, candidate-price snapshot and participating quota/account
+  targets. Gateway request_id remains a correlation field. The AccountingStore
+  coordinator reserves and settles legacy balances plus periodic accounts together.
+- **Unknown charge** — an upstream call may have incurred costs but final Usage or
+  charge cannot be confirmed. The reservation remains held; stale scanning only
+  marks it for review, never refunds it. `released_unknown` is an explicit risk
+  release, not a zero-cost fact; later known settlement applies only the required
+  delta, without a second refund. Manual resolution requires global budget.resolve,
+  version, operator, reason, and evidence.
+- **Budget event** — durable threshold/overspend/unknown or manual-resolution
+  evidence in `budget_events`; thresholds use actual committed spend and deduplicate
+  by account and threshold. It is not an external notification delivery system.
+- **Token Allowance** — a planned token-total boundary independent from cost and
+  TPM. Not part of current E1; reliable upstream Usage, not a fabricated local
+  count, would be its accounting fact. (See ADR-0052.)
+- **ResourceUsage** — an accounting envelope whose source is explicitly either
+  `provider_billed` or `self_hosted_compute`. Provider token/cost facts must not be
+  misrepresented as GPU use; self-hosted allocation requires explicit resource
+  measurements and an internal pricing rule. (See ADR-0052.)
+- **Quota store** — the shared, strongly consistent PG balance backend. Enterprise
+  AccountingRepo coordinates it with periodic accounts in one transaction;
+  concurrent reservation must be atomic, while actual in-flight overage is allowed.
+  No Redis accounting implementation is included in E1. (See ADR-0012/0052.)
+- **Usage record** — an async/batched business report row (`usage_records`) for
+  known Usage/cost, including app/env/currency snapshots. A crash may lose an
+  unflushed row; reservation/account is the financial authority, not this report.
+  Historical empty currency means unknown and must not be backfilled from current
+  prices. (See ADR-0012/0052.)
+- **Partial-stream billing** — settle only a confirmed usage/charge using frozen
+  prices. A missing final Usage or uncertain failed attempt keeps the reservation
+  unknown, without fabricated tokens or automatic zero-cost refund. (See ADR-0052
+  implementation clarification.)
 - **Completion hook** — the single point (non-streaming: after Forward;
   streaming: when the relay loop ends, including on drop) where TPM debit, quota
   debit, and the usage record are triggered together for consistency. Requires
@@ -211,6 +290,43 @@ and refined through `grill-with-docs` sessions.
 - **session_id** — client-supplied session key extracted from the `X-Voxeltoad-Session` header (or configured `sessionHeaders`). Stored in `request_logs.session_id` with a `(session_id, created_at)` index, enabling per-session request chain queries via `GET /api/v1/request-logs?session_id=X`.
 - **trace_id** — W3C trace id parsed from the `traceparent` header (the `00-<trace_id>-<span_id>-<trace_flags>` format). Stored in `request_logs.trace_id` and `trace_payloads.trace_id` (both `DEFAULT ''`). The gateway does NOT emit a synthetic `llm.trace_id` OTel span attribute — trace_id is a W3C standard carried by the OTel trace context itself, so a separate attribute would be redundant. Empty when the client sent no `traceparent` or it was malformed. Unlike `request_id`, trace_id is structurally unique per W3C spec, but the gateway does not enforce uniqueness at the DB level (it relies on the W3C contract). Captured alongside `X-Trace-Id` as a secondary trace-correlation header; see ADR-0040 for the entry-id resolution chain.
 - **request_logs** — the data-plane per-request audit ledger. One row per LLM request (success or rejection), written asynchronously fail-open. Read API: `GET /api/v1/request-logs` (offset paginated, CSV exportable). Distinct from `usage_records` (billing) and `audit_logs` (management-plane mutations). (See ADR-0021.)
+
+## Enterprise governance, data assets & harness
+
+- **FeedbackEvent** — an immutable, tenant/application-scoped metadata record
+  associating a gateway request or session with an outcome signal (metric, value,
+  source, trust level, evaluator version, evidence ref). Does not copy prompt or
+  completion bodies. The gateway owns the ledger and lineage; external evaluators
+  own judge/experiment/training execution. (See ADR-0054.)
+- **Dataset** — a named, tenant-scoped governed collection of examples with an
+  owning Application or Group, data classification, and retention policy.
+  (See ADR-0055.)
+- **DatasetVersion** — an immutable snapshot of a dataset's item manifest. Edits
+  produce a new version; versions are never mutated in place. (See ADR-0055.)
+- **DatasetItem** — one example within a version, carrying provenance references
+  to `request_logs`/`trace_payloads`/`FeedbackEvent` and a `PayloadRef` to stored
+  content. A promoted item is a governed copy with its own retention independent
+  of the trace ledger. (See ADR-0055.)
+- **Payload Promotion** — the management-plane operation that copies a trace
+  payload into a DatasetItem. Requires tenant opt-in, scoped permission, redaction
+  check, and mutation/read/delete audit. (See ADR-0055.)
+- **Agent Label** — an Application-scoped, operator-controlled metadata attribute
+  for attribution and soft policy. Distinct from the User-Agent-inferred
+  `agent_type` observation tag. Not an independent authorization principal in this
+  phase. (See ADR-0051, ADR-0056.)
+- **Run Summary** — a read-only aggregation of gateway events sharing a
+  client-supplied session identifier, providing per-session cost, token, and error
+  visibility. Because the session identifier is forgeable, Run Summary is a
+  statistical projection, not a trusted safety boundary. (See ADR-0056.)
+- **ToolCallAudit** — a metadata-only audit event recording tool-call visibility
+  (tool name, call id, outcome class) from forwarded requests/responses. The
+  gateway does not execute tools or host MCP/A2A runtime. (See ADR-0056.)
+- **Kill Switch** — stop at a trusted governance boundary: Tenant disablement,
+  Application disablement (all bound keys), or APIKey revocation. Takes effect at
+  authentication within key-cache TTL (currently one minute by default), not an
+  instant cross-instance invalidation or truncation of an in-flight stream.
+  Session-level stop is not a safety control because session IDs are forgeable.
+  (See ADR-0051/0056.)
 
 ## Engineering environment
 

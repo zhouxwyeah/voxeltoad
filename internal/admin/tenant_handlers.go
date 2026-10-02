@@ -4,12 +4,16 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"voxeltoad/internal/apperr"
+	"voxeltoad/internal/authz"
 	"voxeltoad/internal/store"
 )
 
@@ -85,11 +89,14 @@ func mountTenantAdmin(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 // so a tenant-admin cannot touch another tenant's keys.
 func mountTenantScoped(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 	keys := g.Group("/api-keys", auth.auditMutation("api_key", resourceIDFrom))
-	keys.POST("", func(c *gin.Context) {
+	keys.POST("", auth.requirePermission(authz.PermAPIKeyWrite), func(c *gin.Context) {
 		op := operatorFrom(c)
 		var body struct {
 			KeyID         string   `json:"key_id"`
 			AllowedModels []string `json:"allowed_models"`
+			GroupID       *int64   `json:"group_id"`
+			ApplicationID *int64   `json:"application_id"`
+			Environment   string   `json:"environment"`
 		}
 		if !bind(c, &body) {
 			return
@@ -125,9 +132,14 @@ func mountTenantScoped(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 		hash := hex.EncodeToString(sum[:])
 
 		repo := store.NewTenantRepo(db, *op.TenantID)
-		if err := repo.CreateAPIKey(c.Request.Context(), store.APIKeySpec{
+		if err := repo.CreateEnterpriseAPIKey(c.Request.Context(), store.APIKeySpec{
 			KeyID: body.KeyID, Hash: hash, AllowedModels: body.AllowedModels,
+			GroupID: body.GroupID, ApplicationID: body.ApplicationID, Environment: body.Environment,
 		}); err != nil {
+			if errors.Is(err, store.ErrInvalidAPIKeyIdentity) {
+				badRequest(c, err.Error())
+				return
+			}
 			if isConstraintViolation(err) {
 				badRequest(c, "api_key create rejected: "+err.Error())
 				return
@@ -136,19 +148,31 @@ func mountTenantScoped(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 			return
 		}
 		setResourceID(c, body.KeyID)
-		c.JSON(http.StatusCreated, gin.H{"key_id": body.KeyID, "api_key": plaintext})
+		c.JSON(http.StatusCreated, gin.H{
+			"key_id": body.KeyID, "api_key": plaintext,
+			"group_id": body.GroupID, "application_id": body.ApplicationID, "environment": body.Environment,
+		})
 	})
-	keys.GET("", func(c *gin.Context) {
+	keys.GET("", auth.requirePermission(authz.PermAPIKeyRead), func(c *gin.Context) {
 		op := operatorFrom(c)
+		unbound := false
+		if value, present := c.GetQuery("unbound"); present {
+			var err error
+			unbound, err = strconv.ParseBool(value)
+			if err != nil {
+				badRequest(c, "unbound must be a boolean")
+				return
+			}
+		}
 		repo := store.NewTenantRepo(db, *op.TenantID)
-		list, next, err := repo.ListAPIKeys(c.Request.Context(), c.Query("cursor"), parseLimit(c))
+		list, next, err := repo.ListAPIKeysFiltered(c.Request.Context(), c.Query("cursor"), parseLimit(c), unbound)
 		if err != nil {
 			internalErr(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, listEnvelope(list, next))
 	})
-	keys.DELETE("/:key_id", func(c *gin.Context) {
+	keys.DELETE("/:key_id", auth.requirePermission(authz.PermAPIKeyWrite), func(c *gin.Context) {
 		op := operatorFrom(c)
 		repo := store.NewTenantRepo(db, *op.TenantID)
 		revoked, err := repo.RevokeAPIKey(c.Request.Context(), c.Param("key_id"))
@@ -163,23 +187,44 @@ func mountTenantScoped(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 		setResourceID(c, c.Param("key_id"))
 		c.Status(http.StatusNoContent)
 	})
-	// PATCH /api-keys/:key_id updates allowed_models for an existing key (tenant-
-	// admin only, scoped to own tenant). The key must be active (non-revoked).
-	keys.PATCH("/:key_id", func(c *gin.Context) {
+	// Complete a legacy identity and/or edit model access in one transaction.
+	keys.PATCH("/:key_id", auth.requirePermission(authz.PermAPIKeyWrite), func(c *gin.Context) {
 		op := operatorFrom(c)
 		var body struct {
-			AllowedModels []string `json:"allowed_models"`
+			AllowedModels json.RawMessage `json:"allowed_models"`
+			GroupID       json.RawMessage `json:"group_id"`
+			ApplicationID json.RawMessage `json:"application_id"`
+			Environment   json.RawMessage `json:"environment"`
 		}
 		if !bind(c, &body) {
 			return
 		}
-		if len(body.AllowedModels) == 0 {
-			badRequest(c, "allowed_models must be a non-empty array; use all-models (empty) for no restriction")
+		var patch store.APIKeyUpdate
+		if len(body.GroupID) > 0 || len(body.ApplicationID) > 0 || len(body.Environment) > 0 {
+			identity := &store.APIKeyIdentity{}
+			if json.Unmarshal(body.GroupID, &identity.GroupID) != nil ||
+				json.Unmarshal(body.ApplicationID, &identity.ApplicationID) != nil ||
+				json.Unmarshal(body.Environment, &identity.Environment) != nil {
+				badRequest(c, "group_id, application_id and environment must be supplied together")
+				return
+			}
+			patch.Identity = identity
+		}
+		var models []string
+		if len(body.AllowedModels) > 0 {
+			if json.Unmarshal(body.AllowedModels, &models) != nil || len(models) == 0 {
+				badRequest(c, "allowed_models must be a non-empty array")
+				return
+			}
+			patch.AllowedModels = &models
+		}
+		if patch.Identity == nil && patch.AllowedModels == nil {
+			badRequest(c, "allowed_models or a complete governance identity is required")
 			return
 		}
 
 		// Validate each model exists (same check as POST create).
-		for _, m := range body.AllowedModels {
+		for _, m := range models {
 			var exists bool
 			if err := db.WithContext(c.Request.Context()).Raw(
 				`SELECT EXISTS (SELECT 1 FROM models WHERE alias = ?)`, m,
@@ -194,8 +239,12 @@ func mountTenantScoped(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 		}
 
 		repo := store.NewTenantRepo(db, *op.TenantID)
-		ok, err := repo.SetAPIKeyAllowedModels(c.Request.Context(), c.Param("key_id"), body.AllowedModels)
+		ok, err := repo.UpdateAPIKey(c.Request.Context(), c.Param("key_id"), patch)
 		if err != nil {
+			if errors.Is(err, store.ErrInvalidAPIKeyIdentity) || errors.Is(err, store.ErrAPIKeyIdentityImmutable) {
+				badRequest(c, err.Error())
+				return
+			}
 			internalErr(c, err)
 			return
 		}
@@ -210,7 +259,7 @@ func mountTenantScoped(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 	// Groups — tenant-admin scoped, audited as resource_type "group"
 	// (rbac.go:214 already handles the "group" case in affectedTenant).
 	groups := g.Group("/groups", auth.auditMutation("group", resourceIDFrom))
-	groups.POST("", func(c *gin.Context) {
+	groups.POST("", auth.requirePermission(authz.PermGroupWrite), func(c *gin.Context) {
 		op := operatorFrom(c)
 		var body struct {
 			Name string `json:"name"`
@@ -235,7 +284,7 @@ func mountTenantScoped(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 		setResourceID(c, body.Name)
 		c.JSON(http.StatusCreated, gin.H{"id": id, "name": body.Name, "enabled": true})
 	})
-	groups.GET("", func(c *gin.Context) {
+	groups.GET("", auth.requirePermission(authz.PermGroupRead), func(c *gin.Context) {
 		op := operatorFrom(c)
 		repo := store.NewTenantRepo(db, *op.TenantID)
 		list, next, err := repo.ListGroups(c.Request.Context(), c.Query("cursor"), parseLimit(c))
@@ -246,7 +295,7 @@ func mountTenantScoped(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 		c.JSON(http.StatusOK, listEnvelope(list, next))
 	})
 	// PATCH toggles enabled — reversible, mirrors tenant pattern.
-	groups.PATCH("/:name", func(c *gin.Context) {
+	groups.PATCH("/:name", auth.requirePermission(authz.PermGroupWrite), func(c *gin.Context) {
 		op := operatorFrom(c)
 		var body struct {
 			Enabled *bool `json:"enabled"`
@@ -274,7 +323,7 @@ func mountTenantScoped(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 	})
 	// DELETE rejects when api_keys reference the group (409), mirrors the
 	// provider/model delete-with-refs pattern.
-	groups.DELETE("/:name", func(c *gin.Context) {
+	groups.DELETE("/:name", auth.requirePermission(authz.PermGroupWrite), func(c *gin.Context) {
 		op := operatorFrom(c)
 		name := c.Param("name")
 		repo := store.NewTenantRepo(db, *op.TenantID)
@@ -285,11 +334,24 @@ func mountTenantScoped(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 		}
 		if len(refs) > 0 {
 			appErrMsg(c, apperr.GroupReferenced,
-				"api_key(s) "+strings.Join(refs, ", ")+"; revoke or repoint them first")
+				"api_key(s) "+strings.Join(refs, ", ")+" retain this group; disable the group instead")
+			return
+		}
+		apps, err := repo.GroupReferencedByApplications(c.Request.Context(), name)
+		if err != nil {
+			internalErr(c, err)
+			return
+		}
+		if len(apps) > 0 {
+			appErrMsg(c, apperr.GroupReferenced, "application(s) "+strings.Join(apps, ", "))
 			return
 		}
 		ok, err := repo.DeleteGroup(c.Request.Context(), name)
 		if err != nil {
+			if isConstraintViolation(err) {
+				appErr(c, apperr.GroupReferenced)
+				return
+			}
 			internalErr(c, err)
 			return
 		}
@@ -300,6 +362,8 @@ func mountTenantScoped(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 		setResourceID(c, name)
 		c.Status(http.StatusNoContent)
 	})
+
+	mountApplications(g, db, auth)
 }
 
 // newClientKey generates a random client API key (plaintext), prefixed for

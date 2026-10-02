@@ -31,6 +31,7 @@ export function SessionTraceClient({
   loadError: boolean;
 }) {
   const t = useTranslations("session-trace");
+  const tIdentity = useTranslations("request-logs.identity");
 
   if (loadError) {
     return (
@@ -119,6 +120,8 @@ export function SessionTraceClient({
                 <thead>
                   <tr className="border-b border-border bg-muted text-left">
                     <Th>{t("timeline.time")}</Th>
+                    <Th>{tIdentity("application")}</Th>
+                    <Th>{tIdentity("environment")}</Th>
                     <Th>{t("timeline.provider")}</Th>
                     <Th>{t("timeline.model")}</Th>
                     <Th className="text-right">{t("timeline.tokens")}</Th>
@@ -140,6 +143,8 @@ export function SessionTraceClient({
                             ? new Date(r.created_at as string).toLocaleString()
                             : "—"}
                         </Td>
+                        <Td>{String(r.application_id ?? tIdentity("unattributed"))}</Td>
+                        <Td>{String(r.environment || tIdentity("unattributed"))}</Td>
                         <Td>{(r.provider as string) ?? "—"}</Td>
                         <Td>{(r.model_requested as string) ?? "—"}</Td>
                         <Td className="text-right tabular-nums">

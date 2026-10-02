@@ -57,7 +57,7 @@ test("tenant-admin: create API key → see it → revoke → gone", async ({
   const opModal = page.getByRole("dialog", { name: "Create Operator" });
   await opModal.getByLabel("Email").fill(taEmail);
   await opModal.getByLabel("Password").fill("test-password-123");
-  await selectCombo(comboboxFor(opModal, "role"), "Tenant Admin");
+  await selectCombo(comboboxFor(opModal, "_role_select"), "Tenant Admin");
   await selectCombo(comboboxFor(opModal, "tenant_id"), tenantName);
   await opModal.getByRole("button", { name: "Save" }).click();
   await expect(opModal).not.toBeVisible();
@@ -72,6 +72,28 @@ test("tenant-admin: create API key → see it → revoke → gone", async ({
   // Should redirect to /api-keys (tenant-admin's first page).
   await expect(page).toHaveURL(/\/api-keys$/);
 
+  // Dependencies are explicit; an owner group need not be the consumption group.
+  await expect(page.getByRole("link", { name: "Create a consumption group first" })).toBeVisible();
+  const ownerGroup = `e2e-owner-${Date.now()}`;
+  const consumptionGroup = `e2e-consumer-${Date.now()}`;
+  for (const name of [ownerGroup, consumptionGroup]) {
+    await page.goto("/groups");
+    await page.getByRole("button", { name: "Create Group" }).click();
+    const modal = page.getByRole("dialog", { name: "Create Group" });
+    await modal.getByLabel("Name *").fill(name);
+    await modal.getByRole("button", { name: "Save" }).click();
+    await expect(modal).not.toBeVisible();
+  }
+  const applicationName = `e2e-key-app-${Date.now()}`;
+  await page.goto("/applications");
+  await page.getByRole("button", { name: "Create Application" }).click();
+  const appModal = page.getByRole("dialog", { name: "Create Application" });
+  await appModal.getByLabel("Name *").fill(applicationName);
+  await selectCombo(comboboxFor(appModal, "owner_group"), ownerGroup);
+  await appModal.getByRole("button", { name: "Save" }).click();
+  await expect(appModal).not.toBeVisible();
+  await page.goto("/api-keys");
+
   // --- Create an API key ---
   // api_keys.key_id has a global UNIQUE constraint (not per-tenant), so use a
   // unique value to avoid collisions across test runs / tenants.
@@ -79,6 +101,10 @@ test("tenant-admin: create API key → see it → revoke → gone", async ({
   await page.getByRole("button", { name: "Create Key" }).click();
   const createModal = page.getByRole("dialog", { name: "Create API Key" });
   await createModal.getByLabel("Key ID *").fill(keyId);
+  await expect(createModal.getByRole("button", { name: "Create Key" })).toBeDisabled();
+  await selectCombo(comboboxFor(createModal, "group_id"), consumptionGroup);
+  await selectCombo(comboboxFor(createModal, "application_id"), applicationName);
+  await selectCombo(comboboxFor(createModal, "environment"), "prod");
   await createModal.getByRole("button", { name: "Create Key" }).click();
 
   // One-time plaintext reveal modal appears.
@@ -104,10 +130,21 @@ test("tenant-admin: create API key → see it → revoke → gone", async ({
   await expect(keyIdInput).toBeDisabled();
   await expect(keyIdInput).toHaveValue(keyId);
 
+  await expect(editModal.getByText("This identity is fixed.", { exact: false })).toBeVisible();
+  await expect(comboboxFor(editModal, "group_id")).toHaveCount(0);
+  await expect(comboboxFor(editModal, "application_id")).toHaveCount(0);
+  await expect(comboboxFor(editModal, "environment")).toHaveCount(0);
+
   // Cancel closes without changes.
   await editModal.getByRole("button", { name: "Cancel" }).click();
   await expect(editModal).not.toBeVisible();
   await expect(page.getByRole("cell", { name: keyId })).toBeVisible();
+
+  await page.getByRole("link", { name: "Unbound API keys", exact: true }).click();
+  await expect(page).toHaveURL(/unbound=true/);
+  await expect(page.getByRole("cell", { name: keyId })).toHaveCount(0);
+  await page.getByRole("link", { name: "All API keys", exact: true }).click();
+  await expect(page.getByRole("row", { name: new RegExp(keyId) }).getByRole("cell", { name: "prod", exact: true })).toBeVisible();
 
   // --- Revoke the key ---
   const row = page.getByRole("row", { name: new RegExp(keyId) });

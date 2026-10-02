@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"voxeltoad/internal/adapter"
+	"voxeltoad/internal/config"
 )
 
 // Phase identifies when a plugin runs in the request lifecycle.
@@ -33,9 +34,34 @@ type Context struct {
 
 	// Tenant, Group, and APIKeyID identify the caller (populated by auth).
 	// The three-level tenancy is Tenant → Group → APIKey (see ADR-0005).
-	Tenant   string
-	Group    string
-	APIKeyID string
+	Tenant        string
+	Group         string
+	APIKeyID      string
+	ApplicationID *int64
+	Environment   string
+
+	// PricingSnapshot is the immutable configuration used by this request's
+	// dispatcher. Accounting must not read a newer live price during settlement.
+	PricingSnapshot *config.Dynamic
+	ReservationID   string
+	// BillingDone marks the durable settlement as finished; the deferred
+	// finalizer uses it to avoid double-settling after a Post-phase failure.
+	BillingDone bool
+	// ChargePossible records that an upstream attempt was actually made (or a
+	// stream opened), so a settlement with no usage cannot claim "no charge".
+	ChargePossible bool
+	// BillingUncertain marks the FINAL outcome as unconfirmed (the last
+	// attempt timed out / transport-errored / the stream dropped before
+	// usage arrived). Such reservations settle as unknown and hold funds.
+	BillingUncertain bool
+	// BillingAttemptRisk records that an EARLIER retryable attempt in this
+	// request may have consumed unreported tokens (e.g. a timeout that later
+	// failed over and succeeded). The final usage still settles the
+	// reservation as known; the residual exposure is persisted as an
+	// attempt-risk event instead of holding the funds in unknown.
+	BillingAttemptRisk bool
+	BeforeUpstream     func(context.Context) error
+	BillingFinalize    func() error
 
 	// Request is the unified request; Pre plugins may rewrite it.
 	Request *adapter.UnifiedRequest

@@ -1,0 +1,6 @@
+{
+  "applicationNotFound": "application not found",
+  "applicationReferenced": "application is referenced by api keys",
+  "applicationNameRequired": "application name is required",
+  "applicationOwnerRequired": "owner group is required"
+}

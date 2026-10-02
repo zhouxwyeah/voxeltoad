@@ -55,6 +55,10 @@ func (a *AsyncRecorder) Start() {
 // record is dropped and the dropped counter incremented (fail-open) — the money
 // path already settled via QuotaStore, so a lost audit row is acceptable.
 func (a *AsyncRecorder) Record(_ context.Context, rec UsageRecord) error {
+	if rec.ApplicationID != nil {
+		id := *rec.ApplicationID
+		rec.ApplicationID = &id
+	}
 	select {
 	case a.buf <- rec:
 	default:

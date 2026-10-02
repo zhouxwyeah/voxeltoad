@@ -24,6 +24,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GATEWAY="http://127.0.0.1:8080"
 ADMIN_URL="http://127.0.0.1:8090"
 PG_PORT=55431
+RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/voxeltoad-stack-test.XXXXXX")" || exit 1
+LAUNCHED_PID=""
 
 TESTPG_BIN=""
 DEVSTACK_BIN=""
@@ -58,21 +60,29 @@ cleanup() {
   [ -n "$DEVSTACK_BIN" ] && rm -f "$DEVSTACK_BIN" 2>/dev/null || true
   [ -n "$ADMINSTACK_BIN" ] && rm -f "$ADMINSTACK_BIN" 2>/dev/null || true
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-# wait_url URL — poll until 200 (or fail after ~90s).
+# Fail if our child exited instead of testing an unrelated/stale listener.
 wait_url() {
+  local url="$1" pid="$2"
   for _ in $(seq 1 90); do
-    if curl -sS -o /dev/null -m 1 "$1" 2>/dev/null; then return 0; fi
+    kill -0 "$pid" 2>/dev/null || return 1
+    if curl -fsS -o /dev/null -m 1 "$url" 2>/dev/null; then return 0; fi
     sleep 1
   done
   return 1
 }
 
-# wait_pg — poll until the shared PG accepts connections (via a TCP connect).
+# TCP readiness precedes CREATE DATABASE; wait for testpg's ready banner.
 wait_pg() {
+  local line
   for _ in $(seq 1 90); do
-    if (echo >"/dev/tcp/127.0.0.1/$PG_PORT") 2>/dev/null; then return 0; fi
+    kill -0 "$TESTPG_PID" 2>/dev/null || return 1
+    while IFS= read -r line; do
+      case "$line" in 'testpg ready'*) return 0 ;; esac
+    done <"$RUN_DIR/pg.log"
     sleep 1
   done
   return 1
@@ -85,14 +95,23 @@ launch() { # launch BIN LOG ENV...
   else
     env "$@" "$bin" >"$log" 2>&1 &
   fi
-  echo $!
+  LAUNCHED_PID=$!
 }
+
+# Refuse occupied ports before testpg can touch any database. TMPDIR below also
+# confines its fixed runtime directory to a fresh directory owned by this run.
+for port in "$PG_PORT" 8080 8090 8091; do
+  if ( : >"/dev/tcp/127.0.0.1/$port" ) 2>/dev/null; then
+    printf '%s\n' "Port $port is already occupied; refusing to reuse another stack."
+    exit 1
+  fi
+done
 
 # --- build (each binary exactly once) ----------------------------------------
 hr "build binaries (testpg / devstack / adminstack)"
-TESTPG_BIN="$(mktemp -t testpg.XXXXXX)"
-DEVSTACK_BIN="$(mktemp -t devstack.XXXXXX)"
-ADMINSTACK_BIN="$(mktemp -t adminstack.XXXXXX)"
+TESTPG_BIN="$RUN_DIR/testpg"
+DEVSTACK_BIN="$RUN_DIR/devstack"
+ADMINSTACK_BIN="$RUN_DIR/adminstack"
 ( cd "$ROOT" && go build -tags testpg -o "$TESTPG_BIN" ./cmd/testpg ) \
   || { echo "$(red 'testpg build failed')"; exit 1; }
 ( cd "$ROOT" && go build -tags devstack -o "$DEVSTACK_BIN" ./cmd/devstack ) \
@@ -102,14 +121,13 @@ ADMINSTACK_BIN="$(mktemp -t adminstack.XXXXXX)"
 
 # --- shared PG ---------------------------------------------------------------
 hr "start shared embedded PostgreSQL (cmd/testpg)"
-TESTPG_PID="$(launch "$TESTPG_BIN" /tmp/stack-test-pg.log)"
+launch "$TESTPG_BIN" "$RUN_DIR/pg.log" TMPDIR="$RUN_DIR"
+TESTPG_PID="$LAUNCHED_PID"
 if ! wait_pg; then
   echo "$(red 'shared PG did not become ready'). Last log lines:"
-  tail -n 20 /tmp/stack-test-pg.log
+  tail -n 20 "$RUN_DIR/pg.log"
   exit 1
 fi
-# Give testpg a moment to DROP/CREATE the two databases after the port opens.
-sleep 1
 DEVSTACK_DSN="postgres://postgres:postgres@localhost:$PG_PORT/voxeltoad_devstack?sslmode=disable"
 ADMINSTACK_DSN="postgres://postgres:postgres@localhost:$PG_PORT/voxeltoad_adminstack?sslmode=disable"
 
@@ -117,11 +135,12 @@ FAILED=0
 
 # --- devstack (one process, drives suites 1+2) -------------------------------
 hr "start devstack against shared PG"
-DEVSTACK_PID="$(launch "$DEVSTACK_BIN" /tmp/stack-test-devstack.log \
-  GATEWAY_ALLOW_INSECURE_DEV=1 GATEWAY_PG_DSN="$DEVSTACK_DSN")"
-if ! wait_url "$GATEWAY/healthz"; then
+launch "$DEVSTACK_BIN" "$RUN_DIR/devstack.log" \
+  GATEWAY_ALLOW_INSECURE_DEV=1 GATEWAY_PG_DSN="$DEVSTACK_DSN"
+DEVSTACK_PID="$LAUNCHED_PID"
+if ! wait_url "$GATEWAY/healthz" "$DEVSTACK_PID"; then
   echo "$(red 'devstack did not become ready'). Last log lines:"
-  tail -n 20 /tmp/stack-test-devstack.log
+  tail -n 20 "$RUN_DIR/devstack.log"
   exit 1
 fi
 
@@ -133,11 +152,11 @@ GATEWAY="$GATEWAY" "$ROOT/scripts/devstack-sdk-e2e.sh" || FAILED=1
 
 # --- adminstack (suite 3) ----------------------------------------------------
 hr "start adminstack against shared PG"
-ADMINSTACK_PID="$(launch "$ADMINSTACK_BIN" /tmp/stack-test-adminstack.log \
-  GATEWAY_PG_DSN="$ADMINSTACK_DSN")"
-if ! wait_url "$ADMIN_URL/healthz"; then
+launch "$ADMINSTACK_BIN" "$RUN_DIR/adminstack.log" GATEWAY_PG_DSN="$ADMINSTACK_DSN" GATEWAY_SEED_DEMO=0 GATEWAY_PERSIST_DATA=0
+ADMINSTACK_PID="$LAUNCHED_PID"
+if ! wait_url "$ADMIN_URL/healthz" "$ADMINSTACK_PID"; then
   echo "$(red 'adminstack did not become ready'). Last log lines:"
-  tail -n 20 /tmp/stack-test-adminstack.log
+  tail -n 20 "$RUN_DIR/adminstack.log"
   exit 1
 fi
 

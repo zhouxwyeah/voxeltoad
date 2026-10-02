@@ -257,6 +257,8 @@ func newPluginContext(r *http.Request, req *adapter.UnifiedRequest) *plugin.Cont
 		c.Tenant = rec.Tenant
 		c.Group = rec.Group
 		c.APIKeyID = rec.KeyID
+		c.ApplicationID = rec.ApplicationID
+		c.Environment = rec.Environment
 	}
 	return c
 }
@@ -484,7 +486,23 @@ func serveChat(codec ingress.Codec, provider DispatcherProvider, chain *plugin.C
 		// (protocol-aware routing, ADR-0047) — passthrough becomes a natural
 		// consequence of routing, not a router-layer special case.
 		r = r.WithContext(withIngressProtocol(r.Context(), string(codec.Protocol())))
+		r = r.WithContext(context.WithValue(r.Context(), accountingContextKey{}, pc))
 		pc.Ctx = r.Context()
+		pc.PricingSnapshot = disp.accountingSnapshot(alias, string(codec.Protocol()))
+		if pc.PricingSnapshot != nil && len(pc.PricingSnapshot.Models) == 0 {
+			acc.errType = "api_error"
+			writeCodecErr(w, codec, http.StatusBadGateway, "api_error", "model is not configured")
+			return
+		}
+		// Once Pre reserves money, every subsequent exit must finalize it,
+		// including a later Pre rejection or a stream that cannot be opened.
+		defer func() {
+			if pc.BillingFinalize != nil {
+				if err := pc.BillingFinalize(); err != nil {
+					observability.Logger().Error("accounting finalization pending", "reservation_id", pc.ReservationID, "error", err)
+				}
+			}
+		}()
 
 		// Pre phase: rate limit / quota / sensitive-word checks may reject.
 		if chain != nil {
@@ -553,7 +571,9 @@ func runPost(chain *plugin.Chain, pc *plugin.Context, resp *adapter.UnifiedRespo
 	pc.Response = resp
 	pc.Provider = dr.Provider
 	pc.ProviderEndpoint = dr.Endpoint
-	_ = chain.Run(pc, plugin.PhasePost)
+	if err := chain.Run(pc, plugin.PhasePost); err != nil {
+		observability.Logger().Error("post processing failed", "request_id", pc.RequestID, "reservation_id", pc.ReservationID, "error", err)
+	}
 }
 
 // rejectStatus maps a Pre-phase rejection to an HTTP status and an
@@ -722,7 +742,7 @@ func isHex(s string) bool {
 		return false
 	}
 	for _, c := range s {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
 			return false
 		}
 	}

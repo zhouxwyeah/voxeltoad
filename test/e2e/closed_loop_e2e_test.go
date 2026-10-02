@@ -101,7 +101,7 @@ func TestClosedLoop_ChatCompletion(t *testing.T) {
 	defer func() { _ = stores.Close() }()
 
 	authn := auth.NewAuthenticator(stores.KeyStore, auth.Options{})
-	billingPlugin := billing.NewPlugin(cfgStore.Current, stores.Quota, stores.UsageRecorder)
+	billingPlugin := billing.NewPlugin(cfgStore.Current, stores.Quota, stores.UsageRecorder, billing.WithAccounting(stores.Accounting))
 	chain := plugin.NewChain(billingPlugin)
 
 	dispWatcher := app.NewDispatcherWatcher(cfgStore.Current, proxy.DispatcherConfig{})

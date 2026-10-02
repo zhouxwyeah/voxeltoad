@@ -1,6 +1,19 @@
 {
   "heading": "Usage",
   "subtitle": "Track token consumption and cost across tenants and models.",
+  "identity": {
+    "application": "Application ID",
+    "environment": "Environment",
+    "unattributed": "Unattributed",
+    "unattributedOnly": "Unattributed applications only",
+    "allEnvironments": "All environments",
+    "unknownCurrency": "Unknown currency",
+    "historyHint": "Historical identity and currency are not backfilled. Usage records are asynchronous settlement facts, not every request; missing details do not mean zero cost. Unbound key counts are not traffic percentages."
+  },
+  "state": {
+    "error": "Unable to load usage data.",
+    "retry": "Retry"
+  },
   "columns": {
     "time": "Time",
     "tenant": "Tenant",
@@ -38,7 +51,10 @@
       "group_name": "Group",
       "api_key_id": "API Key",
       "provider": "Provider",
-      "model": "Model"
+      "model": "Model",
+      "application_id": "Application",
+      "environment": "Environment",
+      "currency": "Currency"
     },
     "selectPlaceholder": "Select…",
     "apply": "Apply",

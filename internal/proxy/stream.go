@@ -73,6 +73,7 @@ func streamChatCompletions(w http.ResponseWriter, r *http.Request, disp *Dispatc
 			return
 		}
 		if err != nil {
+			pc.BillingUncertain = true
 			// Upstream dropped or errored mid-stream. Headers (200) are already
 			// sent, so we cannot change status; we stop relaying and the
 			// deferred terminator + completion hook still run on what was
@@ -113,7 +114,10 @@ func streamChatCompletions(w http.ResponseWriter, r *http.Request, disp *Dispatc
 		// ledger (ADR-0039). Best-effort; a no-op when capture is disabled.
 		acc.captureStreamChunk(wire, chunk.FinishReason)
 		if _, wErr := w.Write(wire); wErr != nil {
-			return // client went away
+			// The client went away. This does NOT make the upstream charge
+			// uncertain: usage already received (or not) still governs the
+			// settlement outcome, so do not mark BillingUncertain here.
+			return
 		}
 		flusher.Flush()
 	}

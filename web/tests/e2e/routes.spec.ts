@@ -57,7 +57,7 @@ async function createProvider(
   await modal.getByLabel("Name *").fill(name);
   // adapter and base_url are required by the admin API even though the
   // OpenAPI spec marks only `name` as required (internal/admin/crud_provider.go).
-  await selectCombo(comboboxesFor(modal, "adapter").first(), "openai");
+  await selectCombo(comboboxesFor(modal, "endpoint_adapter").first(), "openai");
   await modal.getByLabel("Base URL").fill("https://api.openai.com/v1");
   await modal.getByRole("button", { name: "Create" }).click();
   await expect(modal).not.toBeVisible();

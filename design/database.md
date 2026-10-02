@@ -3,11 +3,13 @@
 > 管理面 PostgreSQL schema 的可视化与集中清单。ADR-0014 是决策源，本文件是单一事实来源（可视化 + 完整表清单 + 软引用关系 + 设计决定说明）。
 > **适用对象**：修改 schema、新增表、调整跨表引用关系时，先读本文件对齐全貌，再查相关 ADR 看决策背景。
 
-Schema 形状由 `internal/store/migrations/` 下的 27 个 goose 迁移定义（`00001`-`00028`，缺 `00018`）；本文件与之保持同步。其中 `00018` 因 trace 迁移重命名而跳过（见 git log `856613d`）。
+Schema 形状由 `internal/store/migrations/` 下的 30 个 goose 迁移定义（`00001`-`00031`，缺 `00018`）；本文件与之保持同步。其中 `00018` 因 trace 迁移重命名而跳过；`00028` 为 request_logs/trace_payloads 的 user_agent 列，`00029` 为 Application 实体，`00030` 为三账本归因/币种列，`00031` 为周期支出管控资金五表。
+
+> 迁移编号允许空洞，但必须唯一。曾执行过旧企业 `00028_applications`（现编号 `00029`）的开发库不能靠文件改名修复 goose 历史；按合并后最终迁移序列显式重建开发库，不自动删除现有数据库或目录；Up/Down/Up 仅在测试持有的隔离数据库验证。
 
 > **同步规则（门禁）**：任何 PR 若新增/修改/删除表、列、索引或约束（即触碰 `internal/store/migrations/` 下的 SQL 文件），**必须同步更新本文件**。检查清单：
 > - §1 表分类矩阵：新表归入正确分类，业务表计数同步
-> - 头部迁移数量（"27 个 goose 迁移"）同步
+> - 头部迁移数量与编号空洞同步
 > - 对应表的 ER 图块：新列/新索引加进去
 > - §3.1（及类似专节）字段表、索引清单、字段计数同步
 > - §3.2（及类似对比表）字段数同步
@@ -19,12 +21,12 @@ Schema 形状由 `internal/store/migrations/` 下的 27 个 goose 迁移定义�
 
 ### 表分类矩阵
 
-21 张业务表 + 2 张 goose 隐式表，按作用域分 4 类：
+26 张业务表 + 2 张元数据表（`config_generation` 与 goose 自动维护的 `goose_db_version`），按作用域分 4 类；不把默认/月度分区计作独立业务表：
 
 | 分类 | 表 | RBAC 边界 | 备注 |
 |---|---|---|---|
 | **全局资源** | `providers` `models` `routes` `plugins` `config_snapshots` `data_plane_nodes` `provider_credentials` `gateway_settings` | super-admin (wildcard) 管理；支持自定义角色通过 `requirePermission()` 授权 | 平台级，无 `tenant_id`，所有租户共享 |
-| **租户作用域** | `tenants` `groups` `api_keys` `quotas` `usage_records` `request_logs` `trace_payloads` | tenant-admin 管自己；super-admin 管所有；自定义租户角色按 permissions 授权 | 三级层级 Tenant→Group→APIKey（ADR-0005） |
+| **租户作用域** | `tenants` `groups` `applications` `api_keys` `quotas` `usage_records` `request_logs` `trace_payloads` `budget_policies` `budget_accounts` `billing_reservations` `billing_reservation_items` `budget_events` | tenant-admin 管自己；预算以 `budget.read` 读本租户，写/核对须 `budget.write` / `budget.resolve` 且 global scope；账户/items 经所属策略或 reservation 隔离 | 三级层级 Tenant→Group→APIKey（ADR-0005）；Application 是工作负载身份（ADR-0051）；旧余额与周期预算同事务（ADR-0052 实施澄清） |
 | **运营** | `operators` `sessions` `audit_logs` `roles` `role_permissions` | super-admin 管所有 operators 和 roles；各 operator 管自己 sessions | 邮箱+密码登录，与 client API Key 是两套系统 |
 | **元数据** | `config_generation` `goose_db_version` | 系统内部，无直接 API | 两条独立版本线（ADR-0015） |
 
@@ -33,7 +35,7 @@ Schema 形状由 `internal/store/migrations/` 下的 27 个 goose 迁移定义�
 ```
 角色 → 权限集 (role_permissions) + scope_kind (global | tenant)
   - super-admin: scope=global, permissions="*" (通配)
-  - tenant-admin: scope=tenant, permissions=api_key/group/usage/audit/request_log/quota.read + password.write
+  - tenant-admin: scope=tenant, api_key/group/application.read+write，usage/audit/request_log/quota/budget.read + password.write
   - 自定义角色: 可 free 创建，勾选任意 permission，声明 global 或 tenant scope
 
 全局 scope 角色 (scope_kind='global'):
@@ -116,7 +118,7 @@ erDiagram
 
 每张 config 表的 `spec` 列存整个 Go 结构体的 JSON 序列化（`internal/config/schema.go`）：
 
-- `providers.spec` → `config.Provider`（Name/Type/Adapter/BaseURL/APIKeyRef/Timeouts/Weight）
+- `providers.spec` → `config.Provider`（Name/Type/Enabled + `Endpoints[]`，每个 endpoint 含 Adapter/BaseURL/APIKeyRef/Timeouts；ADR-0049 multi-endpoint）
 - `models.spec` → `config.Model`（Alias + `Upstreams[]`，每个 upstream 含 Provider/UpstreamModel/DefaultMaxTokens/Pricing）
 - `routes.spec` → `config.Route`（ModelAlias + `Providers[].{Name,Weight}` + Strategy）
 - `plugins.spec` → `config.PluginConfig`（Name/Phase/Params/Enabled/Scope）
@@ -191,6 +193,9 @@ erDiagram
     tenants ||--o{ groups : "tenant_id FK"
     tenants ||--o{ api_keys : "tenant_id FK"
     groups ||--o{ api_keys : "group_id FK (nullable)"
+    tenants ||--o{ applications : "tenant_id FK"
+    groups ||--o{ applications : "owner_group_id FK (NOT NULL)"
+    applications ||--o{ api_keys : "application_id FK (nullable)"
     tenants ||..o{ quotas : "scope='tenant:<name>' (软引用)"
     groups ||..o{ quotas : "scope='group:<name>/<group>' (软引用)"
     api_keys ||..o{ quotas : "scope='key:<id>' (软引用)"
@@ -203,7 +208,7 @@ erDiagram
     tenants {
         bigint id PK
         varchar name UNIQUE
-        boolean enabled "存在但无端点 toggle (P2 缺口)"
+        boolean enabled "PATCH 可逆停用；鉴权缓存 TTL 内生效"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -218,12 +223,25 @@ erDiagram
         unique "UNIQUE(tenant_id, name)"
     }
 
+    applications {
+        bigint id PK
+        bigint tenant_id FK "NOT NULL"
+        varchar name
+        bigint owner_group_id FK "NOT NULL"
+        boolean enabled "disable → 所有绑定 key 在 LookupByHash 被拒"
+        timestamptz created_at
+        timestamptz updated_at
+        unique "UNIQUE(tenant_id, name)"
+    }
+
     api_keys {
         bigint id PK
         varchar key_id UNIQUE "公开标识"
         char hash UNIQUE "SHA-256 hex, 64 字符"
         bigint tenant_id FK "NOT NULL"
-        bigint group_id FK "NULLABLE, 可无 group"
+        bigint group_id FK "历史 nullable；企业新 Key 必填消费 Group"
+        bigint application_id FK "NULLABLE, 迁移期允许 unbound (ADR-0051)"
+        varchar environment "dev/staging/prod/'', 受控属性"
         timestamptz expires_at
         jsonb allowed_models "JSONB, 空=全部允许"
         timestamptz revoked_at "软删"
@@ -242,12 +260,16 @@ erDiagram
         varchar tenant "反范式,无 FK"
         varchar group_name "反范式"
         varchar api_key_id "反范式"
+        bigint application_id "nullable 请求快照,无 FK (00030)"
+        varchar environment "请求快照 (00030)"
         varchar provider
+        varchar provider_endpoint "provider 内端点 (00026)"
         varchar model
         integer prompt_tokens
         integer completion_tokens
         integer cached_prompt_tokens "cache 读命中的 prompt (00017)"
         bigint cost "微单位"
+        varchar currency "费用币种；历史空=未知 (00030)"
         bigint cache_discount_micros "cache 命中折扣 (00017)"
         varchar request_id "gateway 关联 ID (00014)"
         varchar session_id "X-Voxeltoad-Session (00014)"
@@ -260,6 +282,8 @@ erDiagram
         varchar tenant "反范式,无 FK"
         varchar group_name
         varchar api_key_id
+        bigint application_id "nullable 请求快照,无 FK (00030)"
+        varchar environment "请求快照 (00030)"
         varchar provider
         varchar model_requested
         varchar model_resolved
@@ -298,6 +322,8 @@ erDiagram
         varchar tenant "反范式,无 FK"
         varchar group_name
         varchar api_key_id
+        bigint application_id "nullable 请求快照,无 FK (00030)"
+        varchar environment "请求快照 (00030)"
         varchar provider
         varchar model_requested
         boolean stream
@@ -325,7 +351,8 @@ erDiagram
 
 | 字段 | 语义 | 来源 |
 |---|---|---|
-| `tenant` / `group_name` / `api_key_id` | 反范式身份串，保留历史 | auth 记录（ADR-0006） |
+| `tenant` / `group_name` / `api_key_id` | 反范式身份串，保留历史；Group 是消费方，不是 Application owner | auth 记录（ADR-0006） |
+| `application_id` / `environment` | nullable 应用 ID 与受控环境的请求时快照（00030），不关联强 FK、不回填历史 | 可信 KeyRecord → plugin.Context（ADR-0051） |
 | `provider` | 实际命中的上游 provider | dispatcher 返回值 |
 | `model_requested` | 客户端请求的 alias | `llm.model.requested` |
 | `model_resolved` | 路由解析后的 provider-native 名 | `llm.model.resolved` |
@@ -357,7 +384,7 @@ erDiagram
 
 **分区策略**：`PARTITION BY RANGE (created_at)` + `request_logs_default` 默认分区 + 月度分区（`00007_request_logs_monthly_partitions`），支持 partition-DROP TTL（ADR-0029）。
 
-**索引**：`idx_request_logs_created_at`、`idx_request_logs_tenant_created`、`idx_request_logs_session_created`（00010，按 session_id 查询）、`idx_request_logs_trace_id`（00015，按 trace 串联）、`idx_request_logs_upstream_request_id`（00024，按上游 ID 反查）、`idx_request_logs_client_request_id`（00027，按客户端 ID 反查）。
+**索引**：`idx_request_logs_created_at`、`idx_request_logs_tenant_created`、`idx_request_logs_session_created`（00010，按 session_id 查询）、`idx_request_logs_trace_id`（00015，按 trace 串联）、`idx_request_logs_upstream_request_id`（00024，按上游 ID 反查）、`idx_request_logs_client_request_id`（00027，按客户端 ID 反查）、`idx_requests_application_environment`（00030，`tenant, application_id, environment, created_at`）。
 
 **读 API**：`GET /api/v1/request-logs`（offset 分页，支持 tenant/provider/model/error_type/session_id/request_id/upstream_request_id 等过滤 + CSV 导出）、`GET /api/v1/request-logs/sessions`（按 session 聚合）、`GET /api/v1/request-logs/sessions/:session_id`（session 内请求时间线）。RBAC 隔离：super-admin 全局视图，租户角色 scoped。
 
@@ -365,17 +392,19 @@ erDiagram
 
 | 维度 | `usage_records` | `request_logs` |
 |---|---|---|
-| 用途 | 计费/对账 | 审计/合规 |
-| 写入时机 | billing plugin 结算阶段 | 请求结束时异步 |
-| 字段数 | 15 列 | 31 列 |
-| cost 字段 | 有（微单位 + cache 折扣） | 无 |
+| 用途 | 已知 Usage 的业务报表；随结算事务持久化并可恢复重放，不再是唯一财务对账依据 | 审计/合规 |
+| 写入时机 | billing 已知结算随资金事务落库（legacy 路径异步）；未知费用不伪造零费行 | 请求结束时异步 |
+| 字段数 | 19 列（含 00026 endpoint、00030 app/env/currency） | 33 列（含 00028 user_agent、00030 app/env） |
+| cost 字段 | 有（微单位 + cache 折扣 + currency；历史空币种表示未知） | 无 |
 | token 字段 | prompt/completion + cached_prompt_tokens | prompt/completion/total + cached_prompt_tokens |
 | 性能字段 | 无 | ttft_ms/duration_ms/error_type/blocked_by/fallback |
 | 缓存维度 | cache_discount_micros（折扣） | cache_hit/cache_tier/cache_source（命中详情） |
 | 关联 ID | request_id/session_id/trace_id | request_id/client_request_id/session_id/trace_id/upstream_request_id（三元组：gateway/client/upstream） |
 | agent 检测 | 无 | agent_type |
 
-两表都有 `tenant`/`group_name`/`api_key_id`/`provider` 反范式身份串，无 FK（ADR-0014:118-122：append-only 审计行应保留身份原样，不受后续重命名/删除影响）。
+两表都有 `tenant`/`group_name`/`api_key_id`/`provider` 反范式身份串，以及 `application_id` / `environment` 快照，无 FK（ADR-0014：append-only 审计行保留请求时身份，不受后续绑定/停用影响）。`usage_records.application_id` 为 nullable BIGINT，`environment` / `currency` 为 NOT NULL VARCHAR 默认空串；旧行不猜测补齐应用或币种。
+
+`usage_records` 索引：`idx_usage_records_created_at`、`idx_usage_records_tenant_created`、`idx_usage_application_environment`（00030，`tenant, application_id, environment, created_at`）。查询/聚合支持应用、环境和 `unattributed=true`；财务事实以 reservation/account 为准，异步明细可能缺失，不得将报表缺行解释为免费。
 
 ### §3.3 `quotas.scope` 命名约定
 
@@ -388,7 +417,9 @@ erDiagram
 | `key:<id>` | `key:ak-123` | **不校验存在**（允许预充值） |
 | 裸串 | `custom-budget` | 无前缀，纯自定义 |
 
-三级层级对应 ADR-0005 的 hierarchical ceilings（key→group→tenant 独立扣减，LiteLLM 模型）。
+Group scope 由 `billing.GroupScope` / `ParseGroupScope` 对租户名和组名分别 URL path-escape，规范格式始终为 `group:<tenant>/<group>`，不是 `group:<group>`。旧歧义格式不猜测迁移为某租户；资金路径发现相关歧义行时拒绝继续，需先核对修复。同名 Group 跨租户不共享余额。
+
+三级余额与周期账户由 `AccountingRepo` 在同一事务预留/结算，保留旧 `quotas` 表与充值 API。每个 scope 只有一种币种，充值不能改变已有币种；所有可达候选价格、余额及适用周期账户必须同币种，不隐式换汇。
 
 ### §3.4 `trace_payloads`（4 层 trace 模型的底部两层，ADR-0039）
 
@@ -407,6 +438,7 @@ erDiagram
 | `user_agent` | 客户端 `User-Agent` header 原值（trim 后，≤256B；00028 后加，与 `request_logs.user_agent` 同义） |
 | `ingress_protocol` | 客户端入站协议（00025 后加，`openai`/`anthropic`/空） |
 | `provider_endpoint` | 命中 provider 内的端点 slug（00026 后加，ADR-0049） |
+| `application_id` / `environment` | 00030 新增的请求时身份快照：nullable BIGINT / NOT NULL VARCHAR 默认空，无应用 FK；历史不回填 |
 | `request_id` / `client_request_id` / `session_id` / `trace_id` / `tenant` / `group_name` / `api_key_id` | 与 `request_logs` 相同的关联身份串（应用层配对；`client_request_id` 由 00027 新增） |
 
 **捕获开关**：默认**关**（`gateway_settings.trace.capture_payload_enabled`），热重载（~5s 生效，无需重启）。关闭时捕获方法短路，零成本（不拷贝 body、不 marshal）。
@@ -415,13 +447,116 @@ erDiagram
 
 **分区策略**：`PARTITION BY RANGE (created_at)` + 默认分区 + 月度分区（`00020_trace_payloads_monthly_partitions`），partition-DROP TTL（默认 7 天，ADR-0039 §4）。DROP 是 O(1) 操作，避免 DELETE 扫描大 JSONB 行。
 
-**索引**：`idx_trace_payloads_request_id`（按 request_id 点查/配对）、`idx_trace_payloads_session_created`（session 视图）、`idx_trace_payloads_tenant_created`（租户列表）、`idx_trace_payloads_client_request_id`（00027，按客户端 ID 反查）。
+**索引**：`idx_trace_payloads_request_id`（按 request_id 点查/配对）、`idx_trace_payloads_session_created`（session 视图）、`idx_trace_payloads_tenant_created`（租户列表）、`idx_trace_payloads_client_request_id`（00027，按客户端 ID 反查）、`idx_trace_application_environment`（00030，`tenant, application_id, environment, created_at`）。当前共 26 列（含 00028 user_agent、00030 app/env）。
 
 **读 API**：`GET /api/v1/trace/sessions/:session_id`（session 内 trace 列表）、`GET /api/v1/trace/requests/:request_id`（单请求详情，按 request_id）、`GET /api/v1/trace/rows/:id`（按自增主键点查，应对 request_id 重复场景）。**读访问被审计**（ADR-0039 §5，读 prompt/completion 明文是敏感操作，每次详情读都写 `audit_logs` 行）。
 
 **保留期**：默认 7 天，partition-DROP 兜底。与 `request_logs`（长期保留）策略**故意不同**——这正是两表分离的核心原因（见 §5.8）。
 
 **`response_raw` 类型历史**：ADR-0039:158 声明为 TEXT，但 `00019` 实际创建为 JSONB，`00022` 修正为 TEXT。ADR 描述的是 `00022` 之后的最终态，未标注中间修正。
+
+---
+
+### §3.5 Application 与 Key 治理身份（00029）
+
+`applications` 共 7 列，`api_keys` 共 11 列。Application 有且只有一个同租户 owner Group；消费 Group 由 Key 独立指定，不要求等于 owner。`UNIQUE(tenant_id,name)` 保证应用名租户内唯一；`owner_group_id`、`tenant_id`、Key 的 `application_id` 有 FK，同租户和启用状态在仓储事务内校验。
+
+企业新 Key 必须同时绑定 Group、Application、`dev/staging/prod` 环境；数据库保留 nullable 是为了历史 Key 与 Desktop 兼容，不是新企业 Key 的可选项。历史 Key 经 `unbound=true` 分页查询并一次性补齐；当前列表仅排除已撤销项，不检查过期或实体启停，不能直接充当有效调用 Key 计数。已有非空身份不可改变，跨应用/环境迁移须发新 Key。`idx_api_keys_tenant_application` 为 `(tenant_id,application_id) WHERE revoked_at IS NULL` 的部分索引。
+
+### §3.6 周期支出管控五表（00031，ADR-0052 实施澄清）
+
+`quotas` 不迁移成新账户，也不被替换；`AccountingRepo` 以一笔事务协调旧余额与下列新账本。所有金额是 BIGINT 微单位，`available = limit_amount - committed - reserved` 是读时计算值，**不是存储列**。enforce 保证预留原子性，不保证在途实际支出不超过限额。
+
+```mermaid
+erDiagram
+    tenants ||--o{ budget_policies : "tenant_id FK"
+    budget_policies ||--o{ budget_accounts : "policy_id FK"
+    tenants ||--o{ billing_reservations : "tenant_id FK"
+    billing_reservations ||--o{ billing_reservation_items : "reservation_id FK"
+    budget_accounts |o--o{ billing_reservation_items : "account_id FK nullable"
+    quotas |o..o{ billing_reservation_items : "quota_scope soft reference"
+    tenants ||--o{ budget_events : "tenant_id FK"
+    budget_accounts |o--o{ budget_events : "account_id FK nullable"
+    billing_reservations |o--o{ budget_events : "reservation_id FK nullable"
+
+    budget_policies {
+        bigint id PK
+        bigint tenant_id FK
+        text name
+        text scope_kind "tenant/group/application/application_env/key"
+        text scope_ref "entity ID/key_id; tenant is empty"
+        text environment "application_env only"
+        text period "daily/weekly/monthly"
+        text timezone "default UTC"
+        text currency "three lowercase letters"
+        bigint limit_amount "nonnegative"
+        text mode "soft/enforce"
+        jsonb thresholds "integer percentage array"
+        boolean enabled
+        bigint version
+        timestamptz created_at
+    }
+    budget_accounts {
+        bigint id PK
+        bigint policy_id FK
+        timestamptz period_start "UNIQUE with policy_id"
+        timestamptz period_end
+        text currency
+        bigint limit_amount
+        bigint reserved
+        bigint committed
+        bigint released
+    }
+    billing_reservations {
+        text id PK "server-generated, not client_request_id"
+        bigint tenant_id FK
+        text request_id "correlation only"
+        jsonb identity "trusted identity, estimate, currency, price snapshot"
+        text status "reserved/dispatched/unknown/settled/released/released_unknown"
+        bigint actual "nullable, unknown is not zero"
+        text reason
+        bigint version
+        jsonb result "nullable durable known result and Usage"
+        boolean result_applied
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    billing_reservation_items {
+        bigint id PK
+        text reservation_id FK
+        text quota_scope "nullable, exclusive with account_id"
+        bigint account_id FK "nullable"
+        bigint reserved "original reservation"
+        bigint held "currently held"
+        bigint committed
+        bigint released
+    }
+    budget_events {
+        bigint id PK
+        bigint tenant_id FK
+        bigint account_id FK "nullable"
+        text reservation_id FK "nullable"
+        text kind
+        integer threshold "0..100"
+        bigint amount
+        bigint operator_id "nullable, no FK"
+        text reason
+        text evidence
+        timestamptz created_at
+    }
+```
+
+| 表（字段数） | 字段与约束 | 索引（除主键） |
+|---|---|---|
+| `budget_policies`（15） | `tenant_id` FK；`scope_kind` 五种枚举；`scope_ref` 默认空，Group/Application 用同租户实体 ID，Key 用公开 key_id；`environment` 仅 application_env 必填；`period` 日/周/月；`timezone` 默认 UTC；`currency` CHECK 三位小写；`limit_amount >= 0`；`mode` soft/enforce；`thresholds` JSONB 数组；`enabled` 默认 true；`version` 默认 1；`created_at` 为起算记录 | `idx_budget_policies_tenant(tenant_id,id)`；`idx_budget_policies_match(tenant_id,scope_kind,scope_ref) WHERE enabled` |
+| `budget_accounts`（9） | `policy_id` FK；`period_end > period_start`；币种与限额为周期快照；`limit_amount/reserved/committed/released >= 0` | `UNIQUE(policy_id,period_start)`；无额外命名索引 |
+| `billing_reservations`（12） | TEXT `id` 独立服务端幂等键；`tenant_id` FK；`request_id` 仅关联；`identity` JSONB 固定可信身份/估算/价格；`status` 六种状态 CHECK；`actual` nullable 且非负；`reason` 默认空；`version` 默认 1；`result` 可空持久化结算结果；`result_applied` 默认 false；创建/更新时间 | `idx_billing_reservations_tenant(tenant_id,id)`；`idx_billing_reservations_stale(updated_at) WHERE status IN ('reserved','dispatched')`；`idx_billing_reservations_pending(updated_at) WHERE result IS NOT NULL AND NOT result_applied` |
+| `billing_reservation_items`（8） | `reservation_id` FK；`quota_scope` 与 `account_id` 必须且只能一个非空，后者 FK；`reserved/held/committed/released >= 0`，累计值支持风险释放后补账，不重复退款 | `UNIQUE(reservation_id,quota_scope)`；`UNIQUE(reservation_id,account_id)`；无额外命名索引 |
+| `budget_events`（11） | `tenant_id` FK；nullable `account_id` / `reservation_id` FK；`kind` 事件类型；`threshold` 默认 0、CHECK 0..100；`amount` 默认 0；nullable `operator_id` 无 FK 保留审计；`reason/evidence` 默认空；`created_at` | `idx_budget_events_tenant(tenant_id,id)`；`idx_budget_events_threshold(account_id,kind,threshold)` UNIQUE，限 account 非空且 kind 为 threshold/overspend；`idx_budget_events_unknown(reservation_id,kind)` UNIQUE，限 kind 为 unknown |
+
+补充应用层约束：合法 IANA 时区（周一为周起点）、阈值为 1..100 且不重复、作用域实体同租户、环境枚举，由 handler/store 校验；没有 scope_ref 指向多表的强 FK。预算写入仅可改 `limit` / `enabled`（携带 version），不硬删除、不原地改变 scope/币种/周期定义；调整当前周期限额不抹掉已预留/已消费，历史账户不改。
+
+事件类型包括 `threshold`、`overspend`、`unknown`、`resolution_settle`、`resolution_release`、`resolution_release_unknown`。阈值按实际 committed 触发；unknown 保留占用而非超时退款。后台重试持久化的已知 result；24 小时 stale 扫描只转待核对，晚到结算仍回原 reservation 的周期账户。人工核对须版本、操作者、理由、证据；风险释放保留 `released_unknown`，后续可补账。
 
 ---
 
@@ -492,7 +627,7 @@ erDiagram
 | name | scope_kind | is_builtin | permissions |
 |---|---|---|---|
 | super-admin | global | true | `*`（通配，所有权限） |
-| tenant-admin | tenant | true | api_key.read/write, group.read/write, usage.read, audit.read, request_log.read, quota.read, password.write |
+| tenant-admin | tenant | true | api_key.read/write, group.read/write, application.read/write, usage.read, audit.read, request_log.read, quota.read, budget.read, password.write（application/budget 由 00030 补种） |
 
 > **models 特例**：`GET /api/v1/models` 不查 `model.read` 权限点，走「仅认证」放行（server.go 的 `configReadGrp`），因为 models 是全局共享配置且 API-key 表单需读别名。故 tenant-admin 虽无 `model.read` 权限点仍可 GET models——这是**有意**的读开放/写关闭 carve-out（见 `crud_model.go` 头注释）。其余全局配置（providers/routes/plugins/operators/tenants）的 GET 挂 `globalGrp`，tenant-admin → 403。
 
@@ -653,7 +788,8 @@ goose 框架自动管理，记录已应用的迁移版本。
 - ADR-0039：`trace_payloads` 4 层 trace 模型（Session → Request → Messages → Raw）
 - `design/domain-flows.md`：实体生命周期、引用保护、quota scope 命名约定
 - `design/observability.md`：语义字段（model/provider/token/ttft/cache/拦截/upstream_request_id）
-- `internal/store/migrations/00001-00024_*.sql`：schema 真相源（缺 00018）
+- `internal/store/migrations/`：schema 真相源（本分支 00001–00031，缺 00018/00028）
+- ADR-0051 / ADR-0052：Application 治理身份、周期支出管控与资金恢复
 - `internal/config/schema.go`：spec JSONB 的 Go 结构定义
 - `internal/store/config.go`：ConfigRepo CRUD + 删除引用保护
 - `internal/store/tenant.go`：TenantRepo + Group 结构

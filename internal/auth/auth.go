@@ -35,6 +35,14 @@ type KeyRecord struct {
 	// AllowedModels optionally restricts model aliases (empty = all). Enforced
 	// by the auth/authorization step that consumes the record.
 	AllowedModels []string
+	// ApplicationID is the bound Application (ADR-0051). nil = unbound key
+	// (migration debt); non-nil = the Application that owns this credential's
+	// workload identity. A disabled Application rejects the key at lookup time
+	// (see KeyRepo.LookupByHash), mirroring the disabled-tenant pattern.
+	ApplicationID *int64
+	// Environment is a controlled credential attribute (dev/staging/prod/''),
+	// snapshotted into request/usage ledgers for cost attribution.
+	Environment string
 }
 
 // KeyStore is the authoritative (slower) lookup the Authenticator falls back to

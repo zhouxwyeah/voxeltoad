@@ -18,7 +18,9 @@ export const NAV_PERMS = {
   dataplane: "dataplane.read",
   // Tenant-scope
   apiKey: "api_key.read",
+  application: "application.read",
   // Both-scope
+  budget: "budget.read",
   usage: "usage.read",
   audit: "audit.read",
   requestLog: "request_log.read",

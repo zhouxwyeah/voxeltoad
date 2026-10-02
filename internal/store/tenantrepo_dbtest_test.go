@@ -4,6 +4,7 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"voxeltoad/internal/store"
@@ -242,5 +243,155 @@ func TestSetTenantEnabled(t *testing.T) {
 	}
 	if ok {
 		t.Error("SetTenantEnabled on unknown tenant = true, want false")
+	}
+}
+
+// --- ADR-0051: API key Application binding and environment ---
+
+func TestTenantRepo_CreateAPIKeyWithBinding(t *testing.T) {
+	ctx := context.Background()
+	db, tenantA, _ := scopedFixture(t)
+	repoA := store.NewTenantRepo(db, tenantA)
+
+	// Tenant A needs a group and an application.
+	groupAID, err := createGroupRaw(db, tenantA, "group-bind")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := createApplicationRaw(db, tenantA, "app-bind", groupAID); err != nil {
+		t.Fatal(err)
+	}
+	var appID int64
+	if err := db.Raw(`SELECT id FROM applications WHERE tenant_id = ? AND name = 'app-bind'`, tenantA).Scan(&appID).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	err = repoA.CreateAPIKey(ctx, store.APIKeySpec{
+		KeyID:         "key_bind",
+		Hash:          "hash_bind",
+		GroupID:       &groupAID,
+		ApplicationID: &appID,
+		Environment:   "prod",
+		AllowedModels: []string{"gpt-4o"},
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIKey with binding: %v", err)
+	}
+
+	keys, _, err := repoA.ListAPIKeys(ctx, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("keys = %d, want 1", len(keys))
+	}
+	if keys[0].ApplicationID == nil || *keys[0].ApplicationID != appID {
+		t.Errorf("ApplicationID = %v, want %d", keys[0].ApplicationID, appID)
+	}
+	if keys[0].Environment != "prod" {
+		t.Errorf("Environment = %q, want prod", keys[0].Environment)
+	}
+}
+
+func TestTenantRepo_UpdateAPIKey_CompleteIdentityOnce(t *testing.T) {
+	ctx := context.Background()
+	db, tenantA, _ := scopedFixture(t)
+	repoA := store.NewTenantRepo(db, tenantA)
+
+	groupAID, err := createGroupRaw(db, tenantA, "group-bu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := createApplicationRaw(db, tenantA, "app-bu", groupAID); err != nil {
+		t.Fatal(err)
+	}
+	var appID int64
+	if err := db.Raw(`SELECT id FROM applications WHERE tenant_id = ? AND name = 'app-bu'`, tenantA).Scan(&appID).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repoA.CreateAPIKey(ctx, store.APIKeySpec{KeyID: "key_bu", Hash: "hash_bu", GroupID: &groupAID}); err != nil {
+		t.Fatal(err)
+	}
+
+	identity := store.APIKeyIdentity{GroupID: groupAID, ApplicationID: appID, Environment: "prod"}
+	ok, err := repoA.UpdateAPIKey(ctx, "key_bu", store.APIKeyUpdate{Identity: &identity})
+	if err != nil || !ok {
+		t.Fatalf("UpdateAPIKey(bind): ok=%v err=%v", ok, err)
+	}
+	keys, _, _ := repoA.ListAPIKeys(ctx, "", 0)
+	if len(keys) != 1 || keys[0].ApplicationID == nil || *keys[0].ApplicationID != appID {
+		t.Errorf("after bind, ApplicationID = %v, want %d", keys[0].ApplicationID, appID)
+	}
+
+	// Identical retries are safe; an environment migration requires a new key.
+	if ok, err := repoA.UpdateAPIKey(ctx, "key_bu", store.APIKeyUpdate{Identity: &identity}); err != nil || !ok {
+		t.Fatalf("idempotent retry: ok=%v err=%v", ok, err)
+	}
+	identity.Environment = "staging"
+	if ok, err := repoA.UpdateAPIKey(ctx, "key_bu", store.APIKeyUpdate{Identity: &identity}); ok || !errors.Is(err, store.ErrAPIKeyIdentityImmutable) {
+		t.Fatalf("identity changed: ok=%v err=%v", ok, err)
+	}
+	keys, _, _ = repoA.ListAPIKeys(ctx, "", 0)
+	if len(keys) != 1 || keys[0].Environment != "prod" {
+		t.Errorf("identity modified after rejected PATCH: %+v", keys)
+	}
+}
+
+func TestTenantRepo_UpdateAPIKey_RejectsPartialIdentity(t *testing.T) {
+	ctx := context.Background()
+	db, tenantA, _ := scopedFixture(t)
+	repoA := store.NewTenantRepo(db, tenantA)
+
+	groupAID, err := createGroupRaw(db, tenantA, "group-env")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repoA.CreateAPIKey(ctx, store.APIKeySpec{KeyID: "key_env", Hash: "hash_env", GroupID: &groupAID}); err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := repoA.UpdateAPIKey(ctx, "key_env", store.APIKeyUpdate{Identity: &store.APIKeyIdentity{Environment: "staging"}})
+	if ok || !errors.Is(err, store.ErrInvalidAPIKeyIdentity) {
+		t.Fatalf("partial identity accepted: ok=%v err=%v", ok, err)
+	}
+	keys, _, _ := repoA.ListAPIKeys(ctx, "", 0)
+	if len(keys) != 1 || keys[0].Environment != "" {
+		t.Errorf("partial identity modified key: %+v", keys)
+	}
+}
+
+func TestTenantRepo_UpdateAPIKey_CrossTenantBlocked(t *testing.T) {
+	ctx := context.Background()
+	db, tenantA, tenantB := scopedFixture(t)
+	repoA := store.NewTenantRepo(db, tenantA)
+
+	groupAID, err := createGroupRaw(db, tenantA, "group-cta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	groupBID, err := createGroupRaw(db, tenantB, "group-ctb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Application belongs to tenant B.
+	if err := createApplicationRaw(db, tenantB, "app-ctb", groupBID); err != nil {
+		t.Fatal(err)
+	}
+	var appBID int64
+	if err := db.Raw(`SELECT id FROM applications WHERE tenant_id = ? AND name = 'app-ctb'`, tenantB).Scan(&appBID).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repoA.CreateAPIKey(ctx, store.APIKeySpec{KeyID: "key_ct", Hash: "hash_ct", GroupID: &groupAID}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Attempt to bind tenant A's key to tenant B's application.
+	ok, err := repoA.UpdateAPIKey(ctx, "key_ct", store.APIKeyUpdate{Identity: &store.APIKeyIdentity{
+		GroupID: groupAID, ApplicationID: appBID, Environment: "prod",
+	}})
+	if ok || !errors.Is(err, store.ErrInvalidAPIKeyIdentity) {
+		t.Fatalf("cross-tenant binding accepted: ok=%v err=%v", ok, err)
 	}
 }

@@ -38,6 +38,8 @@ type TracePayloadSummaryRow struct {
 	SessionID       string    `json:"session_id"`
 	TraceID         string    `json:"trace_id"`
 	Tenant          string    `json:"tenant"`
+	ApplicationID   *int64    `json:"application_id"`
+	Environment     string    `json:"environment"`
 	Provider        string    `json:"provider"`
 	ModelRequested  string    `json:"model_requested"`
 	Stream          bool      `json:"stream"`
@@ -65,7 +67,7 @@ type TracePayloadDetail struct {
 
 // summaryCols lists the columns fetched for a summary row (no JSONB), shared by
 // ListBySession and the summary projection of GetByRequestID.
-const traceSummaryCols = `id, request_id, client_request_id, session_id, trace_id, tenant,
+const traceSummaryCols = `id, request_id, client_request_id, session_id, trace_id, tenant, application_id, environment,
        provider, model_requested, stream, agent_type, user_agent,
        status_code, stop_reason, n_messages, n_tool_use, created_at`
 

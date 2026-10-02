@@ -32,14 +32,14 @@ func (r *TracePayloadRepo) Record(ctx context.Context, p observability.TracePayl
 		    provider, model_requested, stream, agent_type, user_agent, ingress_protocol,
 		    provider_endpoint,
 		    status_code, stop_reason, n_messages, n_tool_use,
-		    messages, request_raw, response_raw, error_raw)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		    messages, request_raw, response_raw, error_raw, application_id, environment)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.RequestID, p.ClientRequestID, p.SessionID, p.TraceID, p.Tenant, p.Group, p.APIKeyID,
 		p.Provider, p.ModelRequested, p.Stream, p.AgentType, p.UserAgent, p.IngressProtocol,
 		p.ProviderEndpoint,
 		p.StatusCode, p.StopReason, p.NMessages, p.NToolUse,
 		jsonBody(p.Messages, "[]"), jsonBody(p.RequestRaw, "{}"),
-		p.ResponseRaw, p.ErrorRaw,
+		p.ResponseRaw, p.ErrorRaw, p.ApplicationID, p.Environment,
 	).Error
 }
 

@@ -32,6 +32,25 @@ func (s *capturingPayloadSink) count() int {
 	return len(s.got)
 }
 
+func TestAsyncTracePayloadRecorder_SnapshotsApplication(t *testing.T) {
+	sink := &capturingPayloadSink{}
+	rec := NewAsyncTracePayloadRecorder(sink, 2)
+	id := int64(901)
+	rec.Record(context.Background(), TracePayload{ApplicationID: &id, Environment: "prod"})
+	rec.Record(context.Background(), TracePayload{})
+	id = 902
+	rec.Start()
+	if err := rec.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.got) != 2 || sink.got[0].ApplicationID == nil || *sink.got[0].ApplicationID != 901 || sink.got[0].Environment != "prod" {
+		t.Fatalf("application snapshot changed after enqueue: %+v", sink.got)
+	}
+	if sink.got[1].ApplicationID != nil || sink.got[1].Environment != "" {
+		t.Fatalf("unattributed trace received invented identity: %+v", sink.got[1])
+	}
+}
+
 func TestAsyncTracePayloadRecorder_FlushesToSink(t *testing.T) {
 	sink := &capturingPayloadSink{}
 	rec := NewAsyncTracePayloadRecorder(sink, 8)

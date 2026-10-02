@@ -1,40 +1,42 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { AdminError, unwrap, type AdminPaths } from "@voxeltoad/gateway-sdk/admin";
 import { serverAdminClient } from "@/lib/admin";
 import { type FormResult, toFormError } from "@/lib/errors";
 import { mapBackendError } from "@/lib/i18n-errors";
+
+type CreateRequest = AdminPaths["/api/v1/api-keys"]["post"]["requestBody"]["content"]["application/json"];
+type UpdateRequest = NonNullable<AdminPaths["/api/v1/api-keys/{key_id}"]["patch"]["requestBody"]>["content"]["application/json"];
+
+async function formError(err: unknown): Promise<FormResult> {
+  const result = await toFormError(err);
+  if (!result.ok && err instanceof AdminError) {
+    const mapped = mapBackendError(err.message);
+    return { ok: false, error: mapped.fallback, errorKey: mapped.key };
+  }
+  return result;
+}
 
 export async function createAPIKey(
   _prev: FormResult | null,
   formData: FormData,
 ): Promise<FormResult & { apiKey?: string }> {
-  const keyId = String(formData.get("key_id") ?? "").trim();
-  const allowedModels = formData.getAll("allowed_models").map(String).filter(Boolean);
-
-  if (!keyId) {
-    const mapped = mapBackendError("key_id is required");
-    return { ok: false, error: mapped.fallback, errorKey: mapped.key };
-  }
-
   try {
     const client = await serverAdminClient();
-    const body: { key_id: string; allowed_models?: string[] } = { key_id: keyId };
-    if (allowedModels.length > 0) {
-      body.allowed_models = allowedModels;
-    }
-    const { data, error, response } = await client.POST("/api/v1/api-keys", {
-      body,
-    });
-    if (error || !response.ok) {
-      const message = error?.error?.message ?? "create failed";
-      const mapped = mapBackendError(message);
-      return { ok: false, error: mapped.fallback, errorKey: mapped.key };
-    }
+    const body: CreateRequest = {
+      key_id: String(formData.get("key_id") ?? "").trim(),
+      group_id: Number(formData.get("group_id")),
+      application_id: Number(formData.get("application_id")),
+      environment: String(formData.get("environment") ?? "") as CreateRequest["environment"],
+    };
+    const allowedModels = formData.getAll("allowed_models").map(String).filter(Boolean);
+    if (allowedModels.length) body.allowed_models = allowedModels;
+    const data = unwrap(await client.POST("/api/v1/api-keys", { body }));
     revalidatePath("/api-keys");
-    return { ok: true, apiKey: (data?.api_key as string) ?? "" };
+    return { ok: true, apiKey: data.api_key };
   } catch (err) {
-    return toFormError(err);
+    return formError(err);
   }
 }
 
@@ -42,53 +44,34 @@ export async function updateAPIKey(
   _prev: FormResult | null,
   formData: FormData,
 ): Promise<FormResult> {
-  const keyId = String(formData.get("key_id") ?? "").trim();
-  const allowedModels = formData.getAll("allowed_models").map(String).filter(Boolean);
-
-  if (!keyId) {
-    return { ok: false, error: "key_id is required" };
-  }
-  if (allowedModels.length === 0) {
-    const mapped = mapBackendError("allowed_models must be a non-empty array");
-    return { ok: false, error: mapped.fallback, errorKey: mapped.key };
-  }
-
   try {
     const client = await serverAdminClient();
-    const { error, response } = await client.PATCH(
-      "/api/v1/api-keys/{key_id}",
-      {
-        body: { allowed_models: allowedModels },
-        params: { path: { key_id: keyId } },
-      },
-    );
-    if (error || !response.ok) {
-      const message = error?.error?.message ?? "update failed";
-      const mapped = mapBackendError(message);
-      return { ok: false, error: mapped.fallback, errorKey: mapped.key };
+    const body: UpdateRequest = {};
+    const allowedModels = formData.getAll("allowed_models").map(String).filter(Boolean);
+    if (allowedModels.length || formData.get("had_models") === "true" || formData.get("bind_identity") !== "true") body.allowed_models = allowedModels;
+    if (formData.get("bind_identity") === "true") {
+      body.group_id = Number(formData.get("group_id"));
+      body.application_id = Number(formData.get("application_id"));
+      body.environment = String(formData.get("environment") ?? "") as CreateRequest["environment"];
     }
+    unwrap(await client.PATCH("/api/v1/api-keys/{key_id}", {
+      body,
+      params: { path: { key_id: String(formData.get("key_id") ?? "").trim() } },
+    }));
+    revalidatePath("/api-keys");
+    return { ok: true };
   } catch (err) {
-    return toFormError(err);
+    return formError(err);
   }
-  revalidatePath("/api-keys");
-  return { ok: true };
 }
 
 export async function revokeAPIKey(keyId: string): Promise<FormResult> {
   try {
     const client = await serverAdminClient();
-    const { error, response } = await client.DELETE(
-      "/api/v1/api-keys/{key_id}",
-      { params: { path: { key_id: keyId } } },
-    );
-    if (error || !response.ok) {
-      const message = error?.error?.message ?? "revoke failed";
-      const mapped = mapBackendError(message);
-      return { ok: false, error: mapped.fallback, errorKey: mapped.key };
-    }
+    unwrap(await client.DELETE("/api/v1/api-keys/{key_id}", { params: { path: { key_id: keyId } } }));
+    revalidatePath("/api-keys");
+    return { ok: true };
   } catch (err) {
-    return toFormError(err);
+    return formError(err);
   }
-  revalidatePath("/api-keys");
-  return { ok: true };
 }

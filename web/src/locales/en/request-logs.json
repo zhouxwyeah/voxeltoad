@@ -1,6 +1,17 @@
 {
   "heading": "Request Logs",
   "subtitle": "LLM request records — view token usage, latency, errors, and blocked requests per tenant.",
+  "identity": {
+    "application": "Application ID",
+    "environment": "Environment",
+    "unattributed": "Unattributed",
+    "unattributedOnly": "Unattributed applications only",
+    "allEnvironments": "All environments"
+  },
+  "state": {
+    "error": "Unable to load request logs.",
+    "retry": "Retry"
+  },
   "columns": {
     "time": "Time",
     "tenant": "Tenant",

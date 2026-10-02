@@ -1,0 +1,59 @@
+{
+  "heading": "Applications",
+  "subtitle": "Long-lived business systems consuming AI. Each application has an owning group and can be consumed by API keys across multiple groups.",
+  "migration": {
+    "description": "Migrate active legacy keys by completing their consumption group, application and environment once. Existing request history stays unchanged.",
+    "unboundKeys": "Review unbound API keys",
+    "disableHint": "Disabling an application rejects new requests after the authentication cache expires (default TTL: 1 minute). Already-started requests and streams are not interrupted."
+  },
+  "attribution": {
+    "heading": "Attribution overview · Last 24 hours",
+    "unboundKeys": "Unbound API keys (current)",
+    "requestCount": "Recorded requests",
+    "unattributedRequests": "Unattributed requests",
+    "unattributedRatio": "Unattributed request share",
+    "recordedCosts": "Recorded unattributed costs",
+    "unknownCurrency": "Unknown currency",
+    "noCosts": "No cost records in this window",
+    "keyHint": "Counts non-revoked keys missing a consumption group, application or environment, including expired keys and disabled tenants. This is not a count of callable keys or a share of traffic.",
+    "historyHint": "Requests without a recorded application are unattributed. Historical missing fields stay unknown; asynchronous request and usage records may lag or be incomplete. Costs are grouped by recorded currency and are not a financial balance.",
+    "error": "Unable to load the attribution overview. Application management is still available.",
+    "forbidden": "The attribution overview requires usage.read permission."
+  },
+  "state": {
+    "error": "Unable to load applications or groups.",
+    "retry": "Retry"
+  },
+  "columns": {
+    "id": "ID",
+    "name": "Name",
+    "ownerGroup": "Owner Group",
+    "status": "Status"
+  },
+  "status": {
+    "enabled": "Enabled",
+    "disabled": "Disabled"
+  },
+  "form": {
+    "name": {
+      "label": "Name *"
+    },
+    "ownerGroup": {
+      "label": "Owner Group *"
+    }
+  },
+  "modal": {
+    "createTitle": "Create Application",
+    "disableTitle": "Disable Application"
+  },
+  "actions": {
+    "create": "Create Application",
+    "save": "Save",
+    "emptyState": "No applications yet.",
+    "disable": "Disable",
+    "enable": "Enable",
+    "delete": "Delete",
+    "disableConfirm": "Disable application \"{name}\"? New requests using bound keys are rejected after the authentication cache expires (default: 1 minute). In-flight requests and streams are not interrupted.",
+    "deleteConfirm": "Delete application \"{name}\"? This cannot be undone unless no API keys reference it."
+  }
+}

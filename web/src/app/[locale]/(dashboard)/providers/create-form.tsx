@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { createProvider, updateProvider, testProviderConnection } from "./actions";
@@ -52,10 +52,6 @@ export function ProviderForm({
   const t = useTranslations("providers");
   const tCommon = useTranslations("common");
   const tErr = useTranslations("errors");
-  const [state, formAction, pending] = useActionState(
-    isEdit ? updateProvider : createProvider,
-    null,
-  );
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const onSuccessRef = useRef(onSuccess);
@@ -69,7 +65,6 @@ export function ProviderForm({
   const [customType, setCustomType] = useState(!dvIsPreset && dvType !== "" ? dvType : "");
   const [showCustom, setShowCustom] = useState(!dvIsPreset && dvType !== "");
   const typeValue = selectedType !== "" ? selectedType : customType;
-  const [success, setSuccess] = useState(false);
 
   // ----- endpoints: dynamic array -----
   const dvEndpoints: EndpointRow[] = defaultValues?.endpoints
@@ -131,20 +126,24 @@ export function ProviderForm({
     setTesting(false);
   }
 
-  useEffect(() => {
-    if (state?.ok && !success) {
-      formRef.current?.reset();
-      setSelectedType("");
-      setCustomType("");
-      setShowCustom(false);
-      setEndpoints([{ id: "", adapter: "openai", base_url: "" }]);
-      setCredMode("ref");
-      setSuccess(true);
-      toast.success(t(isEdit ? "form.successUpdated" : "form.successCreated"));
-      onSuccessRef.current?.();
-      router.refresh();
-    }
-  }, [state, router, success]);
+  const [state, formAction, pending] = useActionState(
+    async (previous: Awaited<ReturnType<typeof createProvider>> | null, data: FormData) => {
+      const result = await (isEdit ? updateProvider : createProvider)(previous, data);
+      if (result.ok) {
+        formRef.current?.reset();
+        setSelectedType("");
+        setCustomType("");
+        setShowCustom(false);
+        setEndpoints([{ id: "", adapter: "openai", base_url: "" }]);
+        setCredMode("ref");
+        toast.success(t(isEdit ? "form.successUpdated" : "form.successCreated"));
+        onSuccessRef.current?.();
+        router.refresh();
+      }
+      return result;
+    },
+    null,
+  );
 
   return (
     <form

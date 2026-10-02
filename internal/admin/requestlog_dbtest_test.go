@@ -10,6 +10,78 @@ import (
 	"voxeltoad/internal/store"
 )
 
+func TestRequestLogs_SessionCurrencies(t *testing.T) {
+	h, db, tok := authedAdmin(t)
+	if err := db.Exec(`INSERT INTO request_logs (tenant, session_id) VALUES
+		('acme', 'mixed'), ('acme', 'single'), ('acme', 'empty')`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO usage_records (tenant, api_key_id, provider, model, session_id, currency, cost) VALUES
+		('acme', 'k', 'openai', 'chat', 'mixed', 'USD', 100),
+		('acme', 'k', 'openai', 'chat', 'mixed', 'CNY', 200),
+		('acme', 'k', 'openai', 'chat', 'single', 'USD', 300)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	rr := doAuth(t, h, tok, http.MethodGet, "/api/v1/request-logs/sessions", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("sessions status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var page struct {
+		Data  []map[string]any `json:"data"`
+		Total int64            `json:"total"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	rows := page.Data
+	if len(rows) != 3 || page.Total != 3 {
+		t.Fatalf("session page = %+v", page)
+	}
+	for _, row := range rows {
+		switch row["session_id"] {
+		case "mixed":
+			if row["cost"] != nil || row["currency"] != "" || len(row["costs_by_currency"].([]any)) != 2 {
+				t.Fatalf("mixed costs = %+v", row)
+			}
+		case "single":
+			if row["cost"] != float64(300) || row["currency"] != "USD" || len(row["costs_by_currency"].([]any)) != 1 {
+				t.Fatalf("single costs = %+v", row)
+			}
+		case "empty":
+			if row["cost"] != float64(0) || len(row["costs_by_currency"].([]any)) != 0 {
+				t.Fatalf("empty costs = %+v", row)
+			}
+		}
+	}
+	for _, sessionID := range []string{"mixed", "single", "empty"} {
+		rr := doAuth(t, h, tok, http.MethodGet, "/api/v1/request-logs/sessions/"+sessionID, nil)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("session detail status=%d body=%s", rr.Code, rr.Body.String())
+		}
+		var detail struct {
+			CostSummary store.SessionCostSummary `json:"cost_summary"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &detail); err != nil {
+			t.Fatal(err)
+		}
+		summary := detail.CostSummary
+		switch sessionID {
+		case "mixed":
+			if summary.Cost != nil || len(summary.CostsByCurrency) != 2 {
+				t.Fatalf("mixed summary = %+v", summary)
+			}
+		case "single":
+			if summary.Cost == nil || *summary.Cost != 300 || summary.Currency != "USD" {
+				t.Fatalf("single summary = %+v", summary)
+			}
+		case "empty":
+			if summary.Cost == nil || *summary.Cost != 0 || len(summary.CostsByCurrency) != 0 {
+				t.Fatalf("empty summary = %+v", summary)
+			}
+		}
+	}
+}
+
 // seedRequestLogRow inserts a request_logs row for a tenant (created_at
 // defaults to now()).
 func seedRequestLogRow(t *testing.T, db *store.DB, tenant, provider, errorType string) {

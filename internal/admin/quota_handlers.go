@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"voxeltoad/internal/apperr"
-	"voxeltoad/internal/operator"
+	"voxeltoad/internal/billing"
 	"voxeltoad/internal/store"
 )
 
@@ -68,7 +68,7 @@ func mountQuotaRead(g *gin.RouterGroup, db *store.DB) {
 			return
 		}
 		op := operatorFrom(c)
-		if op.Role == operator.RoleTenantAdmin {
+		if op.TenantID != nil {
 			own := ""
 			if op.TenantID != nil {
 				name, err := store.TenantName(c.Request.Context(), db, *op.TenantID)
@@ -106,12 +106,11 @@ func validateQuotaScope(ctx context.Context, db *store.DB, scope string) error {
 		}
 		return tenantExists(ctx, db, name)
 	case strings.HasPrefix(scope, "group:"):
-		rest := strings.TrimPrefix(scope, "group:")
-		if i := strings.IndexByte(rest, '/'); i >= 0 {
-			return tenantExists(ctx, db, rest[:i])
+		tenant, _, err := billing.ParseGroupScope(scope)
+		if err != nil {
+			return err
 		}
-		// group without /tenant separator — malformed but not preventing operation.
-		return nil
+		return tenantExists(ctx, db, tenant)
 	default:
 		// key:Z and bare strings — skip validation (pre-funding allowed).
 		return nil

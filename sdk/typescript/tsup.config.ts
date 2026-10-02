@@ -6,6 +6,7 @@ export default defineConfig({
   // needs only one does not bundle the other's dependencies.
   entry: ["src/index.ts", "src/admin.ts"],
   format: ["esm", "cjs"],
+  noExternal: ["openapi-fetch"],
   dts: true,
   clean: true,
   sourcemap: true,

@@ -38,6 +38,43 @@ jobs:
         run: make ci-web
 
   # -------------------------------------------------------------------------
+  # Integration gate: runs on PRs and main pushes before delivery. All upstreams
+  # are mocked; DB, data-plane and browser suites each own their test resources.
+  # -------------------------------------------------------------------------
+  ci-integration:
+    needs: ci-light
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install SDK + web dependencies
+        run: |
+          make sdk-install
+          make sdk-build
+          npm ci --prefix web
+
+      - name: Install Playwright Chromium and system dependencies
+        working-directory: web
+        run: npx --no-install playwright install --with-deps chromium
+
+      - name: Database and migration gates
+        run: make test-db
+
+      - name: Data-plane and enterprise E2E gates
+        run: make test-e2e
+
+      - name: Control Panel browser E2E gates
+        run: make web-e2e
+
+  # -------------------------------------------------------------------------
   # Heavy gate: runs only on push to main. Includes DB-backed tests (embedded
   # PG), Docker image builds, and vulnerability audit. Runs after ci-light so
   # failures in the light gate don't waste heavy CI minutes.

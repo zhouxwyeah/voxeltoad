@@ -118,6 +118,7 @@ func Router(opts Options) http.Handler {
 		mountRequestLogs(v1, opts.DB)
 		mountTrace(v1, opts.DB) // LLM trace message+raw layers (ADR-0039)
 		mountQuotaRead(v1, opts.DB)
+		mountBudgets(v1, opts.DB, auth)
 		mountMe(v1, opts.DB)
 	} else {
 		for _, p := range []string{"/providers", "/models", "/routes", "/plugins", "/api-keys", "/quotas", "/groups", "/me"} {

@@ -55,7 +55,17 @@ func mountRequestLogs(g *gin.RouterGroup, db *store.DB) {
 				return
 			}
 			for i := range sessions {
-				sessions[i].Cost = costs[sessions[i].SessionID]
+				amounts := costs[sessions[i].SessionID]
+				sessions[i].CostsByCurrency = amounts
+				switch len(amounts) {
+				case 0:
+					zero := int64(0)
+					sessions[i].Cost = &zero
+					sessions[i].CostsByCurrency = []store.CurrencyCost{}
+				case 1:
+					sessions[i].Cost = &amounts[0].Cost
+					sessions[i].Currency = amounts[0].Currency
+				}
 			}
 		}
 
@@ -71,8 +81,15 @@ func mountRequestLogs(g *gin.RouterGroup, db *store.DB) {
 		if !ok {
 			return
 		}
+		applicationID, environment, unattributed, ok := parseAttributionFilter(c)
+		if !ok {
+			return
+		}
 		repo := store.NewRequestLogQueryRepo(db, tenant)
 		filter := store.RequestLogFilter{
+			ApplicationID:     applicationID,
+			Environment:       environment,
+			Unattributed:      unattributed,
 			Provider:          c.Query("provider"),
 			ModelRequested:    c.Query("model_requested"),
 			ErrorType:         c.Query("error_type"),
@@ -152,7 +169,7 @@ func exportRequestLogsCSV(c *gin.Context, rows []store.RequestLogRow) {
 		"ttft_ms", "duration_ms", "error_type", "blocked_by", "fallback",
 		"request_id", "client_request_id", "session_id", "trace_id", "session_source", "agent_type", "user_agent",
 		"cache_hit", "cache_tier", "cache_source", "cached_prompt_tokens",
-		"upstream_request_id", "ingress_protocol", "provider_endpoint", "created_at"}
+		"upstream_request_id", "ingress_protocol", "provider_endpoint", "created_at", "application_id", "environment"}
 	out := make([][]string, len(rows))
 	for i, r := range rows {
 		out[i] = []string{
@@ -169,7 +186,9 @@ func exportRequestLogsCSV(c *gin.Context, rows []store.RequestLogRow) {
 			fmt.Sprintf("%d", r.CachedPromptTokens),
 			r.UpstreamRequestID, r.IngressProtocol, r.ProviderEndpoint,
 			r.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			csvApplicationID(r.ApplicationID), r.Environment,
 		}
+		sanitizeLedgerCSVRow(out[i])
 	}
 	writeCSV(c, "request_logs.csv", headers, out)
 }

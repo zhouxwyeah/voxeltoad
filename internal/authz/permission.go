@@ -35,6 +35,8 @@ const (
 	PermOperatorRead  Permission = "operator.read"
 	PermOperatorWrite Permission = "operator.write"
 	PermQuotaWrite    Permission = "quota.write"
+	PermBudgetWrite   Permission = "budget.write"
+	PermBudgetResolve Permission = "budget.resolve"
 
 	// Global-scope: read-only operational views.
 	PermConfigHistoryRead Permission = "config_history.read"
@@ -43,16 +45,19 @@ const (
 	PermSettingsRead      Permission = "settings.read"
 
 	// Tenant-scope: manage api-keys and groups within a tenant.
-	PermAPIKeyRead  Permission = "api_key.read"
-	PermAPIKeyWrite Permission = "api_key.write"
-	PermGroupRead   Permission = "group.read"
-	PermGroupWrite  Permission = "group.write"
+	PermAPIKeyRead       Permission = "api_key.read"
+	PermAPIKeyWrite      Permission = "api_key.write"
+	PermGroupRead        Permission = "group.read"
+	PermGroupWrite       Permission = "group.write"
+	PermApplicationRead  Permission = "application.read"
+	PermApplicationWrite Permission = "application.write"
 
 	// Both-scope: read-only cross-cutting views (scope governs the view width).
 	PermUsageRead      Permission = "usage.read"
 	PermAuditRead      Permission = "audit.read"
 	PermRequestLogRead Permission = "request_log.read"
 	PermQuotaRead      Permission = "quota.read"
+	PermBudgetRead     Permission = "budget.read"
 
 	// Both-scope: operator self-service.
 	PermPasswordWrite Permission = "password.write"
@@ -92,6 +97,8 @@ func AllPermissions() []Entry {
 		{PermOperatorRead, ScopeGlobal, "Read operators"},
 		{PermOperatorWrite, ScopeGlobal, "Write operators"},
 		{PermQuotaWrite, ScopeGlobal, "Write quotas (global top-up)"},
+		{PermBudgetWrite, ScopeGlobal, "Write recurring budgets"},
+		{PermBudgetResolve, ScopeGlobal, "Resolve billing reservations"},
 		{PermConfigHistoryRead, ScopeGlobal, "Read config history"},
 		{PermDataplaneRead, ScopeGlobal, "Read data-plane nodes"},
 		{PermOverviewRead, ScopeGlobal, "Read overview dashboard"},
@@ -101,11 +108,14 @@ func AllPermissions() []Entry {
 		{PermAPIKeyWrite, ScopeTenant, "Write API keys"},
 		{PermGroupRead, ScopeTenant, "Read groups"},
 		{PermGroupWrite, ScopeTenant, "Write groups"},
+		{PermApplicationRead, ScopeTenant, "Read applications"},
+		{PermApplicationWrite, ScopeTenant, "Write applications"},
 		// Both-scope
 		{PermUsageRead, ScopeGlobal, "Read usage stats"}, // global → all; tenant → own
 		{PermAuditRead, ScopeGlobal, "Read audit trail"},
 		{PermRequestLogRead, ScopeGlobal, "Read request logs"},
 		{PermQuotaRead, ScopeGlobal, "Read quotas"},
+		{PermBudgetRead, ScopeGlobal, "Read recurring budgets and reservations"},
 		{PermPasswordWrite, ScopeGlobal, "Change own password"},
 		{PermRoleRead, ScopeGlobal, "Read roles"},
 		{PermRoleWrite, ScopeGlobal, "Write roles"},

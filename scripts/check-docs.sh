@@ -9,6 +9,8 @@
 #      ADRs are excluded — they are immutable history where "deferred to
 #      phase 2" is permanently correct. Check 4 is advisory by default and
 #      only fails under CHECK_DOCS_STRICT=1.
+#   5–7. Architecture paths/layout and ADR status consistency.
+#   8. Duplicate numeric migration versions (gaps are allowed).
 #
 # Usage: ./scripts/check-docs.sh
 # Run from repo root. Exits 0 if valid, 1 on a hard failure, 2 on an
@@ -193,8 +195,36 @@ if [ -f "$ADR_INDEX" ]; then
   done
 fi
 
+# ---------------------------------------------------------------- check 8
+# Goose identifies migrations by their numeric filename prefix, not the full
+# filename. Normalize leading zeroes so 00029 and 29 cannot alias one version.
+# Branches may legitimately have missing versions; only duplicates fail.
+migration_duplicates=$(
+  for migration in "$MIGRATIONS_DIR"/[0-9]*_*.sql; do
+    [ -f "$migration" ] || continue
+    basename "$migration"
+  done | awk -F_ '
+    $1 ~ /^[0-9]+$/ {
+      version = $1
+      sub(/^0+/, "", version)
+      if (version == "") version = "0"
+      count[version]++
+      files[version] = files[version] " " $0
+    }
+    END {
+      for (version in count)
+        if (count[version] > 1)
+          printf "check-docs: duplicate migration version %s:%s\n", version, files[version]
+    }
+  ' | sort
+)
+if [ -n "$migration_duplicates" ]; then
+  printf '%s\n' "$migration_duplicates" >&2
+  exit_code=1
+fi
+
 # ---------------------------------------------------------------- summary
-hard_checks=6
+hard_checks=7
 if [ "$exit_code" -eq 0 ]; then
   if [ "$deferred_reviews" -gt 0 ]; then
     echo "check-docs: OK ($((hard_checks + 1)) checks, $deferred_reviews deferred-references to review)"

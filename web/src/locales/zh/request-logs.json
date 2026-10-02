@@ -1,6 +1,17 @@
 {
   "heading": "请求日志",
   "subtitle": "LLM 请求记录 — 查看 token 用量、延迟、错误和被拦截的请求。",
+  "identity": {
+    "application": "应用 ID",
+    "environment": "环境",
+    "unattributed": "未归因",
+    "unattributedOnly": "仅应用未归因",
+    "allEnvironments": "全部环境"
+  },
+  "state": {
+    "error": "无法加载请求日志。",
+    "retry": "重试"
+  },
   "columns": {
     "time": "时间",
     "tenant": "租户",

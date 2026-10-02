@@ -148,10 +148,9 @@ func TestConfigSnapshots_ListHistory(t *testing.T) {
 
 	// Create a provider to trigger snapshot save (async).
 	rr := doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]interface{}{
-		"name":     "snap-test",
-		"type":     "openai",
-		"adapter":  "openai",
-		"base_url": "https://api.example.com",
+		"name":      "snap-test",
+		"type":      "openai",
+		"endpoints": []map[string]any{{"adapter": "openai", "base_url": "https://api.example.com"}},
 	})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("provider create status = %d, want 201; body=%s", rr.Code, rr.Body.String())
@@ -240,11 +239,14 @@ func TestConfig_Preview(t *testing.T) {
 	h, _, tok := authedAdmin(t)
 
 	preview := map[string]interface{}{
-		"version":   "preview",
-		"providers": []interface{}{map[string]interface{}{"name": "test", "type": "openai", "adapter": "openai"}},
-		"models":    []interface{}{},
-		"routes":    []interface{}{},
-		"plugins":   []interface{}{},
+		"version": "preview",
+		"providers": []interface{}{map[string]interface{}{
+			"name": "test", "type": "openai",
+			"endpoints": []map[string]any{{"adapter": "openai", "base_url": "https://api.example.com"}},
+		}},
+		"models":  []interface{}{},
+		"routes":  []interface{}{},
+		"plugins": []interface{}{},
 	}
 	rr := doAuth(t, h, tok, http.MethodPost, "/api/v1/config/preview", preview)
 	if rr.Code != http.StatusOK {
@@ -374,20 +376,18 @@ func TestConfig_RollbackAPI(t *testing.T) {
 
 	// Create a provider to trigger snapshot save.
 	rr := doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]interface{}{
-		"name":     "rollback-me",
-		"type":     "openai",
-		"adapter":  "openai",
-		"base_url": "https://api.openai.com/v1",
+		"name":      "rollback-me",
+		"type":      "openai",
+		"endpoints": []map[string]any{{"adapter": "openai", "base_url": "https://api.openai.com/v1"}},
 	})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create provider: status=%d body=%s", rr.Code, rr.Body.String())
 	}
 	// Create a second provider.
 	rr = doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]interface{}{
-		"name":     "rollback-target",
-		"type":     "claude",
-		"adapter":  "claude",
-		"base_url": "https://api.anthropic.com/v1",
+		"name":      "rollback-target",
+		"type":      "claude",
+		"endpoints": []map[string]any{{"adapter": "claude", "base_url": "https://api.anthropic.com/v1"}},
 	})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create second provider: status=%d body=%s", rr.Code, rr.Body.String())

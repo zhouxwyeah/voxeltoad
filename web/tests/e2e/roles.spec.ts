@@ -97,8 +97,9 @@ test("login → create custom role → see it → delete it", async ({ page }) =
   // Delete the role.
   const deleteRow = page.getByRole("row", { name: new RegExp(roleName) });
   await deleteRow.getByText("Delete").click();
-  // Confirm button appears.
-  await deleteRow.getByText("Confirm").click();
+  // ConfirmModal dialog appears.
+  const deleteModal = page.getByRole("dialog", { name: "Delete role" });
+  await deleteModal.getByRole("button", { name: "Delete" }).click();
 
   // Role disappears from the list.
   await expect(page.getByRole("cell", { name: roleName })).toHaveCount(0);

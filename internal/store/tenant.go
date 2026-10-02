@@ -2,7 +2,11 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
+
+	"gorm.io/gorm"
 )
 
 // TenantRepo is a tenant-scoped repository for tenant-owned resources (groups,
@@ -205,9 +209,8 @@ func (r *TenantRepo) DeleteGroup(ctx context.Context, name string) (bool, error)
 	return res.RowsAffected > 0, nil
 }
 
-// GroupReferencedByAPIKeys returns the key_id of every active (non-revoked)
-// api_key in the bound tenant that references the named group. Empty when no
-// references exist.
+// GroupReferencedByAPIKeys includes revoked keys: their retained rows still
+// reference the group and prevent deletion.
 func (r *TenantRepo) GroupReferencedByAPIKeys(ctx context.Context, name string) ([]string, error) {
 	var rows []struct {
 		KeyID string
@@ -216,7 +219,7 @@ func (r *TenantRepo) GroupReferencedByAPIKeys(ctx context.Context, name string) 
 		`SELECT k.key_id
 		 FROM api_keys k
 		 JOIN groups g ON g.id = k.group_id
-		 WHERE k.tenant_id = ? AND g.tenant_id = ? AND g.name = ? AND k.revoked_at IS NULL`,
+		 WHERE k.tenant_id = ? AND g.tenant_id = ? AND g.name = ?`,
 		r.tenantID, r.tenantID, name,
 	).Scan(&rows).Error; err != nil {
 		return nil, err
@@ -228,6 +231,35 @@ func (r *TenantRepo) GroupReferencedByAPIKeys(ctx context.Context, name string) 
 	return out, nil
 }
 
+// GroupReferencedByApplications returns applications maintained by the group.
+func (r *TenantRepo) GroupReferencedByApplications(ctx context.Context, name string) ([]string, error) {
+	var names []string
+	err := r.db.WithContext(ctx).Raw(
+		`SELECT a.name FROM applications a JOIN groups g ON g.id = a.owner_group_id
+		 WHERE a.tenant_id = ? AND g.tenant_id = ? AND g.name = ? ORDER BY a.id`,
+		r.tenantID, r.tenantID, name,
+	).Scan(&names).Error
+	return names, err
+}
+
+var (
+	ErrInvalidAPIKeyIdentity   = errors.New("group_id, application_id and environment must identify enabled resources in this tenant")
+	ErrAPIKeyIdentityImmutable = errors.New("existing API key governance identity cannot be changed; issue a new key instead")
+)
+
+// APIKeyIdentity is the complete, immutable enterprise credential identity.
+// GroupID is the consuming group, not the application's owner group.
+type APIKeyIdentity struct {
+	GroupID       int64  `json:"group_id"`
+	ApplicationID int64  `json:"application_id"`
+	Environment   string `json:"environment"`
+}
+
+func (i APIKeyIdentity) valid() bool {
+	return i.GroupID > 0 && i.ApplicationID > 0 &&
+		(i.Environment == "dev" || i.Environment == "staging" || i.Environment == "prod")
+}
+
 // APIKeySpec is the input for creating a client API key (the hash is computed by
 // the caller; plaintext is never stored — ADR-0006).
 type APIKeySpec struct {
@@ -235,6 +267,11 @@ type APIKeySpec struct {
 	Hash          string
 	GroupID       *int64
 	AllowedModels []string
+	// ApplicationID binds the key to an Application (ADR-0051). nil = unbound
+	// (migration debt). At most one Application per key.
+	ApplicationID *int64
+	// Environment is a controlled credential attribute (dev/staging/prod/'').
+	Environment string
 }
 
 // APIKeyInfo is a non-secret view of an API key (for listing).
@@ -242,10 +279,60 @@ type APIKeyInfo struct {
 	KeyID         string   `json:"key_id"`
 	Revoked       bool     `json:"revoked"`
 	AllowedModels []string `json:"allowed_models,omitempty"`
+	GroupID       *int64   `json:"group_id"`
+	// ApplicationID is nil for unbound keys (migration debt).
+	ApplicationID *int64 `json:"application_id"`
+	Environment   string `json:"environment"`
 }
 
-// CreateAPIKey inserts an API key owned by the bound tenant.
+// CreateAPIKey supports internal legacy seeds with incomplete identity. Public
+// enterprise issuance must use CreateEnterpriseAPIKey instead.
 func (r *TenantRepo) CreateAPIKey(ctx context.Context, spec APIKeySpec) error {
+	return r.createAPIKey(r.db.WithContext(ctx), spec)
+}
+
+// CreateEnterpriseAPIKey validates and inserts the complete identity atomically.
+func (r *TenantRepo) CreateEnterpriseAPIKey(ctx context.Context, spec APIKeySpec) error {
+	if spec.GroupID == nil || spec.ApplicationID == nil {
+		return ErrInvalidAPIKeyIdentity
+	}
+	identity := APIKeyIdentity{GroupID: *spec.GroupID, ApplicationID: *spec.ApplicationID, Environment: spec.Environment}
+	if !identity.valid() {
+		return ErrInvalidAPIKeyIdentity
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := r.validateAPIKeyIdentity(tx, identity); err != nil {
+			return err
+		}
+		return r.createAPIKey(tx, spec)
+	})
+}
+
+func (r *TenantRepo) validateAPIKeyIdentity(tx *gorm.DB, identity APIKeyIdentity) error {
+	// SHARE locks serialize enable/disable and deletion with identity binding.
+	var exists bool
+	if err := tx.Raw(`SELECT EXISTS (SELECT 1 FROM tenants WHERE id = ? AND enabled FOR SHARE)`, r.tenantID).Scan(&exists).Error; err != nil {
+		return err
+	}
+	if !exists {
+		return ErrInvalidAPIKeyIdentity
+	}
+	if err := tx.Raw(`SELECT EXISTS (SELECT 1 FROM groups WHERE id = ? AND tenant_id = ? AND enabled FOR SHARE)`, identity.GroupID, r.tenantID).Scan(&exists).Error; err != nil {
+		return err
+	}
+	if !exists {
+		return ErrInvalidAPIKeyIdentity
+	}
+	if err := tx.Raw(`SELECT EXISTS (SELECT 1 FROM applications WHERE id = ? AND tenant_id = ? AND enabled FOR SHARE)`, identity.ApplicationID, r.tenantID).Scan(&exists).Error; err != nil {
+		return err
+	}
+	if !exists {
+		return ErrInvalidAPIKeyIdentity
+	}
+	return nil
+}
+
+func (r *TenantRepo) createAPIKey(tx *gorm.DB, spec APIKeySpec) error {
 	allowed := spec.AllowedModels
 	if allowed == nil {
 		allowed = []string{}
@@ -254,10 +341,10 @@ func (r *TenantRepo) CreateAPIKey(ctx context.Context, spec APIKeySpec) error {
 	if err != nil {
 		return err
 	}
-	return r.db.WithContext(ctx).Exec(
-		`INSERT INTO api_keys (key_id, hash, tenant_id, group_id, allowed_models)
-		 VALUES (?, ?, ?, ?, ?::jsonb)`,
-		spec.KeyID, spec.Hash, r.tenantID, spec.GroupID, string(models),
+	return tx.Exec(
+		`INSERT INTO api_keys (key_id, hash, tenant_id, group_id, allowed_models, application_id, environment)
+		 VALUES (?, ?, ?, ?, ?::jsonb, ?, ?)`,
+		spec.KeyID, spec.Hash, r.tenantID, spec.GroupID, string(models), spec.ApplicationID, spec.Environment,
 	).Error
 }
 
@@ -266,6 +353,12 @@ func (r *TenantRepo) CreateAPIKey(ctx context.Context, spec APIKeySpec) error {
 // cursor ("" for the first page). limit <= 0 defaults to 50. next is "" when
 // there is no further page.
 func (r *TenantRepo) ListAPIKeys(ctx context.Context, cursor string, limit int) ([]APIKeyInfo, string, error) {
+	return r.ListAPIKeysFiltered(ctx, cursor, limit, false)
+}
+
+// ListAPIKeysFiltered restricts migration debt to active keys missing any part
+// of their identity, without changing pagination or the tenant boundary.
+func (r *TenantRepo) ListAPIKeysFiltered(ctx context.Context, cursor string, limit int, unbound bool) ([]APIKeyInfo, string, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -282,12 +375,19 @@ func (r *TenantRepo) ListAPIKeys(ctx context.Context, cursor string, limit int) 
 		InternalID    int64
 		KeyID         string
 		AllowedModels string
+		GroupID       sql.NullInt64
+		ApplicationID sql.NullInt64
+		Environment   string
 	}
 	if err := r.db.WithContext(ctx).Raw(
-		`SELECT id AS internal_id, key_id, COALESCE(allowed_models::text, '[]') AS allowed_models FROM api_keys
+		`SELECT id AS internal_id, key_id,
+		        COALESCE(allowed_models::text, '[]') AS allowed_models,
+		        group_id, application_id, environment
+		 FROM api_keys
 		 WHERE tenant_id = ? AND id > ? AND revoked_at IS NULL
+		   AND (NOT ? OR group_id IS NULL OR application_id IS NULL OR environment = '')
 		 ORDER BY id ASC LIMIT ?`,
-		r.tenantID, afterID, limit+1,
+		r.tenantID, afterID, unbound, limit+1,
 	).Scan(&rows).Error; err != nil {
 		return nil, "", err
 	}
@@ -296,7 +396,21 @@ func (r *TenantRepo) ListAPIKeys(ctx context.Context, cursor string, limit int) 
 	for _, row := range rows {
 		var models []string
 		_ = json.Unmarshal([]byte(row.AllowedModels), &models)
-		out = append(out, APIKeyInfo{KeyID: row.KeyID, Revoked: false, AllowedModels: models})
+		info := APIKeyInfo{
+			KeyID:         row.KeyID,
+			Revoked:       false,
+			AllowedModels: models,
+			Environment:   row.Environment,
+		}
+		if row.GroupID.Valid {
+			groupID := row.GroupID.Int64
+			info.GroupID = &groupID
+		}
+		if row.ApplicationID.Valid {
+			appID := row.ApplicationID.Int64
+			info.ApplicationID = &appID
+		}
+		out = append(out, info)
 	}
 
 	next := ""
@@ -342,4 +456,74 @@ func (r *TenantRepo) SetAPIKeyAllowedModels(ctx context.Context, keyID string, m
 		return false, res.Error
 	}
 	return res.RowsAffected > 0, nil
+}
+
+// APIKeyUpdate optionally changes model access and completes a legacy identity.
+// Identity is all-or-nothing; non-empty existing identity fields are immutable.
+type APIKeyUpdate struct {
+	AllowedModels *[]string
+	Identity      *APIKeyIdentity
+}
+
+// UpdateAPIKey locks the key before validating its current identity, so two
+// concurrent completions cannot reassign a credential. No historical ledger is
+// updated. An identical identity is an idempotent retry, even after disablement.
+func (r *TenantRepo) UpdateAPIKey(ctx context.Context, keyID string, patch APIKeyUpdate) (bool, error) {
+	if patch.Identity != nil && !patch.Identity.valid() {
+		return false, ErrInvalidAPIKeyIdentity
+	}
+	var ok bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current struct {
+			ID            int64
+			GroupID       sql.NullInt64
+			ApplicationID sql.NullInt64
+			Environment   string
+		}
+		if err := tx.Raw(`SELECT id, group_id, application_id, environment FROM api_keys
+			WHERE tenant_id = ? AND key_id = ? AND revoked_at IS NULL FOR UPDATE`,
+			r.tenantID, keyID).Scan(&current).Error; err != nil {
+			return err
+		}
+		if current.ID == 0 {
+			return nil
+		}
+		if identity := patch.Identity; identity != nil {
+			if (current.GroupID.Valid && current.GroupID.Int64 != identity.GroupID) ||
+				(current.ApplicationID.Valid && current.ApplicationID.Int64 != identity.ApplicationID) ||
+				(current.Environment != "" && current.Environment != identity.Environment) {
+				return ErrAPIKeyIdentityImmutable
+			}
+			if !current.GroupID.Valid || !current.ApplicationID.Valid || current.Environment == "" {
+				if err := r.validateAPIKeyIdentity(tx, *identity); err != nil {
+					return err
+				}
+				if err := tx.Exec(`UPDATE api_keys SET group_id = ?, application_id = ?, environment = ?
+					WHERE id = ? AND tenant_id = ?`, identity.GroupID, identity.ApplicationID, identity.Environment,
+					current.ID, r.tenantID).Error; err != nil {
+					return err
+				}
+			}
+		}
+		if patch.AllowedModels != nil {
+			models := *patch.AllowedModels
+			if models == nil {
+				models = []string{}
+			}
+			js, err := json.Marshal(models)
+			if err != nil {
+				return err
+			}
+			if err := tx.Exec(`UPDATE api_keys SET allowed_models = ?::jsonb WHERE id = ? AND tenant_id = ?`,
+				string(js), current.ID, r.tenantID).Error; err != nil {
+				return err
+			}
+		}
+		ok = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return ok, nil
 }

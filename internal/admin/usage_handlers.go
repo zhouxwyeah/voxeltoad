@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"voxeltoad/internal/apperr"
+	"voxeltoad/internal/authz"
 	"voxeltoad/internal/store"
 )
 
@@ -22,17 +23,11 @@ func mountUsage(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 		if !ok {
 			return
 		}
-		from, to, ok := parseTimeRange(c)
+		filter, ok := parseUsageFilter(c)
 		if !ok {
 			return
 		}
 		repo := store.NewUsageQueryRepo(db, tenant)
-		filter := store.UsageFilter{
-			Provider: c.Query("provider"),
-			Model:    c.Query("model"),
-			From:     from,
-			To:       to,
-		}
 		if c.Query("format") == "csv" {
 			rows, _, err := repo.List(c.Request.Context(), filter, "", 2000)
 			if err != nil {
@@ -50,18 +45,43 @@ func mountUsage(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 		c.JSON(http.StatusOK, listEnvelope(rows, next))
 	})
 
-	g.GET("/usage/summary", func(c *gin.Context) {
+	g.GET("/usage/attribution", auth.requirePermission(authz.PermUsageRead), func(c *gin.Context) {
 		tenant, ok := usageTenantScope(c, db)
 		if !ok {
+			return
+		}
+		if tenant == "" {
+			badRequest(c, "tenant is required for attribution overview")
 			return
 		}
 		from, to, ok := parseTimeRange(c)
 		if !ok {
 			return
 		}
+		if !from.IsZero() && !to.IsZero() && !from.Before(to) {
+			badRequest(c, "from must be before to")
+			return
+		}
+		summary, err := store.NewAttributionQueryRepo(db, tenant).Summary(c.Request.Context(), from, to)
+		if err != nil {
+			internalErr(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, summary)
+	})
+
+	g.GET("/usage/summary", func(c *gin.Context) {
+		tenant, ok := usageTenantScope(c, db)
+		if !ok {
+			return
+		}
+		filter, ok := parseUsageFilter(c)
+		if !ok {
+			return
+		}
 		groupBy := c.DefaultQuery("group_by", "model")
 		repo := store.NewUsageQueryRepo(db, tenant)
-		rows, err := repo.Summary(c.Request.Context(), from, to, groupBy)
+		rows, err := repo.Summary(c.Request.Context(), filter.From, filter.To, groupBy, filter)
 		if err != nil {
 			// Summary rejects an unknown group_by; surface as 400.
 			badRequest(c, err.Error())
@@ -75,18 +95,13 @@ func mountUsage(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 		if !ok {
 			return
 		}
-		from, to, ok := parseTimeRange(c)
+		filter, ok := parseUsageFilter(c)
 		if !ok {
 			return
 		}
 		bucket := c.DefaultQuery("bucket", "day")
 		repo := store.NewUsageQueryRepo(db, tenant)
-		rows, err := repo.Timeseries(c.Request.Context(), store.UsageFilter{
-			Provider: c.Query("provider"),
-			Model:    c.Query("model"),
-			From:     from,
-			To:       to,
-		}, bucket)
+		rows, err := repo.Timeseries(c.Request.Context(), filter, bucket)
 		if err != nil {
 			badRequest(c, err.Error())
 			return
@@ -132,6 +147,49 @@ func usageTenantScope(c *gin.Context, db *store.DB) (string, bool) {
 		return t, true
 	}
 	return "", true
+}
+
+func parseUsageFilter(c *gin.Context) (store.UsageFilter, bool) {
+	from, to, ok := parseTimeRange(c)
+	if !ok {
+		return store.UsageFilter{}, false
+	}
+	applicationID, environment, unattributed, ok := parseAttributionFilter(c)
+	return store.UsageFilter{
+		ApplicationID: applicationID, Environment: environment, Unattributed: unattributed,
+		Provider: c.Query("provider"), Model: c.Query("model"), From: from, To: to,
+	}, ok
+}
+
+func parseAttributionFilter(c *gin.Context) (applicationID *int64, environment string, unattributed bool, ok bool) {
+	query := c.Request.URL.Query()
+	if values, present := query["application_id"]; present {
+		id, err := strconv.ParseInt(values[0], 10, 64)
+		if err != nil || id <= 0 || len(values) != 1 {
+			badRequest(c, "application_id must be a positive integer")
+			return nil, "", false, false
+		}
+		applicationID = &id
+	}
+	if values, present := query["environment"]; present {
+		environment = values[0]
+		if len(values) != 1 || (environment != "dev" && environment != "staging" && environment != "prod") {
+			badRequest(c, "environment must be dev, staging or prod")
+			return nil, "", false, false
+		}
+	}
+	if values, present := query["unattributed"]; present {
+		if len(values) != 1 || (values[0] != "true" && values[0] != "false") {
+			badRequest(c, "unattributed must be true or false")
+			return nil, "", false, false
+		}
+		unattributed = values[0] == "true"
+	}
+	if applicationID != nil && unattributed {
+		badRequest(c, "application_id and unattributed=true are mutually exclusive")
+		return nil, "", false, false
+	}
+	return applicationID, environment, unattributed, true
 }
 
 // parseTimeRange reads optional RFC3339 from/to query params. Absent params are
@@ -221,9 +279,28 @@ func parseBoolQuery(c *gin.Context, key string) *bool {
 	return &v
 }
 
+func sanitizeLedgerCSVRow(row []string) {
+	for i, cell := range row {
+		if cell == "" {
+			continue
+		}
+		switch cell[0] {
+		case '=', '+', '-', '@', '\t', '\r', '\n':
+			row[i] = "'" + cell
+		}
+	}
+}
+
+func csvApplicationID(id *int64) string {
+	if id == nil {
+		return ""
+	}
+	return strconv.FormatInt(*id, 10)
+}
+
 func exportUsageCSV(c *gin.Context, rows []store.UsageRow) {
 	headers := []string{"id", "tenant", "group_name", "api_key_id", "provider", "model",
-		"prompt_tokens", "completion_tokens", "cost", "created_at"}
+		"prompt_tokens", "completion_tokens", "cost", "created_at", "application_id", "environment", "currency"}
 	out := make([][]string, len(rows))
 	for i, r := range rows {
 		out[i] = []string{
@@ -232,7 +309,9 @@ func exportUsageCSV(c *gin.Context, rows []store.UsageRow) {
 			fmt.Sprintf("%d", r.PromptTokens), fmt.Sprintf("%d", r.CompletionTokens),
 			fmt.Sprintf("%d", r.Cost),
 			r.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			csvApplicationID(r.ApplicationID), r.Environment, r.Currency,
 		}
+		sanitizeLedgerCSVRow(out[i])
 	}
 	writeCSV(c, "usage.csv", headers, out)
 }

@@ -34,17 +34,24 @@ func (r *KeyRepo) LookupByHash(ctx context.Context, hash string) (auth.KeyRecord
 		GroupName     sql.NullString
 		ExpiresAt     sql.NullTime
 		AllowedModels []byte
+		ApplicationID sql.NullInt64
+		Environment   string
 	}
 	err := r.db.WithContext(ctx).Raw(
 		`SELECT k.key_id        AS key_id,
 		        t.name          AS tenant,
 		        g.name          AS group_name,
 		        k.expires_at    AS expires_at,
-		        k.allowed_models AS allowed_models
+		        k.allowed_models AS allowed_models,
+		        k.application_id AS application_id,
+		        k.environment   AS environment
 		 FROM api_keys k
 		 JOIN tenants t ON t.id = k.tenant_id
 		 LEFT JOIN groups g ON g.id = k.group_id
-		 WHERE k.hash = ? AND k.revoked_at IS NULL AND t.enabled = true`, hash,
+		 WHERE k.hash = ? AND k.revoked_at IS NULL AND t.enabled = true
+		   AND (k.application_id IS NULL
+		        OR EXISTS (SELECT 1 FROM applications a
+		                   WHERE a.id = k.application_id AND a.enabled = true))`, hash,
 	).Scan(&row).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -71,10 +78,15 @@ func (r *KeyRepo) LookupByHash(ctx context.Context, hash string) (auth.KeyRecord
 		Group:         row.GroupName.String,
 		Hash:          hash,
 		AllowedModels: allowed,
+		Environment:   row.Environment,
 	}
 	if row.ExpiresAt.Valid {
 		exp := row.ExpiresAt.Time
 		rec.ExpiresAt = &exp
+	}
+	if row.ApplicationID.Valid {
+		appID := row.ApplicationID.Int64
+		rec.ApplicationID = &appID
 	}
 	return rec, true, nil
 }

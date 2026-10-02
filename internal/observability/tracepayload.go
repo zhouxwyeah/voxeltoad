@@ -33,6 +33,8 @@ type TracePayload struct {
 	Tenant          string
 	Group           string
 	APIKeyID        string
+	ApplicationID   *int64 `json:"application_id"`
+	Environment     string `json:"environment"`
 
 	Provider       string
 	ModelRequested string
@@ -139,6 +141,11 @@ func (a *AsyncTracePayloadRecorder) Start() {
 // Record enqueues a row without blocking; drops (and counts) when the buffer is
 // full (fail-open).
 func (a *AsyncTracePayloadRecorder) Record(_ context.Context, p TracePayload) {
+	// The queued identity must not alias mutable key/config state.
+	if p.ApplicationID != nil {
+		id := *p.ApplicationID
+		p.ApplicationID = &id
+	}
 	select {
 	case a.buf <- p:
 	default:

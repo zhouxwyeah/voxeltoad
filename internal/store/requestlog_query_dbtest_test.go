@@ -7,8 +7,72 @@ import (
 	"testing"
 	"time"
 
+	"voxeltoad/internal/observability"
 	"voxeltoad/internal/store"
 )
+
+func TestRequestLogQuery_AttributionSnapshots(t *testing.T) {
+	ctx := context.Background()
+	sink, db := freshRequestLogRepo(t)
+	appA, appB := int64(901), int64(902)
+	for _, rec := range []observability.RequestLog{
+		{Tenant: "acme", ApplicationID: &appA, Environment: "prod", RequestID: "a-prod", SessionID: "shared"},
+		{Tenant: "acme", ApplicationID: &appA, Environment: "dev", RequestID: "a-dev", SessionID: "shared"},
+		{Tenant: "acme", ApplicationID: &appB, Environment: "prod", RequestID: "b-prod", SessionID: "shared"},
+		{Tenant: "acme", RequestID: "legacy", SessionID: "shared"},
+		{Tenant: "other", ApplicationID: &appA, Environment: "prod", RequestID: "foreign", SessionID: "shared"},
+		{Tenant: "other", RequestID: "foreign-legacy", SessionID: "shared"},
+	} {
+		if err := sink.Record(ctx, rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	query := store.NewRequestLogQueryRepo(db, "acme")
+	for _, tc := range []struct {
+		name   string
+		filter store.RequestLogFilter
+		want   int
+	}{
+		{"all", store.RequestLogFilter{Tenant: "other"}, 4},
+		{"application", store.RequestLogFilter{ApplicationID: &appA}, 2},
+		{"environment", store.RequestLogFilter{Environment: "prod"}, 2},
+		{"intersection", store.RequestLogFilter{ApplicationID: &appA, Environment: "prod"}, 1},
+		{"unattributed", store.RequestLogFilter{Unattributed: true}, 1},
+		{"unattributed-environment", store.RequestLogFilter{Unattributed: true, Environment: "prod"}, 0},
+		{"parameterized", store.RequestLogFilter{Environment: "prod' OR 1=1 --"}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, _, err := query.List(ctx, tc.filter, "", 100)
+			if err != nil || len(rows) != tc.want {
+				t.Fatalf("List = %+v, %v; want %d", rows, err, tc.want)
+			}
+			paged, total, err := query.ListPage(ctx, tc.filter, 1, 100)
+			if err != nil || len(paged) != tc.want || total != int64(tc.want) {
+				t.Fatalf("ListPage = %+v, total=%d, %v", paged, total, err)
+			}
+			for _, row := range append(rows, paged...) {
+				if row.Tenant != "acme" {
+					t.Fatalf("tenant leaked: %+v", row)
+				}
+				if row.RequestID == "a-prod" && (row.ApplicationID == nil || *row.ApplicationID != appA || row.Environment != "prod") {
+					t.Fatalf("lost snapshot: %+v", row)
+				}
+				if row.RequestID == "legacy" && (row.ApplicationID != nil || row.Environment != "") {
+					t.Fatalf("invented historical identity: %+v", row)
+				}
+			}
+		})
+	}
+	rows, err := query.ListBySession(ctx, "shared", 100)
+	if err != nil || len(rows) != 4 {
+		t.Fatalf("session rows = %+v, %v", rows, err)
+	}
+	for _, row := range rows {
+		if row.RequestID == "a-prod" && (row.ApplicationID == nil || *row.ApplicationID != appA || row.Environment != "prod") {
+			t.Fatalf("session lost attribution: %+v", row)
+		}
+	}
+}
 
 // seedRequestLogAt inserts a request_logs row with explicit created_at and
 // tenant/provider/error_type so keyset/time-range/filter behavior is

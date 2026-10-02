@@ -13,7 +13,7 @@ L2  internal/adapter/   供应商协议适配（openai / claude；tencent/zhipu/
     internal/ingress/   客户端入站协议适配（openai / anthropic；unified ↔ 客户端 wire，ADR-0045）
     internal/plugin/    插件框架 + 内置治理插件（限流 / 缓存 / 敏感词 / PII 脱敏 / 注入检测 / 外部审查）
     internal/normalize/ 请求归一化（max_tokens 默认、system 消息合并，ADR-0009）
-    internal/billing/   token 计费与配额（pre-debit/settle，直连 PG quota store，ADR-0013）
+    internal/billing/   token 计费与周期支出管控（AccountingStore 协调旧 quota + 新预算，ADR-0013/0052）
     internal/credential/ 供应商凭证加密（AES-256-GCM，db://provider/<name> scheme，ADR-0031）
     internal/auth/      API Key 鉴权（数据面，ADR-0006）
     internal/authz/     权限 catalog + requirePermission 中间件（管理面 RBAC，ADR-0017）
@@ -24,11 +24,11 @@ L2  internal/adapter/   供应商协议适配（openai / claude；tencent/zhipu/
 L3  internal/proxy/     数据面编排：路由、转发、流式处理、插件链执行
     internal/admin/     管理面 API + 服务层 + 配置下发
     internal/desktopapi/    桌面读 API（与 internal/admin 平级，ADR-0041）
-    internal/app/       数据面组合根（stores/watcher 装配，见 docs/plans/2026-07-01-data-plane-prd.md）
-L4  cmd/gateway/        数据面进程入口
+    internal/app/       数据面组合根（stores/watcher 装配 + pending 结算重试/stale 待核对循环）
+L4  cmd/gateway/        数据面进程入口（向 billing 注入 Stores.Accounting）
     cmd/admin/          管理面进程入口
     cmd/adminstack/     自包含管理面（内嵌 PG + 种子；开发验收用，build tag）
-    cmd/devstack/       自包含数据面（内嵌 PG + mock 上游；开发验收用，build tag）
+    cmd/devstack/       自包含数据面（内嵌 PG + mock 上游 + Accounting 注入；开发验收用，build tag）
     cmd/testpg/         共享 embedded PG（stack-test-all 用，三个 stack 测试共用一份 PG；build tag）
     cmd/desktop/        桌面个人网关入口（SQLite + 本地 YAML + 内嵌 SPA；复用数据面，无 admin/RBAC；ADR-0041）
 ```
@@ -59,8 +59,10 @@ cmd/ ──→ proxy|admin ──→ adapter|plugin|billing|auth|store ──→
 | 入口 | internal/ 包数 | 独有包 | 关键差异 |
 |---|---|---|---|
 | `cmd/desktop` | 17+ingress | —（gateway 的子集 + desktopstore/desktopapi） | 不需要 `plugin/ratelimit`（个人单用户无多租户公平诉求）；不构建 admin/RBAC/billing；持久化/读 API 用自己的 SQLite 实现（`internal/desktopstore` + `internal/desktopapi`）替代 `internal/store` + `internal/admin`。`internal/ingress/{openai,anthropic}` 随 `proxy.Router` 自动引入（ADR-0045）。 |
-| `cmd/gateway` | 16+ingress | `plugin/ratelimit` | 完整数据面。`internal/ingress/{openai,anthropic}` 随 `proxy.Router` 自动引入（ADR-0045）。 |
+| `cmd/gateway` | 16+ingress | `plugin/ratelimit` | 完整数据面。`internal/ingress/{openai,anthropic}` 随 `proxy.Router` 自动引入（ADR-0045）；通过 `billing.WithAccounting(stores.Accounting)` 启用持久化资金协调，不额外挂一个扣费插件。 |
 | `cmd/admin` | 14 | `admin/`、`authz/` | 唯一引入管理面 + RBAC；不直接 import `proxy`（因此不引入 `ingress/`）。 |
+
+E0/E1 沿用上述生产入口，未新增生产进程或顶层目录。`cmd/devstack` 与 gateway 一样注入 Accounting；`internal/app/stores.go` 启动时及每分钟重试已持久化的 pending 结算，并扫描超过 24 小时的 reserved/dispatched 标记 unknown 待核对，Close 时先停止循环再关 DB。该循环不做周期清零、不自动退款。Desktop 不装企业预算，默认 nil Application 继续合法。
 
 ### 共享契约面（变更这些接口 = 三入口同时受影响）
 
@@ -83,10 +85,10 @@ cmd/ ──→ proxy|admin ──→ adapter|plugin|billing|auth|store ──→
 ```
 voxeltoad/
 ├── cmd/
-│   ├── gateway/         # 数据面进程入口（main.go）
+│   ├── gateway/         # 数据面进程入口（向 billing 注入 Stores.Accounting）
 │   ├── admin/           # 管理面进程入口（main.go）
 │   ├── adminstack/      # 自包含管理面（内嵌 PG + 种子；开发验收用，build tag）
-│   ├── devstack/        # 自包含数据面（内嵌 PG + mock 上游；开发验收用，build tag）
+│   ├── devstack/        # 自包含数据面（内嵌 PG + mock 上游 + Accounting；开发验收用，build tag）
 │   ├── testpg/          # 共享 embedded PG（stack-test-all 用，三个 stack 测试共用一份 PG；build tag）
 │   └── desktop/         # 桌面个人网关入口（SQLite + 本地 YAML + 内嵌 SPA；复用数据面，无 admin）
 ├── internal/
@@ -107,7 +109,7 @@ voxeltoad/
 │   │   ├── pii/         # PII 检测与脱敏
 │   │   ├── moderation/  # 外部内容审查 API 集成
 │   │   └── injection/   # Prompt 注入与 jailbreak 检测
-│   ├── billing/         # 计费：usage 入账、定价计算
+│   ├── billing/         # 冻结价格计费、AccountingStore/周期/Group scope 契约
 │   ├── normalize/       # 请求归一化（max_tokens 默认、system 提取合并，ADR-0009）
 │   ├── credential/      # 供应商凭证加密（AES-256-GCM，ADR-0031）
 │   ├── operator/        # 运营者/会话管理（管理面，ADR-0017）
@@ -115,7 +117,8 @@ voxeltoad/
 │   ├── authz/           # 权限 catalog + requirePermission 中间件（管理面，ADR-0017）
 │   ├── apperr/          # 错误码 catalog（分域：auth/tenant/provider/...，每域一个文件）
 │   ├── config/          # config.go（bootstrap loader）/ poller.go（快照轮询）
-│   ├── store/           # models.go（gorm）/ 各 repository（含 config_snapshots / data_plane_nodes）
+│   ├── store/           # gorm repositories；AccountingRepo/BudgetRepo 与身份/历史快照
+│   ├── app/             # stores/watcher 组合根；资金结算恢复循环
 │   ├── desktopstore/    # 桌面 SQLite 持久化（KeyStore/Sinks/Query；与 store/ 平级，ADR-0041）
 │   ├── desktopapi/      # 桌面读 API（与 admin/ 平级；stdlib net/http，ADR-0041）
 │   └── observability/   # otel.go / llm_attributes.go
@@ -144,6 +147,8 @@ voxeltoad/
 | **修改请求处理流程/插件链顺序** | L3 | `internal/proxy/chain.go` |
 | **修改路由/负载均衡/故障切换策略** | L3 | `internal/proxy/router.go` |
 | **新增管理面资源 CRUD** | L3 | `internal/admin/` 加 handler + service；`internal/store/` 加 model + repository |
+| **修改企业 Key/Application 归因** | L2/L3 | `internal/store/{tenant,key,application}.go` + admin 对应 handlers；`auth.KeyRecord` → `plugin.Context` → billing/telemetry → usage/request/trace DTO 与查询；同步三账本 migration、database/glossary、OpenAPI、SDK 与 Web；Desktop nil Application 保持兼容 |
+| **修改周期预算/资金结算** | L2/L3 | `internal/billing/{accounting,period,scope,plugin}.go` 定义契约；`internal/store/{accounting,budget,quota}.go` 单事务实现；`internal/admin/budget_handlers.go` 管理与核对；`internal/app/stores.go` 恢复循环；`cmd/gateway` / `cmd/devstack` 注入；同步 ADR-0052/database/OpenAPI/SDK/Web，不增加第二个扣费插件 |
 | **新增/修改错误码** | L2 | `internal/apperr/<domain>.go` 加 `apperr.New(code, status, i18n)`；同步在 `web/src/locales/{en,zh}/errors/<domain>.json` 加 key；`make check-errors` 校验 |
 | **新增配置项（需热更新）** | L1 | `internal/config/config.go`（bootstrap）或 dynamic 快照结构 + 确保 `poller.go` 原子替换覆盖 |
 | **新增可复用纯工具（无业务依赖）** | L0 | `pkg/` |
@@ -154,7 +159,8 @@ voxeltoad/
 
 - **接口先行**：adapter / plugin / store repository 都先定义接口，再写实现，便于 mock 与测试。
 - **配置即数据**：供应商、模型、路由、插件参数等**配置类**数据由管理面写 PG，数据面**轮询管理面的 HTTP 配置快照接口**（`/internal/config/snapshot`，带 version/ETag 条件请求）拉取，加载进内存 `atomic.Pointer` 原子替换，**不重启、不 reload signal**。配置变更低频，秒级传播延迟可接受；以此避免引入 etcd。
-- **配额是例外（ADR-0013）**：配额是钱，需跨实例强一致，**不能**走最终一致的快照。数据面因此持有一条直连配额存储（PG）的连接，在请求热路径上做原子预扣/结算（`TryDebit`/`Settle`），不可达时 fail-closed。故数据面并非纯无状态——它**轮询快照 + 直连配额存储**；PostgreSQL 是**数据面与管理面共同**的唯一有状态依赖。密钥走缓存/快照（最终一致，ADR-0006），用量记录异步落库（fail-open，ADR-0016），均不需热路径强一致连接。
+- **资金是例外（ADR-0013/0052）**：余额与周期预算需跨实例强一致，**不能**走最终一致的配置快照。企业数据面直连 PG，经 `AccountingStore.Reserve/Finish` 在同一事务协调旧 quota + 所有适用周期账户；旧 `TryDebit/Settle` 保留但该路径不得再重复调用。锁序为租户共享锁（策略变更取排他锁）→ reservation → 排序后的 quota scope → 按 policy/period 排序的 account；事务不跨上游外呼。预留失败 fail-closed，实际在途费用仍允许超额。PostgreSQL 是数据面/管理面共同的有状态依赖；密钥短 TTL 缓存最终一致，usage/request/trace 明细异步 fail-open，不取代持久化资金事实。
+- **请求价格冻结**：一次请求持有同一 dispatcher 与 `PricingSnapshot`，候选预留和命中模型结算使用该版本的价格/缓存倍率；Post 不重新读热更新配置。独立服务端 reservation ID 是资金幂等键，客户端关联 ID 不参与资金去重。
 - **数据面节点注册（ADR-0024）**：每 proxy 实例启动时自注册到 `data_plane_nodes` 表（fail-open），周期性心跳（15s），SIGTERM 时标记下线。管理面后台 goroutine（60s）清理僵尸节点（>45s 无心跳）。节点清单仅供可观测性，不用于路由发现（路由走 Ingress/LB）。
 - **配置版本历史（ADR-0025）**：每次配置变更异步保存完整快照到 `config_snapshots` 表（fail-open，不阻塞写入）。提供 history/list/get/diff/rollback/preview API，支持版本浏览、差异对比及一键回滚。
 - **错误统一**：管理面与数据面 handler 通过 `internal/apperr/` 的分域错误码 catalog

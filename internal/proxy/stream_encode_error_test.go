@@ -1,13 +1,17 @@
 package proxy
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"voxeltoad/internal/adapter"
+	"voxeltoad/internal/billing"
 	"voxeltoad/internal/config"
 	"voxeltoad/internal/ingress"
 	_ "voxeltoad/internal/ingress/openai" // register OpenAI ingress codec
@@ -80,6 +84,87 @@ func TestStreamChatCompletions_EncodeChunkFailureRecordsTelemetry(t *testing.T) 
 	}
 	if acc.errMsg == "" {
 		t.Error("acc.errMsg empty; encode failure cause should be captured for diagnostics")
+	}
+}
+
+type disconnectWriter struct {
+	*httptest.ResponseRecorder
+	writes, failAt int
+}
+
+func (w *disconnectWriter) Write(body []byte) (int, error) {
+	w.writes++
+	if w.failAt > 0 && w.writes >= w.failAt {
+		return 0, io.ErrClosedPipe
+	}
+	return w.ResponseRecorder.Write(body)
+}
+
+func TestStreamSettlementOnDisconnect(t *testing.T) {
+	for _, tc := range []struct {
+		name                                string
+		failAt                              int
+		zeroUsage, priorRisk, upstreamError bool
+		want                                string
+		cost                                int64
+	}{
+		{"before final usage", 1, false, false, false, "unknown", 0},
+		{"final usage received", 2, false, false, false, "known", 25},
+		{"known zero usage", 2, true, false, false, "known", 0},
+		{"prior attempt risk settles known", 2, false, true, false, "known", 25},
+		{"upstream failure remains unknown", 0, false, false, true, "unknown", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt, completion := 11, 7
+			if tc.zeroUsage {
+				prompt, completion = 0, 0
+			}
+			body := "data: {\"id\":\"s\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\n" +
+				fmt.Sprintf("data: {\"id\":\"s\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":%d,\"completion_tokens\":%d,\"total_tokens\":%d}}\n\n", prompt, completion, prompt+completion)
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				if tc.upstreamError {
+					w.Header().Set("Content-Length", fmt.Sprint(len(body)+1))
+					_, _ = io.WriteString(w, body)
+					return
+				}
+				_, _ = io.WriteString(w, body+"data: [DONE]\n\n")
+			}))
+			defer upstream.Close()
+			disp := NewSingleProviderDispatcher(newTestForwarder(t, upstream.URL))
+			dyn := &config.Dynamic{Models: []config.Model{{Alias: "m", Upstreams: []config.ModelUpstream{{Provider: "default", Pricing: config.Pricing{Currency: "usd", PromptPer1M: 1_000_000, CompletionPer1M: 2_000_000}}}}}}
+			pc := &plugin.Context{Ctx: context.Background(), Tenant: "tenant", Request: &adapter.UnifiedRequest{Model: "m", Stream: true}, PricingSnapshot: dyn, BillingAttemptRisk: tc.priorRisk}
+			pc.Ctx = context.WithValue(pc.Ctx, accountingContextKey{}, pc)
+			accounting := &accountingRecorder{}
+			usage := billing.NewMemoryUsageRecorder()
+			bill := billing.NewPlugin(func() *config.Dynamic { return dyn }, nil, usage, billing.WithAccounting(accounting))
+			if err := bill.Execute(pc, plugin.PhasePre); err != nil || pc.Stop {
+				t.Fatalf("reserve: %v", err)
+			}
+			writer := &disconnectWriter{ResponseRecorder: httptest.NewRecorder(), failAt: tc.failAt}
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(pc.Ctx)
+			streamChatCompletions(writer, req, disp, "m", pc.Request, plugin.NewChain(bill), pc, newTelemetryAcc("m", true, "rid", "", "", "", nil), ingress.Lookup(ingress.ProtocolOpenAI))
+			if err := pc.BillingFinalize(); err != nil {
+				t.Fatal(err)
+			}
+			if len(accounting.settlements) != 1 || accounting.settlements[0].Outcome != tc.want || accounting.settlements[0].Actual != tc.cost {
+				t.Fatalf("settlements=%+v, want %s cost=%d", accounting.settlements, tc.want, tc.cost)
+			}
+			if tc.priorRisk && !accounting.settlements[0].AttemptRisk {
+				t.Fatalf("prior attempt risk not carried: %+v", accounting.settlements[0])
+			}
+			settled := accounting.settlements[0].Usage
+			if tc.want == "known" {
+				if settled == nil || settled.Cost != tc.cost || settled.PromptTokens != prompt || settled.CompletionTokens != completion {
+					t.Fatalf("known usage not carried in the settlement payload: %+v", settled)
+				}
+			} else if settled != nil {
+				t.Fatalf("unconfirmed charge carried usage: %+v", settled)
+			}
+			if records := usage.Records(); len(records) != 0 {
+				t.Fatalf("accounting mode bypasses the async ledger: %+v", records)
+			}
+		})
 	}
 }
 

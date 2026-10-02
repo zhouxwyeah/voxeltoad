@@ -101,11 +101,15 @@ export default async function DashboardLayout({
             <>
               <NavLink href="/api-keys">{t("nav.apiKeys")}</NavLink>
               <NavLink href="/groups">{t("nav.groups")}</NavLink>
+              <NavLink href="/applications">{t("nav.applications")}</NavLink>
               <NavLink href="/quotas">{t("nav.quotas")}</NavLink>
             </>
           )}
           {/* Both-scope: available to any authenticated operator. */}
           <div className="mt-2 flex flex-col gap-0.5 border-t border-border pt-2">
+            {has(session, NAV_PERMS.budget) && (
+              <NavLink href="/budgets">{t("nav.budgets")}</NavLink>
+            )}
             {has(session, NAV_PERMS.usage) && (
               <NavLink href="/usage">{t("nav.usage")}</NavLink>
             )}

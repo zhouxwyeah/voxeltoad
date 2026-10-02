@@ -8,6 +8,9 @@
 package billing
 
 import (
+	"fmt"
+	"math/big"
+
 	"voxeltoad/internal/adapter"
 	"voxeltoad/internal/config"
 )
@@ -51,6 +54,30 @@ func Cost(u *adapter.Usage, p config.Pricing) int64 {
 	// Stage 2: sum all three segments in micro-units, then round-half-up once.
 	micros := nonCached*p.PromptPer1M + cached*cachedRate + int64(u.CompletionTokens)*p.CompletionPer1M
 	return (micros + 500_000) / 1_000_000
+}
+
+// checkedCost validates untrusted provider usage before it reaches durable
+// accounting. Big integers prevent a large count or price wrapping into credit.
+func checkedCost(u *adapter.Usage, p config.Pricing) (int64, error) {
+	if u == nil || u.PromptTokens < 0 || u.CompletionTokens < 0 || u.CachedPromptTokens < 0 || p.PromptPer1M < 0 || p.CompletionPer1M < 0 || p.CacheHitMultiplier < 0 || p.CacheHitMultiplier > 1_000_000 {
+		return 0, fmt.Errorf("invalid usage or pricing")
+	}
+	mul := p.CacheHitMultiplier
+	if mul == 0 {
+		mul = 1_000_000
+	}
+	cached := min(int64(u.CachedPromptTokens), int64(u.PromptTokens))
+	million := big.NewInt(1_000_000)
+	cachedRate := new(big.Int).Mul(big.NewInt(p.PromptPer1M), big.NewInt(mul))
+	cachedRate.Add(cachedRate, big.NewInt(500_000)).Quo(cachedRate, million)
+	amount := new(big.Int).Mul(big.NewInt(int64(u.PromptTokens)-cached), big.NewInt(p.PromptPer1M))
+	amount.Add(amount, new(big.Int).Mul(big.NewInt(cached), cachedRate))
+	amount.Add(amount, new(big.Int).Mul(big.NewInt(int64(u.CompletionTokens)), big.NewInt(p.CompletionPer1M)))
+	amount.Add(amount, big.NewInt(500_000)).Quo(amount, million)
+	if !amount.IsInt64() {
+		return 0, fmt.Errorf("usage cost exceeds supported monetary range")
+	}
+	return amount.Int64(), nil
 }
 
 // FullCost computes what Cost would be if NO cache discount applied — i.e. all
