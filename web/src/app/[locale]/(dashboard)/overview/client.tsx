@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { Button } from "@/components/ui";
+import { microToDisplay } from "@/lib/money";
 import { RANGE_OPTIONS, type OverviewRange } from "./range";
 
 type OverviewData = Record<string, unknown>;
@@ -208,7 +209,7 @@ function TopTenantsTable({ rows }: { rows: Array<Record<string, unknown>> }) {
             const cost = num(row.cost);
             return (
               <tr
-                key={(row.group_key as string) ?? String(i)}
+                key={`${String(row.group_key ?? i)}:${String(row.currency ?? "")}`}
                 className="border-b border-border last:border-b-0 hover:bg-accent/50"
               >
                 <Td>{(row.group_key as string) ?? "—"}</Td>
@@ -219,7 +220,7 @@ function TopTenantsTable({ rows }: { rows: Array<Record<string, unknown>> }) {
                   {(prompt + completion).toLocaleString()}
                 </Td>
                 <Td className="text-right tabular-nums">
-                  {cost.toLocaleString()}
+                  {microToDisplay(cost)} {typeof row.currency === "string" && row.currency ? row.currency.toUpperCase() : "—"}
                 </Td>
               </tr>
             );

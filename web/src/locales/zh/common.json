@@ -11,6 +11,7 @@
     "groups": "分组",
     "applications": "应用",
     "quotas": "配额",
+    "budgets": "预算",
     "routes": "路由",
     "plugins": "插件",
     "usage": "用量",

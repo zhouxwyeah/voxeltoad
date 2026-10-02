@@ -92,6 +92,14 @@ This decision intentionally does not make Agent a first-class identity:
 Agent identity, run-level controls, budget semantics, and workload-aware routing
 require follow-up decisions rather than being folded into Application.
 
+## E0 实施说明（2026-09-30）
+
+原身份决策不变。本次企业管理 API 对所有新发 Key（不限 prod）强制同租户消费 Group、已启用 Application 与 `dev/staging/prod` 环境；Application owner Group 与消费 Group 不要求相同。历史 Key 仍可鉴权，用 `unbound=true` 分页扫描，一次补齐缺失身份；已有非空 Group/Application/environment 不可改写，完成后不可解绑。变更归属或环境须发新 Key。SQL 保留 nullable，不自动猜测历史归属；Desktop 默认 nil Application 仍合法。
+
+`00029_applications.sql` 建 Application 和 Key 绑定，`00030_application_attribution.sql` 给 usage/request/trace 三账本增加请求时 app/env 快照，不建 Application FK，不按后续 Key 绑定回填。业务查询的 `unattributed=true` 与 Key 列表的 `unbound=true` 是不同口径；当前列表只排除 revoked，不排除过期或所属实体停用；未绑定列表数量不等于实际可调用 Key 数，更不等于未归因请求占比。缺失历史维度与异步明细可能丢失需明确展示。
+
+停用沿用鉴权缓存 TTL（当前默认 1 分钟），不即时跨实例失效，不截断在途流。应用 PATCH 返回更新后的 Application 对象，与 OpenAPI 一致。应用/Key 读写分别校验权限；tenant-admin 的 application.read/write 由 00030 补种。实现完成，最终端到端验收状态见 roadmap。
+
 ## Consequences
 
 - API key rotation no longer fragments application-level cost and usage history.

@@ -27,7 +27,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "codegen": "openapi-typescript ../../docs/openapi/admin.yaml -o src/admin-schema.d.ts",
-    "codegen:check": "npm run codegen && git diff --exit-code -- src/admin-schema.d.ts",
+    "codegen:check": "sh -c 'tmp=$(mktemp) && openapi-typescript ../../docs/openapi/admin.yaml -o \"$tmp\" && diff -u src/admin-schema.d.ts \"$tmp\"; result=$?; rm -f \"$tmp\"; exit \"$result\"'",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

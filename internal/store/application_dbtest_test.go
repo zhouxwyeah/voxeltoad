@@ -363,7 +363,7 @@ func TestApplicationRepo_ReferencedByAPIKeys(t *testing.T) {
 	if err := createKeyRaw(db, "key_ref_b", "hash_ref_b", tenantID, consumerGroupID, &appID, "prod"); err != nil {
 		t.Fatal(err)
 	}
-	// A revoked key should not count.
+	// Revoked keys remain referenced for deletion protection.
 	now := time.Now()
 	if err := db.Exec(
 		`INSERT INTO api_keys (key_id, hash, tenant_id, group_id, application_id, environment, allowed_models, revoked_at)
@@ -377,8 +377,8 @@ func TestApplicationRepo_ReferencedByAPIKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(refs) != 2 {
-		t.Fatalf("refs = %v, want 2 active keys", refs)
+	if len(refs) != 3 {
+		t.Fatalf("refs = %v, want all 3 retained keys", refs)
 	}
 }
 
@@ -454,25 +454,25 @@ func TestApplicationRepo_TenantIsolation(t *testing.T) {
 	}
 }
 
-func TestApplicationRepo_OrphanKeys(t *testing.T) {
+func TestTenantRepo_UnboundKeys(t *testing.T) {
 	ctx := context.Background()
 	db := mustMigratedDB(t)
 	tenantID, groupID, appID := seedApplication(t, db, "acme-orphan", "team-orphan", "app-orphan")
-	repo := store.NewApplicationRepo(db, tenantID)
+	repo := store.NewTenantRepo(db, tenantID)
 
 	// A bound key and an unbound key.
-	if err := createKeyRaw(db, "key_bound", "hash_bound", tenantID, groupID, &appID, ""); err != nil {
+	if err := createKeyRaw(db, "key_bound", "hash_bound", tenantID, groupID, &appID, "prod"); err != nil {
 		t.Fatal(err)
 	}
 	if err := createKeyRaw(db, "key_orphan", "hash_orphan", tenantID, groupID, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 
-	orphans, err := repo.OrphanKeys(ctx)
+	orphans, _, err := repo.ListAPIKeysFiltered(ctx, "", 50, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(orphans) != 1 || orphans[0] != "key_orphan" {
+	if len(orphans) != 1 || orphans[0].KeyID != "key_orphan" {
 		t.Errorf("orphans = %v, want [key_orphan]", orphans)
 	}
 }

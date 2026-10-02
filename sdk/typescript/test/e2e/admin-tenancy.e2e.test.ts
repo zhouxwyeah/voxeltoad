@@ -128,10 +128,23 @@ describe.skipIf(!enabled)("admin tenancy contract", () => {
     const { loginAs } = await import("./helpers");
     const ta = await loginAs(opEmail, opPassword);
 
+    const group = unwrap(
+      await ta.POST("/api/v1/groups", { body: { name: unique("key-group") } }),
+    );
+    const application = unwrap(
+      await ta.POST("/api/v1/applications", {
+        body: { name: unique("key-app"), owner_group: group.name },
+      }),
+    );
     const keyId = `key-${Date.now()}`;
     const created = unwrap(
       await ta.POST("/api/v1/api-keys", {
-        body: { key_id: keyId },
+        body: {
+          key_id: keyId,
+          group_id: group.id,
+          application_id: application.id,
+          environment: "prod",
+        },
       }),
     );
     // Plaintext key returned exactly once.
@@ -146,7 +159,25 @@ describe.skipIf(!enabled)("admin tenancy contract", () => {
       (k: { key_id?: string }) => k.key_id === keyId,
     );
     expect(matching).toHaveLength(1);
+    expect(matching[0]?.group_id).toBe(group.id);
+    expect(matching[0]?.application_id).toBe(application.id);
+    expect(matching[0]?.environment).toBe("prod");
     expect(JSON.stringify(matching[0])).not.toContain(created.api_key);
+    const unbound = unwrap(
+      await ta.GET("/api/v1/api-keys", {
+        params: { query: { unbound: true } },
+      }),
+    );
+    expect(unbound.data.some((key) => key.key_id === keyId)).toBe(false);
+    const reassignment = await ta.PATCH("/api/v1/api-keys/{key_id}", {
+      params: { path: { key_id: keyId } },
+      body: {
+        group_id: group.id,
+        application_id: application.id,
+        environment: "dev",
+      },
+    });
+    expect(reassignment.response.status).toBe(400);
 
     // Revoke.
     unwrap(
@@ -168,9 +199,13 @@ describe.skipIf(!enabled)("admin tenancy contract", () => {
       await admin.POST("/api/v1/providers", {
         body: {
           name: pName,
-          type: "o",
-          adapter: "openai",
-          base_url: "u",
+          endpoints: [
+            {
+              id: "openai",
+              adapter: "openai",
+              base_url: "http://localhost:9999",
+            },
+          ],
           api_key_ref: "plain://k",
         },
       }),
@@ -198,10 +233,25 @@ describe.skipIf(!enabled)("admin tenancy contract", () => {
     const { loginAs } = await import("./helpers");
     const ta = await loginAs(opEmail, opPassword);
 
+    const group = unwrap(
+      await ta.POST("/api/v1/groups", {
+        body: { name: unique("models-group") },
+      }),
+    );
+    const application = unwrap(
+      await ta.POST("/api/v1/applications", {
+        body: { name: unique("models-app"), owner_group: group.name },
+      }),
+    );
     const keyId2 = `key2-${Date.now()}`;
     const created = unwrap(
       await ta.POST("/api/v1/api-keys", {
-        body: { key_id: keyId2 },
+        body: {
+          key_id: keyId2,
+          group_id: group.id,
+          application_id: application.id,
+          environment: "dev",
+        },
       }),
     );
     // Update allowed_models to a real model alias.
@@ -227,6 +277,66 @@ describe.skipIf(!enabled)("admin tenancy contract", () => {
         params: { path: { name: pName } },
       }),
     );
+  });
+
+  it("budget policies use tenant scope, versioned updates and typed read envelopes", async () => {
+    const tenantName = unique("tenant-budget");
+    const tenant = unwrap(
+      await admin.POST("/api/v1/tenants", { body: { name: tenantName } }),
+    );
+    const created = unwrap(
+      await admin.POST("/api/v1/budgets", {
+        params: { query: { tenant: tenantName } },
+        body: {
+          name: "monthly-spend",
+          scope_kind: "tenant",
+          period: "monthly",
+          currency: "usd",
+          limit: 1000000,
+          mode: "enforce",
+          thresholds: [50, 80, 100],
+        },
+      }),
+    );
+    expect(created.tenant_id).toBe(tenant.id);
+    expect(created.timezone).toBe("UTC");
+    expect(created.thresholds).toEqual([50, 80, 100]);
+    expect(created.version).toBe(1);
+    const updated = unwrap(
+      await admin.PATCH("/api/v1/budgets/{id}", {
+        params: { path: { id: created.id }, query: { tenant: tenantName } },
+        body: { version: created.version, limit: 2000000, enabled: false },
+      }),
+    );
+    expect(updated.limit).toBe(2000000);
+    expect(updated.enabled).toBe(false);
+    expect(updated.version).toBeGreaterThan(created.version);
+    const stale = await admin.PATCH("/api/v1/budgets/{id}", {
+      params: { path: { id: created.id }, query: { tenant: tenantName } },
+      body: { version: created.version, limit: 1 },
+    });
+    expect(stale.response.status).toBe(409);
+    const accounts = unwrap(
+      await admin.GET("/api/v1/budgets/{id}/accounts", {
+        params: { path: { id: created.id }, query: { tenant: tenantName } },
+      }),
+    );
+    expect(accounts.data).toEqual([]);
+    expect(accounts.next_cursor).toBe("");
+    const events = unwrap(
+      await admin.GET("/api/v1/budget-events", {
+        params: { query: { tenant: tenantName } },
+      }),
+    );
+    expect(Array.isArray(events.data)).toBe(true);
+    const reservations = unwrap(
+      await admin.GET("/api/v1/billing-reservations", {
+        params: { query: { tenant: tenantName, status: "unknown" } },
+      }),
+    );
+    expect(reservations.data).toEqual([]);
+    const noTenant = await admin.GET("/api/v1/budgets");
+    expect(noTenant.response.status).toBe(400);
   });
 
   it("quota topup is atomic and returns the new balance", async () => {

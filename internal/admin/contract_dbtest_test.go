@@ -87,8 +87,8 @@ func TestContract_ResponsesMatchSpec(t *testing.T) {
 
 	// Seed enough state that list/read endpoints return representative bodies.
 	if rr := doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "openai-prod", "type": "openai", "adapter": "openai",
-		"base_url": "https://api.openai.com/v1", "api_key_ref": "env://K",
+		"name": "openai-prod", "type": "openai", "api_key_ref": "env://K",
+		"endpoints": []map[string]any{{"adapter": "openai", "base_url": "https://api.openai.com/v1"}},
 	}); rr.Code != http.StatusCreated {
 		t.Fatalf("seed provider: %d %s", rr.Code, rr.Body.String())
 	}

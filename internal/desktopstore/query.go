@@ -509,16 +509,7 @@ func (r *QueryRepo) Overview(ctx context.Context, from, to time.Time) ([]AgentUs
 	var tot AgentUsage
 	tot.AgentType = "ALL"
 	for _, a := range agg {
-		agents = append(agents, AgentUsage{
-			AgentType:        a.AgentType,
-			RequestCount:     a.RequestCount,
-			PromptTokens:     a.PromptTokens,
-			CompletionTokens: a.CompletionTokens,
-			TotalTokens:      a.TotalTokens,
-			DurationMs:       a.DurationMs,
-			TTFTms:           a.TTFTms,
-			ErrorCount:       a.ErrorCount,
-		})
+		agents = append(agents, AgentUsage(a))
 		tot.RequestCount += a.RequestCount
 		tot.PromptTokens += a.PromptTokens
 		tot.CompletionTokens += a.CompletionTokens

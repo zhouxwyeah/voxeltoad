@@ -129,6 +129,13 @@ func TestApplicationCRUD_ToggleEnabled(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("disable: %d %s", rr.Code, rr.Body.String())
 	}
+	var patched map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &patched); err != nil {
+		t.Fatal(err)
+	}
+	if patched["id"] == nil || patched["owner_group_id"] == nil || patched["owner_group_name"] != "team-a" || patched["name"] != "app-a" || patched["enabled"] != false {
+		t.Fatalf("PATCH must return a complete Application: %v", patched)
+	}
 	var enabled bool
 	db.Raw(`SELECT enabled FROM applications WHERE name = 'app-a' AND tenant_id = ?`, tenantID).Scan(&enabled)
 	if enabled {
@@ -219,6 +226,13 @@ func TestApplicationCRUD_DeleteWithRefs409(t *testing.T) {
 	rr := doAuth(t, h, taTok, http.MethodDelete, "/api/v1/applications/app-a", nil)
 	if rr.Code != http.StatusConflict {
 		t.Errorf("delete with refs status = %d, want 409; body=%s", rr.Code, rr.Body.String())
+	}
+	if rr := doAuth(t, h, taTok, http.MethodDelete, "/api/v1/api-keys/ref-key", nil); rr.Code != http.StatusNoContent {
+		t.Fatalf("revoke referenced key: %d %s", rr.Code, rr.Body.String())
+	}
+	rr = doAuth(t, h, taTok, http.MethodDelete, "/api/v1/applications/app-a", nil)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("retained revoked key must return409, not FK500: %d %s", rr.Code, rr.Body.String())
 	}
 }
 

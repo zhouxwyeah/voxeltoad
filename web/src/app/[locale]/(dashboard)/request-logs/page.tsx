@@ -1,5 +1,6 @@
 import { serverAdminClient } from "@/lib/admin";
-import { onAuthExpired } from "@/lib/errors";
+import { handleAdminError } from "@/lib/errors";
+import { ForbiddenNotice } from "@/components/forbidden-notice";
 import { unwrap } from "@voxeltoad/gateway-sdk/admin";
 import { getSession } from "@/lib/session";
 import { RequestLogsPageClient } from "./client";
@@ -32,6 +33,9 @@ export default async function RequestLogsPage({
     session_id?: string;
     agent_type?: string;
     ingress_protocol?: string;
+    application_id?: string;
+    environment?: string;
+    unattributed?: string;
   }>;
 }) {
   const {
@@ -51,6 +55,9 @@ export default async function RequestLogsPage({
     session_id,
     agent_type,
     ingress_protocol,
+    application_id,
+    environment,
+    unattributed,
   } = await searchParams;
   const session = await getSession();
   const isSuperAdmin = session.role === "super-admin";
@@ -92,6 +99,9 @@ export default async function RequestLogsPage({
     if (session_id) query.session_id = session_id;
     if (agent_type) query.agent_type = agent_type;
     if (ingress_protocol) query.ingress_protocol = ingress_protocol;
+    if (application_id) query.application_id = Number(application_id);
+    if (environment) query.environment = environment;
+    if (unattributed === "true") query.unattributed = true;
     const res = unwrap(
       await client.GET("/api/v1/request-logs", { params: { query } }),
     ) as Record<string, unknown>;
@@ -110,12 +120,14 @@ export default async function RequestLogsPage({
       );
     }
   } catch (err) {
-    await onAuthExpired(err);
+    const outcome = await handleAdminError(err);
+    return <div className="p-8"><ForbiddenNotice message={outcome.message} /></div>;
   }
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-8">
       <RequestLogsPageClient
+        key={JSON.stringify({ application_id, environment, unattributed, page, pageSize })}
         rows={rows}
         total={total}
         page={page}

@@ -84,6 +84,13 @@ var e2eTables = []string{
 	"operators",
 	"sessions",
 	"request_logs",
+	"trace_payloads",
+	"applications",
+	"billing_reservation_items",
+	"billing_reservations",
+	"budget_events",
+	"budget_accounts",
+	"budget_policies",
 }
 
 // truncateAll wipes all e2e tables on the shared DB, restarting identity
@@ -95,6 +102,9 @@ func truncateAll(t *testing.T) {
 	stmt := "TRUNCATE " + strings.Join(e2eTables, ", ") + " RESTART IDENTITY CASCADE"
 	if err := sharedDB.Exec(stmt).Error; err != nil {
 		t.Fatalf("truncate e2e tables: %v", err)
+	}
+	if err := sharedDB.Exec(`UPDATE gateway_settings SET spec = '{}'::jsonb`).Error; err != nil {
+		t.Fatalf("reset gateway_settings: %v", err)
 	}
 	if err := sharedDB.Exec(`UPDATE config_generation SET version = 0`).Error; err != nil {
 		t.Fatalf("reset config_generation: %v", err)

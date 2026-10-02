@@ -1,6 +1,16 @@
 {
   "heading": "LLM 追踪",
   "subtitle": "会话 → 请求 → 消息 → 原始。完整的 prompt/completion 与原始报文，用于调试。捕获需在网关侧开启 (ADR-0039)。",
+  "identity": {
+    "application": "应用 ID",
+    "environment": "环境",
+    "unattributed": "未归因"
+  },
+  "state": {
+    "error": "无法加载追踪数据。",
+    "forbidden": "你没有权限读取此追踪。",
+    "retry": "重试"
+  },
   "nav": "追踪",
   "back": "返回",
   "notFound": "未找到 trace payload。可能网关未开启捕获，或该会话在留存窗口内无 payload。",

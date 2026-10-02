@@ -14,10 +14,16 @@ export function APIKeysPageClient({
   rows,
   nextCursor,
   models,
+  groups,
+  applications,
+  unbound,
 }: {
   rows: KeyRow[];
   nextCursor: string;
   models: ModelOption[];
+  groups: ModelOption[];
+  applications: ModelOption[];
+  unbound: boolean;
 }) {
   const t = useTranslations("api-keys");
   const [createOpen, setCreateOpen] = useState(false);
@@ -44,7 +50,16 @@ export function APIKeysPageClient({
           {t("actions.create")}
         </Button>
       </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button href={unbound ? "/api-keys" : "/api-keys?unbound=true"} variant="outline" size="sm">
+          {t(unbound ? "identity.showAll" : "identity.showUnbound")}
+        </Button>
+        {unbound && <p className="text-sm text-muted-foreground">{t("identity.unboundHint")}</p>}
+      </div>
+      {groups.length === 0 && <Button href="/groups" variant="outline">{t("identity.createGroup")}</Button>}
+      {applications.length === 0 && <Button href="/applications" variant="outline">{t("identity.createApplication")}</Button>}
       <APIKeysTable
+        unbound={unbound}
         rows={rows}
         nextCursor={nextCursor}
         onEdit={(row) => {
@@ -55,6 +70,8 @@ export function APIKeysPageClient({
       {createOpen && (
         <CreateModalPanel
           models={models}
+          groups={groups}
+          applications={applications}
           onClose={() => {
             setCreateOpen(false);
             setCreatedKey(null);
@@ -75,6 +92,8 @@ export function APIKeysPageClient({
         >
           <APIKeyForm
             models={models}
+            groups={groups}
+            applications={applications}
             defaultValues={editTarget}
             onCancel={() => {
               setEditOpen(false);
@@ -100,11 +119,15 @@ function CreateModalPanel({
   onCreated,
   createdKey,
   models,
+  groups,
+  applications,
 }: {
   onClose: () => void;
   onCreated: (plaintext?: string) => void;
   createdKey: string | null;
   models: ModelOption[];
+  groups: ModelOption[];
+  applications: ModelOption[];
 }) {
   const t = useTranslations("api-keys");
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -153,7 +176,7 @@ function CreateModalPanel({
       title={t("modal.createTitle")}
       size="md"
     >
-      <APIKeyForm models={models} onCancel={onClose} onSuccess={onCreated} />
+      <APIKeyForm models={models} groups={groups} applications={applications} onCancel={onClose} onSuccess={onCreated} />
     </Modal>
   );
 }

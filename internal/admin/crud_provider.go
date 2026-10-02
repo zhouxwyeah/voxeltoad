@@ -62,7 +62,7 @@ func mountProviderCRUD(g *gin.RouterGroup, repo *store.ConfigRepo, credService c
 		if !bind(c, &req) {
 			return
 		}
-		if req.Provider.Name == "" {
+		if req.Name == "" {
 			badRequest(c, "provider name is required")
 			return
 		}
@@ -73,16 +73,16 @@ func mountProviderCRUD(g *gin.RouterGroup, repo *store.ConfigRepo, credService c
 			badRequest(c, err.Error())
 			return
 		}
-		req.Provider.APIKeyRef = effectiveAPIKeyRef(req.Provider.Name, req.APIKey, req.Provider.APIKeyRef)
+		req.APIKeyRef = effectiveAPIKeyRef(req.Name, req.APIKey, req.APIKeyRef)
 		if err := repo.UpsertProvider(c.Request.Context(), req.Provider); err != nil {
 			internalErr(c, err)
 			return
 		}
-		if err := persistProviderCredential(c.Request.Context(), req.Provider.Name, req.APIKey, req.Provider.APIKeyRef, credService, credRepo); err != nil {
+		if err := persistProviderCredential(c.Request.Context(), req.Name, req.APIKey, req.APIKeyRef, credService, credRepo); err != nil {
 			appErrMsg(c, apperr.ProviderCreateFailed, err.Error())
 			return
 		}
-		setResourceID(c, req.Provider.Name)
+		setResourceID(c, req.Name)
 		c.JSON(http.StatusCreated, maskedProvider(req.Provider))
 	})
 	providers.GET("", func(c *gin.Context) {

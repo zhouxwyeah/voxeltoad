@@ -119,9 +119,7 @@ func TestAPIKeyIssuance_TenantAdmin(t *testing.T) {
 	taTok := login(t, h, "ta@acme", "ta-pass-123")
 
 	// Issue an API key (no allowed_models — empty = all models allowed).
-	rr = doAuth(t, h, taTok, http.MethodPost, "/api/v1/api-keys", map[string]any{
-		"key_id": "key_acme_1",
-	})
+	rr = doAuth(t, h, taTok, http.MethodPost, "/api/v1/api-keys", enterpriseKeyBody(t, h, taTok, "key_acme_1"))
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("issue key status = %d, want 201; body=%s", rr.Code, rr.Body.String())
 	}
@@ -250,9 +248,9 @@ func TestAPIKeyIssuance_RejectsUnknownModel(t *testing.T) {
 	taTok := login(t, h, "ta@acme", "ta-pass-123")
 	_ = ctx
 
-	rr := doAuth(t, h, taTok, http.MethodPost, "/api/v1/api-keys", map[string]any{
-		"key_id": "k1", "allowed_models": []string{"ghost-model"},
-	})
+	body := enterpriseKeyBody(t, h, taTok, "k1")
+	body["allowed_models"] = []string{"ghost-model"}
+	rr := doAuth(t, h, taTok, http.MethodPost, "/api/v1/api-keys", body)
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("unknown model allowed_models status = %d, want 400; body=%s", rr.Code, rr.Body.String())
 	}

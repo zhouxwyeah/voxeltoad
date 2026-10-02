@@ -6,16 +6,23 @@ import { useTranslations } from "next-intl";
 import { createAPIKey, updateAPIKey } from "./actions";
 import { Button, Input } from "@/components/ui";
 import { MultiSelect } from "@/components/multi-select";
+import { Select } from "@/components/ui/select";
+import { modalFormActionsClass } from "@/components/modal";
+import { toast } from "@/lib/toast";
 
 type ModelOption = { value: string; label: string };
 
 export function APIKeyForm({
   models,
+  groups,
+  applications,
   defaultValues,
   onCancel,
   onSuccess,
 }: {
   models: ModelOption[];
+  groups: ModelOption[];
+  applications: ModelOption[];
   defaultValues?: Record<string, unknown> | null;
   onCancel?: () => void;
   onSuccess?: (plaintext?: string) => void;
@@ -39,6 +46,15 @@ export function APIKeyForm({
     [defaultValues],
   );
   const [selectedModels, setSelectedModels] = useState<string[]>(dvModels);
+  const [groupId, setGroupId] = useState(String(defaultValues?.group_id ?? ""));
+  const [applicationId, setApplicationId] = useState(String(defaultValues?.application_id ?? ""));
+  const [environment, setEnvironment] = useState(String(defaultValues?.environment ?? ""));
+  const bound = !!(defaultValues?.group_id && defaultValues?.application_id && defaultValues?.environment);
+  const identityFields = [
+    { name: "group_id", label: t("identity.group"), value: groupId, set: setGroupId, options: groups },
+    { name: "application_id", label: t("identity.application"), value: applicationId, set: setApplicationId, options: applications },
+    { name: "environment", label: t("identity.environment"), value: environment, set: setEnvironment, options: ["dev", "staging", "prod"].map((value) => ({ value, label: value })) },
+  ];
 
   useEffect(() => {
     if (state?.ok) {
@@ -48,10 +64,11 @@ export function APIKeyForm({
       const plaintext = isEdit
         ? undefined
         : (state as { ok: true; apiKey?: string }).apiKey;
+      if (isEdit) toast.success(t("actions.saved"));
       onSuccessRef.current?.(plaintext);
       router.refresh();
     }
-  }, [state, router, isEdit, dvModels]);
+  }, [state, router, isEdit, dvModels, t]);
 
   return (
     <form ref={formRef} action={formAction} className="flex flex-col gap-4">
@@ -71,6 +88,24 @@ export function APIKeyForm({
         defaultValue={String(defaultValues?.key_id ?? "")}
         disabled={isEdit}
       />
+      {isEdit && <input type="hidden" name="had_models" value={String(dvModels.length > 0)} />}
+      {isEdit && !bound && <input type="hidden" name="bind_identity" value="true" />}
+      <p className="text-sm text-muted-foreground">{t(bound ? "identity.immutable" : "identity.bindingHint")}</p>
+      {identityFields.map((field) => (
+        <label key={field.name} className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-foreground">{field.label} *</span>
+          {defaultValues?.[field.name] ? (
+            <>
+              {!bound && <input type="hidden" name={field.name} value={field.value} />}
+              <span className="text-sm text-muted-foreground">{field.options.find((option) => option.value === field.value)?.label ?? field.value}</span>
+            </>
+          ) : (
+            <Select name={field.name} options={field.options} value={field.value} onValueChange={field.set} placeholder={tCommon("actions.select")} searchable={field.name !== "environment"} className="h-9 w-full" />
+          )}
+        </label>
+      ))}
+      {!groupId && groups.length === 0 && <Button href="/groups" variant="outline">{t("identity.createGroup")}</Button>}
+      {!applicationId && applications.length === 0 && <Button href="/applications" variant="outline">{t("identity.createApplication")}</Button>}
       {models.length > 0 ? (
         <MultiSelect
           name="allowed_models"
@@ -94,11 +129,11 @@ export function APIKeyForm({
           {state.errorKey ? tErr(state.errorKey) : state.error}
         </p>
       )}
-      <div className="flex justify-end gap-3 pt-2">
+      <div className={modalFormActionsClass}>
         <Button type="button" variant="outline" onClick={onCancel}>
           {tCommon("actions.cancel")}
         </Button>
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" disabled={pending || !groupId || !applicationId || !environment}>
           {pending
             ? tCommon("actions.saving")
             : isEdit

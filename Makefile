@@ -6,7 +6,8 @@ WEB_DIR := web
 
 # Pinned tool versions (keep in sync with .tool-versions).
 GOVULNCHECK_VERSION := v1.1.4
-GOLANGCI_LINT_VERSION := v1.62.2
+GOLANGCI_LINT_VERSION := v2.14.0
+GOLANGCI_LINT := $(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 .PHONY: help all build build-gateway build-admin run-gateway run-admin \
         devstack devstack-test adminstack adminstack-test stack-test-all \
@@ -140,7 +141,7 @@ test-e2e: ## Run E2E tests (e2e tag, mock upstreams by default)
 # by -run to cover non-streaming, streaming TTFT, routing, auth, rate-limit and
 # billing settlement. Use during feature development for a fast sanity check
 # before running the full suite (see design/e2e.md).
-E2E_QUICK_RUN := TestCompat_NonStreamingShape|TestCompat_StreamingTTFT|TestNonStream_UpstreamError_RefundsQuota|TestClosedLoop_ChatCompletion|TestPerm_DisallowedModelForbidden|TestRateLimit_TenantRPMRejectsOverLimit|TestRouting_PriorityPicksFirst
+E2E_QUICK_RUN := TestCompat_NonStreamingShape|TestCompat_StreamingTTFT|TestNonStream_UpstreamError_RetainsUnknown|TestClosedLoop_ChatCompletion|TestPerm_DisallowedModelForbidden|TestRateLimit_TenantRPMRejectsOverLimit|TestRouting_PriorityPicksFirst
 test-e2e-quick: ## Run quick E2E smoke (no race, selected tests)
 	$(GO) test -tags=e2e -timeout=5m -run "$(E2E_QUICK_RUN)" ./test/...
 
@@ -168,10 +169,11 @@ vet: ## Run go vet (default + dbtest + e2e build tags)
 	$(GO) vet -tags=dbtest ./...
 	$(GO) vet -tags=e2e ./...
 
-# Requires golangci-lint (pinned in .tool-versions). Install:
-#   go install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
-lint: ## Run golangci-lint (needs golangci-lint installed)
-	golangci-lint run ./...
+# Build/run the pinned v2 tool with the project's Go toolchain, not a stale
+# binary on PATH. `run` also checks the configured gofmt/goimports formatters
+# without modifying source files.
+lint: ## Run pinned golangci-lint and formatter checks (no separate install)
+	$(GOLANGCI_LINT) run ./...
 
 # Vulnerability scanning across both ecosystems. govulncheck is run via `go run`
 # at a pinned version so no separate install is needed. The Node side uses
@@ -190,8 +192,8 @@ tidy: ## Run go mod tidy
 	$(GO) mod tidy
 
 ## ---- TypeScript SDK ----
-sdk-install: ## Install SDK dependencies
-	cd $(SDK_DIR) && npm install
+sdk-install: ## Install SDK dependencies from the lockfile
+	cd $(SDK_DIR) && npm ci
 
 sdk-build: ## Build the SDK (tsup: ESM + CJS + d.ts)
 	cd $(SDK_DIR) && npm run build
@@ -216,8 +218,8 @@ sdk-codegen-check: ## Verify the generated admin client matches the spec
 # web depends on the SDK dist — run sdk-build first. Like devstack/adminstack,
 # web targets are manual/opt-in and NOT in `ci` (create-next-app + Playwright
 # browser download are heavy).
-web-install: sdk-build ## Install web dependencies (needs SDK dist)
-	cd $(WEB_DIR) && npm install
+web-install: sdk-build ## Install web dependencies from the lockfile (needs SDK dist)
+	cd $(WEB_DIR) && npm ci
 
 web-dev: ## Start the web dev server for manual UI testing (needs adminstack on :8090)
 	cp -n $(WEB_DIR)/.env.example $(WEB_DIR)/.env.local 2>/dev/null || true
@@ -303,7 +305,7 @@ check-errors: ## Verify internal/apperr catalog (unique codes, valid statuses, i
 check-permissions: ## Verify authz permission catalog (unique keys, format, alignment)
 	@./scripts/check-permissions.sh
 
-check-docs: ## Verify ADR index/filename consistency, migration-table mentions, and stale deferred wording
+check-docs: ## Verify ADRs, architecture, migration versions/table mentions, and deferred wording
 	@./scripts/check-docs.sh
 
 check-frontend-permissions: ## Verify frontend nav permission strings match backend catalog

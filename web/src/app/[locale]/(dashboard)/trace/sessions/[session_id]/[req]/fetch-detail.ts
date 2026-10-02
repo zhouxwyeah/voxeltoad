@@ -1,7 +1,7 @@
 import "server-only";
 
 import { serverAdminClient } from "@/lib/admin";
-import { unwrap } from "@voxeltoad/gateway-sdk/admin";
+import { AdminError, unwrap } from "@voxeltoad/gateway-sdk/admin";
 import type { TraceDetail } from "./detail-client";
 
 /**
@@ -26,8 +26,9 @@ export async function fetchDetailByRow(rowID: number): Promise<TraceDetail | nul
       }),
     );
     return (res ?? null) as TraceDetail | null;
-  } catch {
-    return null;
+  } catch (err) {
+    if (err instanceof AdminError && err.status === 404) return null;
+    throw err;
   }
 }
 

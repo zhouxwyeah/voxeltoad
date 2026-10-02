@@ -1,61 +1,56 @@
-import { redirect } from "next/navigation";
+import type { ComponentProps } from "react";
 import { serverAdminClient } from "@/lib/admin";
-import { onAuthExpired } from "@/lib/errors";
-import { AdminError, unwrap } from "@voxeltoad/gateway-sdk/admin";
+import { handleAdminError } from "@/lib/errors";
+import { unwrap, type AdminPaths } from "@voxeltoad/gateway-sdk/admin";
+import { ForbiddenNotice } from "@/components/forbidden-notice";
 import { APIKeysPageClient } from "./client";
 
-export const dynamic = "force-dynamic";
+type Group = NonNullable<AdminPaths["/api/v1/groups"]["get"]["responses"][200]["content"]["application/json"]["data"]>[number];
+type Application = NonNullable<AdminPaths["/api/v1/applications"]["get"]["responses"][200]["content"]["application/json"]["data"]>[number];
+type Model = NonNullable<AdminPaths["/api/v1/models"]["get"]["responses"][200]["content"]["application/json"]["data"]>[number];
 
-type ModelOption = { value: string; label: string };
+export const dynamic = "force-dynamic";
 
 export default async function APIKeysPage({
   searchParams,
 }: {
-  searchParams: Promise<{ cursor?: string; limit?: string }>;
+  searchParams: Promise<{ cursor?: string; limit?: string; unbound?: string }>;
 }) {
-  const { cursor, limit } = await searchParams;
-
-  let rows: Array<Record<string, unknown>> = [];
-  let nextCursor = "";
-  let models: ModelOption[] = [];
+  const { cursor, limit, unbound } = await searchParams;
+  let props: ComponentProps<typeof APIKeysPageClient>;
   try {
     const client = await serverAdminClient();
-    const query: Record<string, string | number> = {};
-    if (cursor) query.cursor = cursor;
-    if (limit) query.limit = Number(limit);
-    const page = unwrap(
-      await client.GET("/api/v1/api-keys", { params: { query } }),
-    );
-    rows = (page.data ?? []) as Array<Record<string, unknown>>;
-    nextCursor = page.next_cursor ?? "";
-  } catch (err) {
-    await onAuthExpired(err);
-  }
-
-  try {
-    const client = await serverAdminClient();
-    const modelsPage = unwrap(
-      await client.GET("/api/v1/models", { params: { query: {} } }),
-    );
-    models = ((modelsPage.data ?? []) as { alias: string }[]).map((m) => ({
-      value: m.alias,
-      label: m.alias,
+    const page = unwrap(await client.GET("/api/v1/api-keys", {
+      params: { query: { cursor, limit: limit ? Number(limit) : undefined, unbound: unbound === "true" || undefined } },
     }));
+    const groups: { value: string; label: string }[] = [];
+    const applications: { value: string; label: string }[] = [];
+    const models: { value: string; label: string }[] = [];
+    let groupCursor: string | undefined;
+    do {
+      const result = unwrap(await client.GET("/api/v1/groups", { params: { query: { limit: 500, cursor: groupCursor } } }));
+      const rows: Group[] = result.data ?? [];
+      groups.push(...rows.map((g) => ({ value: String(g.id), label: g.name ?? String(g.id) })));
+      groupCursor = result.next_cursor || undefined;
+    } while (groupCursor);
+    let appCursor: string | undefined;
+    do {
+      const result = unwrap(await client.GET("/api/v1/applications", { params: { query: { limit: 500, cursor: appCursor } } }));
+      const rows: Application[] = result.data ?? [];
+      applications.push(...rows.filter((a) => a.enabled).map((a) => ({ value: String(a.id), label: a.name ?? String(a.id) })));
+      appCursor = result.next_cursor || undefined;
+    } while (appCursor);
+    let modelCursor: string | undefined;
+    do {
+      const result = unwrap(await client.GET("/api/v1/models", { params: { query: { limit: 500, cursor: modelCursor } } }));
+      const rows: Model[] = result.data ?? [];
+      models.push(...rows.map((m) => ({ value: m.alias, label: m.alias })));
+      modelCursor = result.next_cursor || undefined;
+    } while (modelCursor);
+    props = { rows: page.data ?? [], nextCursor: page.next_cursor ?? "", models, groups, applications, unbound: unbound === "true" };
   } catch (err) {
-    // A 401 means the back-end session died — our cookie still holds a
-    // now-dead token. Bounce to /logout so it's cleared; this must not be
-    // swallowed, or the user silently degrades to "no models" forever.
-    if (err instanceof AdminError && err.status === 401) {
-      redirect("/logout");
-    }
-    // Models fetch failure is non-blocking — key creation still works
-    // without model restrictions (empty = allow all).
-    console.error("[api-keys] failed to load models for selector:", err);
+    const outcome = await handleAdminError(err);
+    return <div className="p-8"><ForbiddenNotice message={outcome.message} /></div>;
   }
-
-  return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
-      <APIKeysPageClient rows={rows} nextCursor={nextCursor} models={models} />
-    </div>
-  );
+  return <div className="mx-auto flex max-w-5xl flex-col gap-6 p-8"><APIKeysPageClient {...props} /></div>;
 }

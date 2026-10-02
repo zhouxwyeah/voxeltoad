@@ -93,6 +93,9 @@ test("tenant-admin: create application → toggle enabled → delete", async ({
   await page.click('a:has-text("Applications")');
   await expect(page).toHaveURL(/\/applications$/);
 
+  await expect(page.getByRole("link", { name: "Review unbound API keys" })).toHaveAttribute("href", "/api-keys?unbound=true");
+  await expect(page.getByText("Already-started requests and streams are not interrupted.", { exact: false })).toBeVisible();
+
   // Create application.
   await page.getByRole("button", { name: "Create Application" }).click();
   const createModal = page.getByRole("dialog", { name: "Create Application" });
@@ -111,6 +114,7 @@ test("tenant-admin: create application → toggle enabled → delete", async ({
   // Disable.
   await row.getByRole("button", { name: "Disable" }).click();
   const disableModal = page.getByRole("dialog", { name: "Disable Application" });
+  await expect(disableModal.getByText("default: 1 minute", { exact: false })).toBeVisible();
   await disableModal.getByRole("button", { name: "Disable" }).click();
   await expect(disableModal).not.toBeVisible();
   await expect(row.getByText("Disabled")).toBeVisible();

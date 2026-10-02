@@ -7,7 +7,7 @@ import { Button } from "@/components/ui";
 import { microToDisplay } from "@/lib/money";
 import { formatDateTime } from "@/lib/datetime";
 import type { MetaRow, SessionStats, TraceRow } from "./page";
-import type { TraceDetail } from "./[req]/detail-client";
+import { TraceIdentity, type TraceDetail } from "./[req]/detail-client";
 import { fetchTraceDetailPair } from "./[req]/actions";
 import { TraceCategories } from "@/components/trace/trace-categories";
 
@@ -60,13 +60,15 @@ export function SessionDetailClient({
     | { status: "loading" }
     | { status: "loaded"; pair: DetailPair }
     | { status: "error" }
+    | { status: "forbidden" }
   >({ status: "loading" });
 
   async function loadSelected(rowID: number, previousRowID: number) {
     setPanel({ status: "loading" });
     try {
       const pair = await fetchTraceDetailPair(rowID, previousRowID);
-      setPanel({ status: "loaded", pair });
+      if (pair.ok) setPanel({ status: "loaded", pair });
+      else setPanel({ status: pair.forbidden ? "forbidden" : "error" });
     } catch (err) {
       console.error("[trace] loadSelected error", err);
       setPanel({ status: "error" });
@@ -208,18 +210,19 @@ function RightPanel({
   panel:
     | { status: "loading" }
     | { status: "loaded"; pair: DetailPair }
-    | { status: "error" };
+    | { status: "error" }
+    | { status: "forbidden" };
   t: ReturnType<typeof useTranslations>;
 }) {
   if (panel.status === "loading") {
     return <p className="text-sm text-muted-foreground">{t("detail.loading")}</p>;
   }
-  if (panel.status === "error") {
-    return <p className="text-sm text-destructive">{t("detail.notFound")}</p>;
+  if (panel.status === "error" || panel.status === "forbidden") {
+    return <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{t(panel.status === "forbidden" ? "state.forbidden" : "state.error")}</p>;
   }
   const { current, previous } = panel.pair;
   if (!current) {
     return <p className="text-sm text-muted-foreground">{t("detail.notFound")}</p>;
   }
-  return <TraceCategories current={current} previous={previous} t={t} />;
+  return <><TraceIdentity detail={current} /><TraceCategories current={current} previous={previous} t={t} /></>;
 }

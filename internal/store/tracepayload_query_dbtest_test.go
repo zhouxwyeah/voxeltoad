@@ -8,8 +8,71 @@ import (
 	"testing"
 	"time"
 
+	"voxeltoad/internal/observability"
 	"voxeltoad/internal/store"
 )
+
+func TestTracePayloadQuery_AttributionSnapshots(t *testing.T) {
+	ctx := context.Background()
+	db := mustMigratedDB(t)
+	if err := db.Exec(`TRUNCATE trace_payloads`).Error; err != nil {
+		t.Fatal(err)
+	}
+	sink := store.NewTracePayloadRepo(db)
+	appID := int64(901)
+	for _, rec := range []observability.TracePayload{
+		{Tenant: "acme", ApplicationID: &appID, Environment: "prod", RequestID: "attributed", SessionID: "shared"},
+		{Tenant: "acme", RequestID: "legacy", SessionID: "shared"},
+		{Tenant: "other", ApplicationID: &appID, Environment: "prod", RequestID: "foreign", SessionID: "shared"},
+	} {
+		if err := sink.Record(ctx, rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	query := store.NewTracePayloadQueryRepo(db, "acme")
+	rows, err := query.ListBySession(ctx, "shared", 100)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("session rows = %+v, %v", rows, err)
+	}
+	for _, row := range rows {
+		if row.Tenant != "acme" {
+			t.Fatalf("tenant leaked: %+v", row)
+		}
+		if row.RequestID == "attributed" && (row.ApplicationID == nil || *row.ApplicationID != appID || row.Environment != "prod") {
+			t.Fatalf("lost snapshot: %+v", row)
+		}
+		if row.RequestID == "legacy" && (row.ApplicationID != nil || row.Environment != "") {
+			t.Fatalf("invented historical identity: %+v", row)
+		}
+		byRequest, found, err := query.GetByRequestID(ctx, row.RequestID)
+		if err != nil || !found {
+			t.Fatalf("GetByRequestID = %+v, %v, %v", byRequest, found, err)
+		}
+		byID, found, err := query.GetByRowID(ctx, row.ID)
+		if err != nil || !found {
+			t.Fatalf("GetByRowID = %+v, %v, %v", byID, found, err)
+		}
+		for _, detail := range []store.TracePayloadDetail{byRequest, byID} {
+			if detail.Environment != row.Environment || (detail.ApplicationID == nil) != (row.ApplicationID == nil) {
+				t.Fatalf("detail lost snapshot: %+v", detail)
+			}
+			if row.ApplicationID != nil && *detail.ApplicationID != *row.ApplicationID {
+				t.Fatalf("detail changed application: %+v", detail)
+			}
+		}
+	}
+	if _, found, err := query.GetByRequestID(ctx, "foreign"); err != nil || found {
+		t.Fatalf("foreign request found=%v, %v", found, err)
+	}
+	global := store.NewTracePayloadQueryRepo(db, "")
+	foreign, found, err := global.GetByRequestID(ctx, "foreign")
+	if err != nil || !found {
+		t.Fatalf("global foreign request = %+v, %v, %v", foreign, found, err)
+	}
+	if _, found, err := query.GetByRowID(ctx, foreign.ID); err != nil || found {
+		t.Fatalf("foreign row found=%v, %v", found, err)
+	}
+}
 
 // seedTracePayload inserts a trace_payloads row with explicit fields for the
 // query tests.

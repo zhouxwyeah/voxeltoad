@@ -17,6 +17,7 @@ type Bucket = {
   prompt_tokens?: number;
   completion_tokens?: number;
   cost?: number;
+  currency?: string;
   request_count?: number;
 };
 
@@ -26,6 +27,17 @@ type Bucket = {
  * simply absent — the chart connects existing points.
  */
 export function UsageTimeseriesChart({ rows }: { rows: Bucket[] }) {
+  const t = useTranslations("usage");
+  if (rows.length === 0) return <CurrencyChart rows={[]} currency="" />;
+  const currencies = [...new Set(rows.map((row) => row.currency ?? ""))];
+  return <div className="flex flex-col gap-3">{currencies.map((currency) => currency ? (
+    <CurrencyChart key={currency} rows={rows.filter((row) => row.currency === currency)} currency={currency} />
+  ) : (
+    <p key="unknown" className="rounded-lg border border-border p-4 text-sm text-muted-foreground">{t("identity.unknownCurrency")}</p>
+  ))}</div>;
+}
+
+function CurrencyChart({ rows, currency }: { rows: Bucket[]; currency: string }) {
   const t = useTranslations("usage");
 
   if (rows.length === 0) {
@@ -61,7 +73,7 @@ export function UsageTimeseriesChart({ rows }: { rows: Bucket[] }) {
   return (
     <div className="rounded-lg border border-border bg-background p-4">
       <h2 className="mb-3 text-sm font-semibold text-foreground">
-        {t("chart.costTrend")}
+        {t("chart.costTrend")} · {currency}
       </h2>
       <ResponsiveContainer width="100%" height={260}>
         <AreaChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
@@ -79,6 +91,7 @@ export function UsageTimeseriesChart({ rows }: { rows: Bucket[] }) {
             axisLine={{ stroke: "var(--border)" }}
           />
           <YAxis
+            tickFormatter={(value: number) => microToDisplay(value)}
             tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
             tickLine={false}
             axisLine={false}
@@ -94,7 +107,7 @@ export function UsageTimeseriesChart({ rows }: { rows: Bucket[] }) {
             labelStyle={{ color: "var(--foreground)" }}
             formatter={(value, name) => {
               const v = Number(value);
-              if (name === "cost") return [microToDisplay(v), t("chart.cost")];
+              if (name === "cost") return [`${microToDisplay(v)} ${currency}`, t("chart.cost")];
               if (name === "tokens") return [v.toLocaleString(), t("chart.tokens")];
               return [String(value), String(name)];
             }}

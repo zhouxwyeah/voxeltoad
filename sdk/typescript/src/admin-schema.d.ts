@@ -1168,6 +1168,8 @@ export interface paths {
                     cursor?: components["parameters"]["Cursor"];
                     /** @description Max items to return. */
                     limit?: components["parameters"]["Limit"];
+                    /** @description Only active legacy keys missing a complete group/application/environment identity. */
+                    unbound?: boolean;
                 };
                 header?: never;
                 path?: never;
@@ -1259,7 +1261,10 @@ export interface paths {
         };
         options?: never;
         head?: never;
-        /** Update an API key's allowed_models within the caller's tenant */
+        /**
+         * Update allowed models or complete a legacy key's governance identity
+         * @description Requires api_key.write. A legacy key may receive group_id, application_id and environment together exactly once. An already bound identity cannot be changed or removed; issue a new key to move application or environment.
+         */
         patch: {
             parameters: {
                 query?: never;
@@ -1288,6 +1293,380 @@ export interface paths {
                 404: components["responses"]["NotFound"];
             };
         };
+        trace?: never;
+    };
+    "/api/v1/budgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List recurring budget policies within one tenant
+         * @description Requires budget.read. Tenant-scoped operators cannot widen their scope.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Required for global operators (tenant name). Tenant operators read their own tenant automatically; a different name is rejected, not ignored. */
+                    tenant?: components["parameters"]["BudgetTenant"];
+                    /** @description Opaque keyset cursor from a prior response's next_cursor. Omit for the first page. */
+                    cursor?: components["parameters"]["Cursor"];
+                    /** @description Page size; values above 200 are capped. */
+                    limit?: components["parameters"]["BudgetLimit"];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Budget policy page */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BudgetPolicyList"];
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        /**
+         * Create a recurring budget policy
+         * @description Requires global scope and budget.write. Starts accounting at creation; does not reconstruct prior spending from asynchronous usage records. Enforce mode blocks new reservations when exhausted but in-flight actual costs may exceed the limit. No strict total-cost ceiling is promised.
+         */
+        post: {
+            parameters: {
+                query: {
+                    /** @description Explicit tenant name for global budget.write or budget.resolve operations. */
+                    tenant: components["parameters"]["BudgetWriteTenant"];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BudgetSpec"];
+                };
+            };
+            responses: {
+                /** @description Created budget policy */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BudgetPolicy"];
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/budgets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read a recurring budget policy
+         * @description Requires budget.read.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Required for global operators (tenant name). Tenant operators read their own tenant automatically; a different name is rejected, not ignored. */
+                    tenant?: components["parameters"]["BudgetTenant"];
+                };
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Budget policy */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BudgetPolicy"];
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change a budget limit or enabled state with optimistic version checking
+         * @description Requires global scope and budget.write. Existing committed and reserved amounts are retained. Scope, currency, timezone and period are immutable; create another policy instead. No account balance can be patched directly.
+         */
+        patch: {
+            parameters: {
+                query: {
+                    /** @description Explicit tenant name for global budget.write or budget.resolve operations. */
+                    tenant: components["parameters"]["BudgetWriteTenant"];
+                };
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BudgetPatch"];
+                };
+            };
+            responses: {
+                /** @description Full updated policy */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BudgetPolicy"];
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
+            };
+        };
+        trace?: never;
+    };
+    "/api/v1/budgets/{id}/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read current and historical period accounts for a policy
+         * @description Requires budget.read. Accounts are created lazily; an unused policy can have no accounts. Accounts across policy scopes overlap and must not be summed as total spending.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Required for global operators (tenant name). Tenant operators read their own tenant automatically; a different name is rejected, not ignored. */
+                    tenant?: components["parameters"]["BudgetTenant"];
+                };
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Period account list */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BudgetAccountList"];
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/budget-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read persistent threshold and reconciliation events
+         * @description Requires budget.read. Thresholds are based on committed cost, not reserved amounts, and are deduplicated per account and threshold.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Required for global operators (tenant name). Tenant operators read their own tenant automatically; a different name is rejected, not ignored. */
+                    tenant?: components["parameters"]["BudgetTenant"];
+                    /** @description Opaque keyset cursor from a prior response's next_cursor. Omit for the first page. */
+                    cursor?: components["parameters"]["Cursor"];
+                    /** @description Page size; values above 200 are capped. */
+                    limit?: components["parameters"]["BudgetLimit"];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Budget event page */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BudgetEventList"];
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing-reservations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List financial reservations, including unknown outcomes awaiting reconciliation
+         * @description Requires budget.read. Unknown amounts retain their reserved occupancy; release_unknown retains unknown cost and does not create zero-cost usage.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Required for global operators (tenant name). Tenant operators read their own tenant automatically; a different name is rejected, not ignored. */
+                    tenant?: components["parameters"]["BudgetTenant"];
+                    /** @description Opaque keyset cursor from a prior response's next_cursor. Omit for the first page. */
+                    cursor?: components["parameters"]["Cursor"];
+                    /** @description Page size; values above 200 are capped. */
+                    limit?: components["parameters"]["BudgetLimit"];
+                    status?: components["schemas"]["ReservationStatus"];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Reservation page */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BillingReservationList"];
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing-reservations/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reconcile a reservation using evidence and a version check
+         * @description Requires global scope and budget.resolve. Operator identity is derived from the authenticated session, never supplied by the caller. Settlement and its event are atomic. Repeated or stale resolutions return 409.
+         */
+        post: {
+            parameters: {
+                query: {
+                    /** @description Explicit tenant name for global budget.write or budget.resolve operations. */
+                    tenant: components["parameters"]["BudgetWriteTenant"];
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ReservationResolution"];
+                };
+            };
+            responses: {
+                /** @description Reconciled reservation */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BillingReservation"];
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/quotas": {
@@ -1434,6 +1813,12 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
+                    /** @description Request-time application identity; cannot be combined with unattributed=true. */
+                    application_id?: components["parameters"]["ApplicationFilter"];
+                    /** @description Request-time environment snapshot. */
+                    environment?: components["parameters"]["EnvironmentFilter"];
+                    /** @description Only historical records with application_id IS NULL. Incompatible with application_id. */
+                    unattributed?: components["parameters"]["UnattributedFilter"];
                     /** @description Inclusive lower bound on created_at (RFC3339). */
                     from?: components["parameters"]["From"];
                     /** @description Exclusive upper bound on created_at (RFC3339). */
@@ -1479,6 +1864,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/usage/attribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Tenant attribution overview for migration tracking
+         * @description Requires usage.read. Global operators must explicitly select an existing tenant; tenant-scoped operators are always bound to their own tenant. Key counts are current non-revoked keys missing any governance identity field, not callable-key counts and not bounded by from/to. Request counts come from request_logs; recorded costs come from usage_records, in the same [from,to) window. Historical missing attribution stays unknown. Asynchronous detail records may lag or be incomplete; these figures are not an authoritative financial ledger.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Required for global operators; ignored for tenant-scoped operators. */
+                    tenant?: string;
+                    /** @description Inclusive lower bound on created_at (RFC3339). */
+                    from?: components["parameters"]["From"];
+                    /** @description Exclusive upper bound on created_at (RFC3339). */
+                    to?: components["parameters"]["To"];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Tenant attribution overview; absent time bounds are returned as null. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AttributionSummary"];
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/usage/summary": {
         parameters: {
             query?: never;
@@ -1486,16 +1920,29 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Aggregate usage (grouped, summed), by currency */
+        /**
+         * Aggregate usage (grouped, summed), by currency
+         * @description Currency is always part of the aggregate key; amounts in different currencies are never summed together. Empty currency identifies unknown historical currency.
+         */
         get: {
             parameters: {
                 query?: {
+                    /** @description Request-time application identity; cannot be combined with unattributed=true. */
+                    application_id?: components["parameters"]["ApplicationFilter"];
+                    /** @description Request-time environment snapshot. */
+                    environment?: components["parameters"]["EnvironmentFilter"];
+                    /** @description Only historical records with application_id IS NULL. Incompatible with application_id. */
+                    unattributed?: components["parameters"]["UnattributedFilter"];
+                    /** @description Global operator tenant filter; tenant operators remain scoped to their own tenant. */
+                    tenant?: components["parameters"]["UsageTenant"];
+                    provider?: string;
+                    model?: string;
                     /** @description Inclusive lower bound on created_at (RFC3339). */
                     from?: components["parameters"]["From"];
                     /** @description Exclusive upper bound on created_at (RFC3339). */
                     to?: components["parameters"]["To"];
                     /** @description Dimension to group aggregates by. */
-                    group_by?: "tenant" | "model" | "provider" | "api_key_id" | "group_name";
+                    group_by?: "tenant" | "model" | "provider" | "api_key_id" | "group_name" | "application_id" | "environment" | "currency";
                 };
                 header?: never;
                 path?: never;
@@ -1531,10 +1978,21 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Time-bucketed usage trends (cost/tokens/requests per hour/day/week) */
+        /**
+         * Time-bucketed usage trends (cost/tokens/requests per hour/day/week)
+         * @description Separate rows per time bucket and currency; no currency conversion or mixed-currency total.
+         */
         get: {
             parameters: {
                 query?: {
+                    /** @description Request-time application identity; cannot be combined with unattributed=true. */
+                    application_id?: components["parameters"]["ApplicationFilter"];
+                    /** @description Request-time environment snapshot. */
+                    environment?: components["parameters"]["EnvironmentFilter"];
+                    /** @description Only historical records with application_id IS NULL. Incompatible with application_id. */
+                    unattributed?: components["parameters"]["UnattributedFilter"];
+                    /** @description Global operator tenant filter; tenant operators remain scoped to their own tenant. */
+                    tenant?: components["parameters"]["UsageTenant"];
                     /** @description Inclusive lower bound on created_at (RFC3339). */
                     from?: components["parameters"]["From"];
                     /** @description Exclusive upper bound on created_at (RFC3339). */
@@ -1633,6 +2091,12 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
+                    /** @description Request-time application identity; cannot be combined with unattributed=true. */
+                    application_id?: components["parameters"]["ApplicationFilter"];
+                    /** @description Request-time environment snapshot. */
+                    environment?: components["parameters"]["EnvironmentFilter"];
+                    /** @description Only historical records with application_id IS NULL. Incompatible with application_id. */
+                    unattributed?: components["parameters"]["UnattributedFilter"];
                     /** @description Inclusive lower bound on created_at (RFC3339). */
                     from?: components["parameters"]["From"];
                     /** @description Exclusive upper bound on created_at (RFC3339). */
@@ -2764,11 +3228,8 @@ export interface components {
         Error: {
             error: {
                 message: string;
-                /**
-                 * @description OpenAI-compatible error type.
-                 * @enum {string}
-                 */
-                type: "invalid_request_error" | "authentication_error" | "permission_error" | "not_found" | "rate_limit_error" | "api_error";
+                /** @description Stable management-plane error code from internal/apperr (for example budget_conflict); message is an i18n key. */
+                type: string;
             };
         };
         /** @description Uniform list envelope. next_cursor="" means no further pages. */
@@ -2873,7 +3334,7 @@ export interface components {
             ok: boolean;
             /** Format: int64 */
             latency_ms: number;
-            /** @description Upstream HTTP status */
+            /** @description Upstream HTTP status, when the upstream answered. */
             status?: number;
             /** @description Human-readable failure reason (empty on success). */
             error?: string;
@@ -3083,11 +3544,27 @@ export interface components {
         APIKeyInfo: {
             key_id: string;
             revoked: boolean;
+            /** Format: int64 */
+            group_id: number | null;
+            /** Format: int64 */
+            application_id: number | null;
+            /**
+             * @description Empty only for legacy keys.
+             * @enum {string}
+             */
+            environment: "" | "dev" | "staging" | "prod";
             /** @description Models this key is restricted to (empty = all). */
             allowed_models?: string[];
         };
+        /** @description Enterprise keys require a consuming group and an enabled application in the caller's tenant. The application's owner group may differ from the consuming group. */
         CreateAPIKeyRequest: {
             key_id: string;
+            /** Format: int64 */
+            group_id: number;
+            /** Format: int64 */
+            application_id: number;
+            /** @enum {string} */
+            environment: "dev" | "staging" | "prod";
             /** @description Empty/absent = all models allowed. */
             allowed_models?: string[];
         };
@@ -3096,9 +3573,204 @@ export interface components {
             /** @description Plaintext key — returned exactly once, never retrievable again. */
             api_key: string;
         };
+        /** @description Supply allowed_models and/or all three identity fields. The latter is a one-time completion for legacy keys only, never a reassignment or unbind. */
         UpdateAPIKeyRequest: {
-            /** @description Non-empty list of model aliases to restrict this key to. */
+            /** @description Model aliases to restrict this key to. When supplied for an update the array must be nonempty. */
+            allowed_models?: string[];
+            /** Format: int64 */
+            group_id?: number;
+            /** Format: int64 */
+            application_id?: number;
+            /** @enum {string} */
+            environment?: "dev" | "staging" | "prod";
+        } | {
             allowed_models: string[];
+        } | {
+            /** Format: int64 */
+            group_id: number;
+            /** Format: int64 */
+            application_id: number;
+            /** @enum {string} */
+            environment: "dev" | "staging" | "prod";
+        };
+        BudgetSpec: {
+            name: string;
+            /** @enum {string} */
+            scope_kind: "tenant" | "group" | "application" | "application_env" | "key";
+            /** @description Empty (or omitted) for tenant; positive entity ID encoded as a string for group/application/application_env; key_id for key. All references must belong to the selected tenant. */
+            scope_ref?: string;
+            /**
+             * @description Required and nonempty only for application_env; must be empty or omitted for other scopes.
+             * @enum {string}
+             */
+            environment?: "" | "dev" | "staging" | "prod";
+            /** @enum {string} */
+            period: "daily" | "weekly" | "monthly";
+            /** @description IANA timezone; defaults to UTC if omitted. Local is not accepted. Weeks start on Monday. */
+            timezone?: string;
+            /** @description Lowercase ISO 4217 currency code; no implicit conversion. */
+            currency: string;
+            /**
+             * Format: int64
+             * @description Period limit in micro-units. Zero in enforce mode rejects even a zero-estimate new reservation.
+             */
+            limit: number;
+            /** @enum {string} */
+            mode: "enforce" | "soft";
+            /** @description Committed spending percentages, not fractions; persisted once per account and threshold. */
+            thresholds?: number[];
+        };
+        BudgetPolicy: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            tenant_id: number;
+            name: string;
+            /** @enum {string} */
+            scope_kind: "tenant" | "group" | "application" | "application_env" | "key";
+            scope_ref: string;
+            /** @enum {string} */
+            environment: "" | "dev" | "staging" | "prod";
+            /** @enum {string} */
+            period: "daily" | "weekly" | "monthly";
+            timezone: string;
+            currency: string;
+            /** Format: int64 */
+            limit: number;
+            /** @enum {string} */
+            mode: "enforce" | "soft";
+            thresholds: number[];
+            enabled: boolean;
+            /** Format: int64 */
+            version: number;
+            /**
+             * Format: date-time
+             * @description Policy accounting start; historical usage is not backfilled.
+             */
+            created_at: string;
+        };
+        BudgetPatch: {
+            /** Format: int64 */
+            version: number;
+            /** Format: int64 */
+            limit?: number;
+            enabled?: boolean;
+        } | unknown | unknown;
+        BudgetAccount: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            policy_id: number;
+            /** Format: date-time */
+            period_start: string;
+            /** Format: date-time */
+            period_end: string;
+            currency: string;
+            /** Format: int64 */
+            limit: number;
+            /**
+             * Format: int64
+             * @description Occupancy including unresolved unknown requests.
+             */
+            reserved: number;
+            /**
+             * Format: int64
+             * @description Known actual spending; can exceed the limit due to in-flight costs.
+             */
+            committed: number;
+            /** Format: int64 */
+            released: number;
+            /**
+             * Format: int64
+             * @description limit - committed - reserved; can be negative.
+             */
+            available: number;
+        };
+        BudgetEvent: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            tenant_id: number;
+            /** Format: int64 */
+            account_id: number | null;
+            reservation_id: string;
+            kind: string;
+            threshold: number;
+            /** Format: int64 */
+            amount: number;
+            /** Format: int64 */
+            operator_id: number | null;
+            reason: string;
+            evidence: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @enum {string} */
+        ReservationStatus: "reserved" | "dispatched" | "unknown" | "settled" | "released" | "released_unknown";
+        BillingReservation: {
+            /** @description Server-generated reservation ID; not a client idempotency key. */
+            id: string;
+            request_id: string;
+            tenant: string;
+            group: string;
+            api_key_id: string;
+            /** Format: int64 */
+            application_id: number | null;
+            /** @enum {string} */
+            environment: "" | "dev" | "staging" | "prod";
+            currency: string;
+            /** Format: int64 */
+            estimate: number;
+            /** @description Frozen dispatch-time pricing configuration. */
+            price_snapshot: {
+                [key: string]: unknown;
+            };
+            /** Format: int64 */
+            tenant_id: number;
+            status: components["schemas"]["ReservationStatus"];
+            /**
+             * Format: int64
+             * @description Null means unknown, not zero.
+             */
+            actual: number | null;
+            reason: string;
+            /** Format: int64 */
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ReservationResolution: {
+            /** Format: int64 */
+            version: number;
+            /** @enum {string} */
+            action: "settle" | "release" | "release_unknown";
+            /**
+             * Format: int64
+             * @description Required for settle; omitted for release and release_unknown.
+             */
+            actual?: number;
+            reason: string;
+            /** @description Reconciliation evidence or explicit acknowledgement that cost remains unknown. */
+            evidence: string;
+        };
+        BudgetPolicyList: {
+            data: components["schemas"]["BudgetPolicy"][];
+            next_cursor: string;
+        };
+        BudgetAccountList: {
+            data: components["schemas"]["BudgetAccount"][];
+            /** @enum {string} */
+            next_cursor: "";
+        };
+        BudgetEventList: {
+            data: components["schemas"]["BudgetEvent"][];
+            next_cursor: string;
+        };
+        BillingReservationList: {
+            data: components["schemas"]["BillingReservation"][];
+            next_cursor: string;
         };
         QuotaBalance: {
             scope: string;
@@ -3158,12 +3830,56 @@ export interface components {
             /** Format: int64 */
             error_count?: number;
         };
+        AttributionSummary: {
+            /**
+             * Format: int64
+             * @description Current non-revoked keys with group_id IS NULL, application_id IS NULL or empty environment. Includes expired keys and disabled tenants; not the number of callable keys.
+             */
+            unbound_key_count: number;
+            /**
+             * Format: int64
+             * @description All recorded request_logs rows for the tenant in the window.
+             */
+            request_count: number;
+            /**
+             * Format: int64
+             * @description Recorded request_logs rows with application_id IS NULL in the window.
+             */
+            unattributed_request_count: number;
+            /**
+             * Format: double
+             * @description Unattributed request count divided by request count; zero when no requests are recorded.
+             */
+            unattributed_request_ratio: number;
+            /** @description Recorded usage_records costs with application_id IS NULL in the window, grouped by currency. Empty currency remains unknown; currencies are never summed together. Empty array means no matching cost records, not a guarantee of zero financial cost. */
+            recorded_unattributed_costs: components["schemas"]["CurrencyCost"][];
+            /**
+             * Format: date-time
+             * @description Inclusive time bound; null when unbounded.
+             */
+            from: string | null;
+            /**
+             * Format: date-time
+             * @description Exclusive time bound; null when unbounded.
+             */
+            to: string | null;
+        };
         UsageRecord: {
             /** Format: int64 */
             id?: number;
             tenant?: string;
             group_name?: string;
             api_key_id?: string;
+            /**
+             * Format: int64
+             * @description Immutable request-time application snapshot; null means unattributed.
+             */
+            application_id?: number | null;
+            /**
+             * @description Immutable request-time environment snapshot.
+             * @enum {string}
+             */
+            environment?: "" | "dev" | "staging" | "prod";
             provider?: string;
             model?: string;
             prompt_tokens?: number;
@@ -3173,12 +3889,16 @@ export interface components {
              * @description Micro-units.
              */
             cost?: number;
+            /** @description Request-time currency; empty means unknown historical currency and must not be inferred from current prices. */
+            currency?: string;
             /** Format: date-time */
             created_at?: string;
         };
-        /** @description One aggregate bucket. group_key is the value of the group_by dimension. */
+        /** @description One aggregate bucket. group_key is the group_by dimension value (empty for unattributed application); currency is always an additional grouping dimension. */
         UsageSummaryRow: {
             group_key?: string;
+            /** @description Empty for unknown historical currency. */
+            currency?: string;
             /** Format: int64 */
             prompt_tokens?: number;
             /** Format: int64 */
@@ -3214,6 +3934,16 @@ export interface components {
             tenant?: string;
             group_name?: string;
             api_key_id?: string;
+            /**
+             * Format: int64
+             * @description Immutable request-time application snapshot; null means unattributed.
+             */
+            application_id?: number | null;
+            /**
+             * @description Immutable request-time environment snapshot.
+             * @enum {string}
+             */
+            environment?: "" | "dev" | "staging" | "prod";
             provider?: string;
             model_requested?: string;
             /** @description Upstream model name actually resolved to (ADR-0002). */
@@ -3277,8 +4007,9 @@ export interface components {
         OperatorList: components["schemas"]["ListEnvelope"] & {
             data?: components["schemas"]["Operator"][];
         };
-        APIKeyList: components["schemas"]["ListEnvelope"] & {
-            data?: components["schemas"]["APIKeyInfo"][];
+        APIKeyList: {
+            data: components["schemas"]["APIKeyInfo"][];
+            next_cursor: string;
         };
         UsageList: components["schemas"]["ListEnvelope"] & {
             data?: components["schemas"]["UsageRecord"][];
@@ -3286,8 +4017,10 @@ export interface components {
         UsageSummaryList: components["schemas"]["ListEnvelope"] & {
             data?: components["schemas"]["UsageSummaryRow"][];
         };
-        /** @description One time-bucketed aggregate for the timeseries endpoint. */
+        /** @description One time-and-currency bucket for the timeseries endpoint. */
         UsageBucket: {
+            /** @description Empty for unknown historical currency. */
+            currency?: string;
             /** Format: date-time */
             bucket_start?: string;
             /** Format: int64 */
@@ -3311,7 +4044,16 @@ export interface components {
         RequestLogPage: components["schemas"]["PageEnvelope"] & {
             data?: components["schemas"]["RequestLogEntry"][];
         };
-        /** @description Aggregated cost/tokens for all usage_records rows in a session. */
+        CurrencyCost: {
+            /** @description Empty means unknown historical currency. */
+            currency: string;
+            /**
+             * Format: int64
+             * @description Micro-units in this currency only.
+             */
+            cost: number;
+        };
+        /** @description Aggregated tokens and separate currency totals for all usage_records rows in a session. */
         SessionCostSummary: {
             session_id?: string;
             /** Format: int64 */
@@ -3320,9 +4062,12 @@ export interface components {
             completion_tokens?: number;
             /**
              * Format: int64
-             * @description int64 micro-units (ADR-0013).
+             * @description Null when currencies are mixed; use costs_by_currency.
              */
-            cost?: number;
+            cost?: number | null;
+            /** @description Empty for mixed currencies or unknown historical currency. */
+            currency?: string;
+            costs_by_currency?: components["schemas"]["CurrencyCost"][];
             /** Format: int64 */
             request_count?: number;
         };
@@ -3350,9 +4095,12 @@ export interface components {
             duration_ms?: number;
             /**
              * Format: int64
-             * @description Total cost in micro-units (from usage_records).
+             * @description Total cost in micro-units for one currency; null for mixed currencies.
              */
-            cost?: number;
+            cost?: number | null;
+            /** @description Empty for mixed currencies or unknown historical currency. */
+            currency?: string;
+            costs_by_currency?: components["schemas"]["CurrencyCost"][];
             /**
              * Format: date-time
              * @description First request timestamp.
@@ -3376,6 +4124,16 @@ export interface components {
             session_id?: string;
             trace_id?: string;
             tenant?: string;
+            /**
+             * Format: int64
+             * @description Immutable request-time application snapshot.
+             */
+            application_id?: number | null;
+            /**
+             * @description Immutable request-time environment snapshot.
+             * @enum {string}
+             */
+            environment?: "" | "dev" | "staging" | "prod";
             provider?: string;
             model_requested?: string;
             stream?: boolean;
@@ -3589,6 +4347,20 @@ export interface components {
         };
     };
     parameters: {
+        /** @description Required for global operators (tenant name). Tenant operators read their own tenant automatically; a different name is rejected, not ignored. */
+        BudgetTenant: string;
+        /** @description Page size; values above 200 are capped. */
+        BudgetLimit: number;
+        /** @description Explicit tenant name for global budget.write or budget.resolve operations. */
+        BudgetWriteTenant: string;
+        /** @description Request-time application identity; cannot be combined with unattributed=true. */
+        ApplicationFilter: number;
+        /** @description Request-time environment snapshot. */
+        EnvironmentFilter: "dev" | "staging" | "prod";
+        /** @description Only historical records with application_id IS NULL. Incompatible with application_id. */
+        UnattributedFilter: boolean;
+        /** @description Global operator tenant filter; tenant operators remain scoped to their own tenant. */
+        UsageTenant: string;
         /** @description Opaque keyset cursor from a prior response's next_cursor. Omit for the first page. */
         Cursor: string;
         /** @description Max items to return. */

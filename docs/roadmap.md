@@ -1,7 +1,7 @@
 # voxeltoad Roadmap
 
 > 本文档是项目演进的**单一事实来源**，明确各主线阶段及触发条件。
-> 更新日期：2026-07-31
+> 更新日期：2026-09-30
 
 ---
 
@@ -22,13 +22,13 @@ desktop 编译失败先撞到。
 以下能力已生产可用，非骨架：
 
 - [x] **协议适配**：OpenAI / Claude 完整 adapter（含 SSE 流式），tencent/zhipu 通过 openai adapter 走配置分支
-- [x] **配额计费**：Pre 预扣 + Post 结算，失败退还；token 来自上游 response.usage（非估算）
+- [x] **配额计费基线**：Pre 预扣 + Post 按上游 response.usage 结算；本次 E1 收窄退款条件，已外呼但费用未知不自动退还（见下文实施状态）
 - [x] **限流**：单机内存 sliding-window，多实例靠"总额除以在线节点数"妥协
 - [x] **审计**：管理面 `rbac.auditMutation` 中间件统一拦截非 GET 写操作；数据面每请求落 `request_logs`
 - [x] **多租户**：middleware 层强制，handler 不重复判
 - [x] **provider_credentials 加密**：AES-256-GCM 已落地（ADR-0031）
-- [x] **OpenAPI 契约**：43 个端点，server 端实现度高；SDK codegen 用 `git diff --exit-code` 强制同步
-- [x] **数据库**：23 个迁移文件、24 张表、月度分区；database.md 与 migrations 同步纪律好
+- [x] **OpenAPI 契约**：43 个端点，server 端实现度高；SDK codegen 重新生成到临时文件并逐字节 diff 校验同步（不要求工作区已提交）
+- [x] **数据库基线**：PG 持久化与月度分区；当前迁移/表/字段计数只见 `design/database.md`，不沿用旧里程碑 snapshot 的统计
 - [x] **前端控制台**：Next.js 16 + React 19 + RSC，20 个 dashboard 页面全部「真实可用」档
 - [x] **SDK**：`@voxeltoad/gateway-sdk` 双产物（数据面 client + 管理面 admin），web 强依赖
 - [x] **测试**：~101 个 _test.go、test/e2e/ 16 个文件、`make ci` 含 16 个 step
@@ -43,34 +43,52 @@ desktop 编译失败先撞到。
 
 ### E0 可见（Application 归因）
 
-**目标**：让每条请求都能回答"哪个应用、什么环境在消费"。
+**目标**：新企业请求使用可信应用/环境身份，历史未归因可查询、不猜测回填。**实现完成，待最终验收**；实现与验收分列，不把测试文件存在当作运行通过。
 
-- [ ] Application CRUD + 生命周期（enabled/disabled）
-- [ ] APIKey 强绑定 Application + environment 受控属性
-- [ ] `usage_records` / `request_logs` / `trace_payloads` 新增 `application_id` + `environment` 快照
-- [ ] 控制台 Application 管理页 + usage/request 按应用维度查询
-- [ ] 历史孤儿 Key 扫描与未归因流量量化
+| 切片 | 当前实现 | 验收 |
+|---|---|---|
+| Application 与 Key | Application 创建/列表/启停/受引用保护删除；新 Key 强绑定同租户消费 Group + Application + dev/staging/prod；读写权限分离；Application PATCH 返回对象 | 待最终验收 |
+| 历史补齐 | `unbound=true` 分页查询，PATCH 一次补齐，不改已有非空身份；变更归属通过新 Key | 待最终验收 |
+| 三账本与查询 | usage/request/trace app/env 请求快照，usage currency；应用/环境/未归因过滤、汇总、CSV、trace 展示 | 待最终验收 |
+| 控制台 | Key/Application 身份字段、迁移入口、停用 TTL 提示；usage/request 归因查询 | 待最终验收 |
+| 未归因口径 | Key 未绑定与 `unattributed=true` 业务查询分离；历史空币种/维度不回填、异步明细可能不完整 | 待核对窗口请求数/占比/费用的量化闭环，不能以 Key 数替代流量 |
 
-**验收**：新生产 Key 绑定率 100%；未归因历史流量可量化；Application 停用在 key cache TTL 内阻断所有绑定 Key。
+**验收标准**：新企业 Key 绑定率 100%；跨租户/伪造 header/只读写入被拒绝；旧快照不变；两种入站协议与流式/非流式归因正确。Application 停用在 key cache TTL 内拒绝后续鉴权（当前默认 1 分钟），不截断在途流。
 
-**非目标**：预算、智能路由、Agent 一等化。
+**兼容边界**：数据库 group/application 仍 nullable，仅为历史 Key 和 Desktop 保留；不自动批量补绑或收紧成 NOT NULL。Desktop nil Application 合法、不增加企业 catalog。
 
-**前置**：`api_keys.group_id` nullable 漂移处理——先扫描/归属历史孤儿 Key，再决定 `NOT NULL`。
+### E1 管控（最小周期支出管控与已有停用机制）
 
-### E1 管控（预算与 kill switch）
+**目标**：应用/环境级周期成本管控，**不是严格硬预算**。预留检查原子，但实际在途费用允许超过预留/限额，耗尽后拒绝后续请求；不承诺固定最大超额。ADR-0052 的本期实施澄清优先于其原始长期 hard-budget/降级设想。
 
-**目标**：应用/环境级别的成本与容量控制。
+| 切片 | 当前实现 | 验收 |
+|---|---|---|
+| 资金五表 | policies/accounts/reservations/items/events；保留旧 quotas/充值 API，AccountingRepo 单事务协调 | 待最终验收 |
+| 周期/作用域 | 日/周/月、IANA 时区、五维交集；惰性 rollover；晚结算回原账户；当前调限额/启停不清账 | 待最终验收 |
+| enforce / soft | enforce 原子预留，耗尽时零估算也拒绝，实际允许超额；soft 不阻断，阈值/超额事件持久化去重 | 待最终验收 |
+| 身份/定价 | 独立服务端 reservation ID 幂等；冻结 dispatcher 候选价格；同币种校验；group quota scope 统一租户/组名 | 待最终验收 |
+| 未知费用与恢复 | 仅最终结果不明保留 unknown 占用；failover 成功按权威 Usage 结算并持久化 attempt_risk 事件，不积压人工队列；已持久化 result（含 usage 明细）可精确重放一次；启动及每分钟恢复/24h stale 只标待核对；全局权限带版本/证据核对，风险释放可补账 | 待最终验收 |
+| API/控制台 | budget.read 租户读；budget.write/resolve 仅 global；策略/账户/事件/待核对视图、确认与双语状态 | 待最终验收 |
+| Kill switch | 复用 Tenant/Application 禁用与 Key 撤销，缓存 TTL 内生效；不增加分布式即时失效 | 待最终验收 |
 
-- [ ] BudgetPolicy / BudgetAccount migration + 周期 rollover
-- [ ] Cost Hard Budget：Tenant / consuming Group / Application / env / Key 交集原子预留
-- [ ] Token Allowance：post-accounting（完成后记账、耗尽后拒绝后续）
-- [ ] Soft Budget：阈值告警事件
-- [ ] 预算驱动预设降级 + 降级后仍不足则拒绝
-- [ ] Kill switch：Tenant / Application / APIKey 同步停用
+**本次未实现，不能勾为完成**：
+- [ ] Token Allowance
+- [ ] 预算驱动预设降级
+- [ ] 邮件/webhook 等外部通知
 
-**验收**：并发原子性无越界；结算幂等；rollover 与晚到结算归属正确；停用在 key cache TTL 内生效。
+**非目标**：queueing、approval、borrowing、mid-stream truncation、客户端跨 HTTP 幂等、GPU accounting；E2/E3 不随本次实施完成。
 
-**非目标**：queueing、approval、borrowing、mid-stream truncation。
+### E0/E1 交付门禁与迁移说明
+
+- 企业迁移使用 00029/00030/00031，main 的 00028 user_agent 保留；本分支缺 00018/00028 合法，编号唯一。已执行旧企业 00028 的开发库须按合并后最终序列显式重建，不靠文件改名修复历史、不自动删除现有数据库。
+- PR/main push 的 `ci-integration` 已配置 DB/迁移、数据面 E2E、Web E2E 门禁；Web 脚本使用同一隔离 PG 的 admin/gateway/mock/Next，清理仅限自身资源。
+- **验收状态：已登记（本地实际运行，2026-09-30）**
+  - `make ci` 通过：fmt/vet/lint(0 issues)/arch-check、`go test -race ./...`（含 Desktop canary）、check-errors(72)、check-permissions(34)、check-docs、check-frontend-permissions、SDK codegen/typecheck/lint/test/build、三个真实 stack 套件（devstack 冒烟、数据面 SDK 契约、Control Panel 契约）全部 PASS。
+  - `make ci-web` 通过：check-i18n、check-i18n-keys、check-ui、web typecheck、eslint（17 warnings、0 errors）、web 单测 1924 passed、`next build` 成功。
+  - `make test-db` 通过：`-tags=dbtest` 全包（含 store/admin 预算、身份、归因真实 PostgreSQL 回归）。
+  - `make test-e2e` 通过：数据面 + `TestEnterprise*`（两协议×流/非流、三账本归因、伪造 header、跨租户隔离、应用停用 TTL、预算预留/结算/阈值/耗尽拒绝/soft/币种冲突、unknown 人工核对与补账幂等）。
+  - `make web-e2e`（`./scripts/web-e2e.sh`）50/50 通过，含 api-keys/applications/budgets 真实 gateway 闭环。
+  - 未做/环境限制：未发布镜像或安装包，未推送分支；`make ci-heavy`（Docker 构建 + 漏洞扫描）未运行；多实例/Redis 方向仍未启动。
 
 ### E2 优化（可解释路由）
 
@@ -205,3 +223,4 @@ desktop 编译失败先撞到。
 - 2026-07-17：初版，基于 grill session 拍板结果
 - 2026-07-18：新增「UI 产品级化」批次（P0 完成，P1/P2 排期）；design-system.md 升级为视觉单一事实源 + `make check-ui` 门禁
 - 2026-07-31：重构为双主线（Enterprise Evolution + Desktop Productization）；新增 Enterprise E0～E3 分期与触发式方向；企业演进决策 ADR-0051～0056 Accepted
+- 2026-09-30：同步 E0 收口与最小 E1 的当前实现；明确周期支出管控允许在途超额、旧余额保留、未知费用核对与恢复；实现/最终验收分栏，Token Allowance/自动降级/外部通知及 E2/E3 仍未实现

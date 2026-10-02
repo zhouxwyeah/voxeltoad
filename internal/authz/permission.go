@@ -35,6 +35,8 @@ const (
 	PermOperatorRead  Permission = "operator.read"
 	PermOperatorWrite Permission = "operator.write"
 	PermQuotaWrite    Permission = "quota.write"
+	PermBudgetWrite   Permission = "budget.write"
+	PermBudgetResolve Permission = "budget.resolve"
 
 	// Global-scope: read-only operational views.
 	PermConfigHistoryRead Permission = "config_history.read"
@@ -55,6 +57,7 @@ const (
 	PermAuditRead      Permission = "audit.read"
 	PermRequestLogRead Permission = "request_log.read"
 	PermQuotaRead      Permission = "quota.read"
+	PermBudgetRead     Permission = "budget.read"
 
 	// Both-scope: operator self-service.
 	PermPasswordWrite Permission = "password.write"
@@ -94,6 +97,8 @@ func AllPermissions() []Entry {
 		{PermOperatorRead, ScopeGlobal, "Read operators"},
 		{PermOperatorWrite, ScopeGlobal, "Write operators"},
 		{PermQuotaWrite, ScopeGlobal, "Write quotas (global top-up)"},
+		{PermBudgetWrite, ScopeGlobal, "Write recurring budgets"},
+		{PermBudgetResolve, ScopeGlobal, "Resolve billing reservations"},
 		{PermConfigHistoryRead, ScopeGlobal, "Read config history"},
 		{PermDataplaneRead, ScopeGlobal, "Read data-plane nodes"},
 		{PermOverviewRead, ScopeGlobal, "Read overview dashboard"},
@@ -110,6 +115,7 @@ func AllPermissions() []Entry {
 		{PermAuditRead, ScopeGlobal, "Read audit trail"},
 		{PermRequestLogRead, ScopeGlobal, "Read request logs"},
 		{PermQuotaRead, ScopeGlobal, "Read quotas"},
+		{PermBudgetRead, ScopeGlobal, "Read recurring budgets and reservations"},
 		{PermPasswordWrite, ScopeGlobal, "Change own password"},
 		{PermRoleRead, ScopeGlobal, "Read roles"},
 		{PermRoleWrite, ScopeGlobal, "Write roles"},

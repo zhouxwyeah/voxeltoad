@@ -10,6 +10,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"voxeltoad/internal/auth"
 	"voxeltoad/internal/billing"
@@ -39,7 +40,8 @@ type Stores struct {
 	// back to it on cache miss).
 	KeyStore auth.KeyStore
 	// Quota is the strongly-consistent quota backend (pre-debit/settle).
-	Quota billing.QuotaStore
+	Quota      billing.QuotaStore
+	Accounting billing.AccountingStore
 	// UsageRecorder is the fail-open async usage recorder (started).
 	UsageRecorder billing.UsageRecorder
 	// RequestLog is the fail-open async request-audit recorder (started); the
@@ -51,12 +53,14 @@ type Stores struct {
 	// the hot-reloadable GatewaySettings (trace.capture_payload_enabled).
 	TracePayload observability.TracePayloadRecorder
 
-	db         *store.DB
-	quotaRep   *store.QuotaRepo
-	recorder   *billing.AsyncRecorder
-	reqLogRec  *observability.AsyncRequestLogRecorder
-	tracePLRec *observability.AsyncTracePayloadRecorder
-	cfgFresher func() bool
+	db               *store.DB
+	quotaRep         *store.QuotaRepo
+	recorder         *billing.AsyncRecorder
+	reqLogRec        *observability.AsyncRequestLogRecorder
+	tracePLRec       *observability.AsyncTracePayloadRecorder
+	cfgFresher       func() bool
+	accountingCancel context.CancelFunc
+	accountingDone   chan struct{}
 }
 
 const (
@@ -100,17 +104,45 @@ func OpenStores(dsn string, opts StoreOptions) (*Stores, error) {
 	tracePLRec.Start()
 
 	quotaRep := store.NewQuotaRepo(db)
+	accounting := store.NewAccountingRepo(db)
+	recoveryCtx, recoveryCancel := context.WithCancel(context.Background())
+	recoveryDone := make(chan struct{})
+	go func() {
+		defer close(recoveryDone)
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			ctx, cancel := context.WithTimeout(recoveryCtx, 20*time.Second)
+			if err := accounting.RetryPending(ctx, 100); err != nil && recoveryCtx.Err() == nil {
+				observability.Logger().Error("accounting recovery failed", "error", err)
+			}
+			// Stale is a review state only, never evidence that an upstream was
+			// free. Late valid settlement remains possible after this mark.
+			if _, err := accounting.MarkStale(ctx, time.Now().Add(-24*time.Hour)); err != nil && recoveryCtx.Err() == nil {
+				observability.Logger().Error("accounting stale scan failed", "error", err)
+			}
+			cancel()
+			select {
+			case <-recoveryCtx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
 	return &Stores{
-		KeyStore:      store.NewKeyRepo(db),
-		Quota:         quotaRep,
-		UsageRecorder: recorder,
-		RequestLog:    reqLogRec,
-		TracePayload:  tracePLRec,
-		db:            db,
-		quotaRep:      quotaRep,
-		recorder:      recorder,
-		reqLogRec:     reqLogRec,
-		tracePLRec:    tracePLRec,
+		KeyStore:         store.NewKeyRepo(db),
+		Quota:            quotaRep,
+		Accounting:       accounting,
+		accountingCancel: recoveryCancel,
+		accountingDone:   recoveryDone,
+		UsageRecorder:    recorder,
+		RequestLog:       reqLogRec,
+		TracePayload:     tracePLRec,
+		db:               db,
+		quotaRep:         quotaRep,
+		recorder:         recorder,
+		reqLogRec:        reqLogRec,
+		tracePLRec:       tracePLRec,
 	}, nil
 }
 
@@ -155,6 +187,10 @@ func (s *Stores) SetConfigFreshness(f func() bool) { s.cfgFresher = f }
 
 // Close drains the async recorders and closes the database connection.
 func (s *Stores) Close() error {
+	if s.accountingCancel != nil {
+		s.accountingCancel()
+		<-s.accountingDone
+	}
 	_ = s.recorder.Close()
 	_ = s.reqLogRec.Close()
 	if s.tracePLRec != nil {

@@ -157,8 +157,8 @@ func TestUsageQuery_SummaryBySession(t *testing.T) {
 	if summary.PromptTokens != 3500 || summary.CompletionTokens != 1750 {
 		t.Errorf("tokens = %d/%d, want 3500/1750", summary.PromptTokens, summary.CompletionTokens)
 	}
-	if summary.Cost != 35000 {
-		t.Errorf("cost = %d, want 35000 (10000+20000+5000)", summary.Cost)
+	if summary.Cost == nil || *summary.Cost != 35000 {
+		t.Errorf("cost summary = %+v, want 35000 (10000+20000+5000)", summary)
 	}
 	if summary.SessionID != "abc" {
 		t.Errorf("session_id = %q, want abc", summary.SessionID)
@@ -188,7 +188,7 @@ func TestUsageQuery_SummaryBySession_EmptySession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SummaryBySession empty: %v", err)
 	}
-	if summary.RequestCount != 0 || summary.Cost != 0 {
+	if summary.RequestCount != 0 || summary.Cost == nil || *summary.Cost != 0 {
 		t.Errorf("empty session should give zero summary; got %+v", summary)
 	}
 }

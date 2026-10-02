@@ -4,9 +4,11 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
+	"voxeltoad/internal/billing"
 	"voxeltoad/internal/store"
 )
 
@@ -138,6 +140,28 @@ func mustBalance(t *testing.T, repo *store.QuotaRepo, scope string) int64 {
 // TopUp is an atomic increment: it creates the scope at delta when absent, and
 // adds to the existing balance otherwise. Unlike SetBalance it never overwrites,
 // so it cannot clobber a concurrent hot-path debit.
+func TestQuotaRepo_TopUpPreservesCurrency(t *testing.T) {
+	ctx := context.Background()
+	repo := freshQuotaRepo(t)
+	setQuota(t, repo, "tenant:a", 100)
+	if err := repo.TopUp(ctx, "tenant:a", 50, "cny"); !errors.Is(err, billing.ErrCurrencyMismatch) {
+		t.Fatalf("currency change = %v", err)
+	}
+	balance, currency, err := repo.BalanceWithCurrency(ctx, "tenant:a")
+	if err != nil || balance != 100 || currency != "usd" {
+		t.Fatalf("currency mismatch mutated quota: %d %s %v", balance, currency, err)
+	}
+	if err := repo.TopUp(ctx, "tenant:a", 50, "USD"); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustBalance(t, repo, "tenant:a"); got != 150 {
+		t.Fatalf("case-insensitive topup = %d", got)
+	}
+	if err := repo.TopUp(ctx, "group:ambiguous", 50, "usd"); !errors.Is(err, billing.ErrInvalidPolicy) {
+		t.Fatalf("ambiguous scope = %v", err)
+	}
+}
+
 func TestQuotaRepo_TopUpCreatesAndIncrements(t *testing.T) {
 	ctx := context.Background()
 	repo := freshQuotaRepo(t)

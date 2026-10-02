@@ -1,6 +1,29 @@
 {
   "heading": "应用",
   "subtitle": "消费 AI 的长期业务系统。每个应用有一个所属团队，可被多个团队的 API Key 消费。",
+  "migration": {
+    "description": "为有效历史密钥一次性补齐消费团队、应用与环境，完成迁移。已有请求历史保持不变。",
+    "unboundKeys": "查看未绑定 API 密钥",
+    "disableHint": "停用应用后，鉴权缓存过期时开始拒绝新请求（默认 TTL：1 分钟），不会中断已开始的请求或流。"
+  },
+  "attribution": {
+    "heading": "归因概览 · 最近 24 小时",
+    "unboundKeys": "未绑定 API 密钥（当前）",
+    "requestCount": "已记录请求数",
+    "unattributedRequests": "未归因请求数",
+    "unattributedRatio": "未归因请求占比",
+    "recordedCosts": "已记录未归因费用",
+    "unknownCurrency": "币种未知",
+    "noCosts": "此窗口暂无费用记录",
+    "keyHint": "统计未撤销且消费团队、应用或环境任一缺失的密钥，包含已过期密钥及已停用租户的密钥。这不是实际可调用密钥数，也不是流量占比。",
+    "historyHint": "未记录应用的请求计为未归因。旧历史缺失字段保持未知，异步请求与用量明细可能延迟或不完整。费用按记录币种分别展示，不代表资金余额。",
+    "error": "无法加载归因概览，仍可继续管理应用。",
+    "forbidden": "查看归因概览需要 usage.read 权限。"
+  },
+  "state": {
+    "error": "无法加载应用或团队。",
+    "retry": "重试"
+  },
   "columns": {
     "id": "ID",
     "name": "名称",
@@ -12,8 +35,12 @@
     "disabled": "已停用"
   },
   "form": {
-    "name": { "label": "名称 *" },
-    "ownerGroup": { "label": "所属团队 *" }
+    "name": {
+      "label": "名称 *"
+    },
+    "ownerGroup": {
+      "label": "所属团队 *"
+    }
   },
   "modal": {
     "createTitle": "创建应用",
@@ -26,7 +53,7 @@
     "disable": "停用",
     "enable": "启用",
     "delete": "删除",
-    "disableConfirm": "停用应用「{name}」？所有绑定的 API Key 将被拒绝。",
+    "disableConfirm": "停用应用「{name}」？鉴权缓存过期后（默认 1 分钟），绑定密钥的新请求将被拒绝，不会中断在途请求或流。",
     "deleteConfirm": "删除应用「{name}」？除非没有 API Key 引用它，否则此操作无法撤销。"
   }
 }

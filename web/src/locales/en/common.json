@@ -11,6 +11,7 @@
     "groups": "Groups",
     "applications": "Applications",
     "quotas": "Quota",
+    "budgets": "Budgets",
     "routes": "Routes",
     "plugins": "Plugins",
     "usage": "Usage",

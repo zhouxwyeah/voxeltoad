@@ -1,6 +1,8 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
+import { useState } from "react";
+import { Select } from "@/components/ui/select";
 import { useRouter } from "@/i18n/navigation";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui";
@@ -50,6 +52,9 @@ export function RequestLogsPageClient({
   const currentFallback = searchParams.get("fallback") ?? "";
   const currentSessionID = searchParams.get("session_id") ?? "";
   const currentIngressProtocol = searchParams.get("ingress_protocol") ?? "";
+  const currentApplication = searchParams.get("application_id") ?? "";
+  const [environment, setEnvironment] = useState(searchParams.get("environment") ?? "");
+  const [unattributed, setUnattributed] = useState(searchParams.get("unattributed") === "true");
   const hasFilters =
     !!currentFrom ||
     !!currentTo ||
@@ -63,7 +68,7 @@ export function RequestLogsPageClient({
     !!currentStream ||
     !!currentFallback ||
     !!currentSessionID ||
-    !!currentIngressProtocol;
+    !!currentIngressProtocol || !!currentApplication || !!environment || unattributed;
 
   // Push a new URL keeping the current filters but overriding page and/or
   // page_size. Changing page keeps filters; changing a filter resets to 1.
@@ -98,6 +103,9 @@ export function RequestLogsPageClient({
     set("fallback", formData.get("fallback"));
     set("session_id", formData.get("session_id"));
     set("ingress_protocol", formData.get("ingress_protocol"));
+    set("environment", formData.get("environment"));
+    if (unattributed) params.set("unattributed", "true");
+    else set("application_id", formData.get("application_id"));
     router.push(`/request-logs?${params.toString()}`);
   }
 
@@ -161,6 +169,16 @@ export function RequestLogsPageClient({
             className="block h-8 w-32 rounded border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground"
           />
         </FilterField>
+        <FilterField label={t("identity.application")}>
+          <input name="application_id" type="number" defaultValue={currentApplication} disabled={unattributed} className="block h-8 w-32 rounded border border-border bg-background px-2 text-xs text-foreground disabled:opacity-50" />
+        </FilterField>
+        <FilterField label={t("identity.environment")}>
+          <Select name="environment" value={environment} onValueChange={setEnvironment} options={[{ value: "", label: t("identity.allEnvironments") }, ...["dev", "staging", "prod"].map((value) => ({ value, label: value }))]} className="w-32" />
+        </FilterField>
+        <label className="flex h-8 items-center gap-2 text-xs text-foreground">
+          <input name="unattributed" type="checkbox" checked={unattributed} onChange={(event) => setUnattributed(event.target.checked)} />
+          {t("identity.unattributedOnly")}
+        </label>
         <FilterField label={t("filters.provider")}>
           <input
             name="provider"

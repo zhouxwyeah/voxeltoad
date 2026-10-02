@@ -16,6 +16,8 @@
 | `llm.tenant` | 租户标识 | 鉴权层 |
 | `llm.group` | 消费方 Group 标识 | 鉴权层 |
 | `llm.api_key_id` | API Key（脱敏后的 id，非明文） | 鉴权层 |
+| `llm.application_id` | 可信 Application ID；历史未归因/桌面可空，不能用 caller header 补值 | KeyRecord → plugin.Context |
+| `llm.environment` | Key 绑定的 dev/staging/prod 环境，历史可空 | KeyRecord → plugin.Context |
 | `llm.model.requested` | 业务方请求的模型别名 | 请求 |
 | `llm.model.resolved` | 路由后实际命中的供应商模型 | 路由层 |
 | `llm.provider` | 实际命中的供应商（**降级后记实际值**） | 转发层 |
@@ -62,6 +64,17 @@
 **不回显上游 ID 给客户端**：`echoCorrelationHeaders`（`internal/proxy/router.go`）回显 `X-Request-Id`（gateway 生成）/ `X-Client-Request-Id`（客户端原值，仅当客户端发送过）/ `X-Voxeltoad-Session` / `X-Trace-Id` 四个网关自己的关联头。上游 `req_xxx`（OpenAI/Anthropic/Gemini 的内部 ID）永远不暴露给外部客户端——安全考虑（避免泄露上游基础设施拓扑）+ 行业惯例（Nginx/HAProxy/AWS ALB 都不透传后端 ID）。上游 ID 已落库 `request_logs.upstream_request_id`，客户端报障时运维可查。
 
 **重试/failover 的多上游 ID**：当前 `upstream_request_id` 只捕获**最终成功**那次尝试的 ID（ADR-0040 Decision 5）。失败/重试/failover 尝试的上游 ID 不捕获——这会破坏 `request_logs` "1 请求 = 1 行"的账本模型（ADR-0021 §5）。per-attempt 捕获（含失败重试）是阶段二增强，见 `docs/ops/failover-troubleshooting.md §8`。
+
+## Application 归因与资金事实（E0/E1）
+
+- `application_id` / `environment` 从鉴权 KeyRecord 传播到 plugin、billing、request log 与 trace，三账本保存请求时快照（00030）；历史补绑、应用停用不改变旧行，不加 Application 强 FK。Application owner 是维护归属，`llm.group` 是消费归属。
+- app/env 可用于 span、日志、业务查询；Application ID **不得作为 Prometheus label**。`unbound=true` 查待补齐 Key，`unattributed=true` 查未归因历史业务数据；未绑定 Key 列表仅排除 revoked，不等于实际可调用 Key 数，更不是未归因流量占比。请求数/占比与已记录费用需选同一窗口并注明异步明细可能不完整。
+- 三账本不是每条失败请求各写一行：request_logs 记录最终状态；usage 仅记录已知 Usage/结算事实；trace_payloads 仍需显式开启。不能为拦截、缺 Usage 或未知费用伪造零费 usage。`usage_records.currency` 保存费用币种，历史空串显示未知，不按当前定价回填。
+- 财务事实以持久化 `billing_reservations` / `budget_accounts` 为准，异步 usage 可能丢失，不能作为唯一对账依据。服务端 reservation ID 是资金幂等键；gateway request_id 用于关联，client_request_id 仅跨系统检索，不复用为资金去重键。
+- 请求预留与最终计价冻结同一 dispatcher/model 配置，记录可信身份、币种、估算、候选价格快照；不因热更新在 Post 改价。enforce 原子检查 available，但在途实际成本可以超额；soft 只记账和事件。
+- 结算错误必须保留可核对的 reservation 状态并输出错误日志，不能吞掉，也不能把已返回成功的模型内容伪装成“可安全重试”。`result` 已持久化时后台可重试应用；写入 result 前崩溃仍可能 unknown，不宣称精确零丢失。
+- `budget_events` 持久化 threshold/overspend/unknown 与人工核对证据。阈值按实际 committed 触发并去重；unknown 保留占用，不因 24 小时 stale 扫描而退款。风险释放保留 released_unknown，可后续补账；平台核对带 version/操作者/理由/证据。本期仅持久化事件，不发送外部通知。
+- `internal/app/stores.go` 启动时及每分钟运行 RetryPending/MarkStale，重试与扫描失败分别输出 `accounting recovery failed` / `accounting stale scan failed` 日志。恢复不保证补齐异步 usage 报表。
 
 ## Trace 约定
 
@@ -127,7 +140,7 @@
 **命名规范**：
 - 所有指标以 `llm_` 前缀开头。
 - label 顺序固定：`tenant` → `model` → `provider` → `status`/`type`/`stream` 等修饰 label。
-- 禁止在 label 中使用高基数值（如 `request_id`、`session_id`），这些只能放 trace attribute。
+- 禁止在 label 中使用高基数值（如 `request_id`、`session_id`、`application_id`、reservation ID），这些只能放 trace attribute/结构化日志或业务账本。
 
 **Exporter 位置**：`internal/observability/exporter.go` 统一注册，避免散在各 handler。
 

@@ -1,6 +1,16 @@
 {
   "heading": "LLM Trace",
   "subtitle": "Session → Request → Messages → Raw. Full prompt/completion + raw bodies for debugging. Capture is opt-in on the gateway (ADR-0039).",
+  "identity": {
+    "application": "Application ID",
+    "environment": "Environment",
+    "unattributed": "Unattributed"
+  },
+  "state": {
+    "error": "Unable to load trace data.",
+    "forbidden": "You do not have permission to read this trace.",
+    "retry": "Retry"
+  },
   "nav": "Trace",
   "back": "Back",
   "notFound": "No trace payloads found. Either capture is disabled on the gateway, or this session has no payloads within the retention window.",

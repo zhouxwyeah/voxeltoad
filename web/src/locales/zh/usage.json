@@ -1,6 +1,19 @@
 {
   "heading": "用量",
   "subtitle": "按租户和模型追踪 Token 消耗与成本。",
+  "identity": {
+    "application": "应用 ID",
+    "environment": "环境",
+    "unattributed": "未归因",
+    "unattributedOnly": "仅应用未归因",
+    "allEnvironments": "全部环境",
+    "unknownCurrency": "币种未知",
+    "historyHint": "历史身份与币种不会回填。用量记录是异步写入的结算事实，并非每次请求；明细缺失不代表零费用。未绑定密钥数量不等于流量占比。"
+  },
+  "state": {
+    "error": "无法加载用量数据。",
+    "retry": "重试"
+  },
   "columns": {
     "time": "时间",
     "tenant": "租户",
@@ -38,7 +51,10 @@
       "group_name": "分组",
       "api_key_id": "API Key",
       "provider": "供应商",
-      "model": "模型"
+      "model": "模型",
+      "application_id": "应用",
+      "environment": "环境",
+      "currency": "币种"
     },
     "selectPlaceholder": "请选择…",
     "apply": "应用",

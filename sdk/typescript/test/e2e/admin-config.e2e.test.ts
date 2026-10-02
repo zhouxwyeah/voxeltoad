@@ -26,8 +26,13 @@ describe.skipIf(!enabled)("admin config CRUD contract", () => {
         body: {
           name,
           type: "openai",
-          adapter: "openai",
-          base_url: "https://api.openai.com/v1",
+          endpoints: [
+            {
+              id: "openai",
+              adapter: "openai",
+              base_url: "https://api.openai.com/v1",
+            },
+          ],
           api_key_ref: "env://OPENAI_KEY",
         },
       }),
@@ -55,8 +60,13 @@ describe.skipIf(!enabled)("admin config CRUD contract", () => {
         body: {
           name,
           type: "openai",
-          adapter: "openai",
-          base_url: "https://api.openai.com/v1",
+          endpoints: [
+            {
+              id: "openai",
+              adapter: "openai",
+              base_url: "https://api.openai.com/v1",
+            },
+          ],
           api_key: "sk-test-secret-12345",
         },
       }),
@@ -73,8 +83,13 @@ describe.skipIf(!enabled)("admin config CRUD contract", () => {
         body: {
           name,
           type: "openai",
-          adapter: "openai",
-          base_url: "https://api.openai.com/v1",
+          endpoints: [
+            {
+              id: "openai",
+              adapter: "openai",
+              base_url: "https://api.openai.com/v1",
+            },
+          ],
           api_key_ref: "env://OPENAI_KEY",
         },
       }),
@@ -96,8 +111,13 @@ describe.skipIf(!enabled)("admin config CRUD contract", () => {
         body: {
           name: pName,
           type: "o",
-          adapter: "openai",
-          base_url: "https://api.example.com",
+          endpoints: [
+            {
+              id: "openai",
+              adapter: "openai",
+              base_url: "https://api.example.com",
+            },
+          ],
           api_key_ref: "plain://k",
         },
       }),
@@ -161,8 +181,13 @@ describe.skipIf(!enabled)("admin config CRUD contract", () => {
         body: {
           name: pName,
           type: "o",
-          adapter: "openai",
-          base_url: "u",
+          endpoints: [
+            {
+              id: "openai",
+              adapter: "openai",
+              base_url: "http://localhost:9999",
+            },
+          ],
           api_key_ref: "plain://k",
         },
       }),
@@ -272,8 +297,13 @@ describe.skipIf(!enabled)("admin config CRUD contract", () => {
         body: {
           name: pName,
           type: "o",
-          adapter: "openai",
-          base_url: "u",
+          endpoints: [
+            {
+              id: "openai",
+              adapter: "openai",
+              base_url: "http://localhost:9999",
+            },
+          ],
           api_key_ref: "plain://k",
         },
       }),

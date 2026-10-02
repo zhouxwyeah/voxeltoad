@@ -2,7 +2,9 @@ package billing
 
 import (
 	"context"
+	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"voxeltoad/internal/adapter"
@@ -23,9 +25,10 @@ const settleTimeout = 10 * time.Second
 // pricing, settles the est−actual difference (always — full refund when no
 // usage), and records the usage for audit.
 type Plugin struct {
-	dyn      func() *config.Dynamic
-	quota    QuotaStore
-	recorder UsageRecorder
+	dyn        func() *config.Dynamic
+	quota      QuotaStore
+	recorder   UsageRecorder
+	accounting AccountingStore
 	// maxTokensCeiling bounds the completion-token estimate when neither the
 	// request's max_tokens nor any candidate's DefaultMaxTokens is set, so the
 	// quota pre-debit is never zero (which would silently bypass the quota check).
@@ -51,6 +54,12 @@ func WithMaxTokensCeiling(ceiling int64) Option {
 			p.maxTokensCeiling = ceiling
 		}
 	}
+}
+
+// WithAccounting installs the durable coordinator for enterprise requests.
+// It replaces, rather than supplements, the legacy quota debit/settle path.
+func WithAccounting(store AccountingStore) Option {
+	return func(p *Plugin) { p.accounting = store }
 }
 
 // NewPlugin builds the billing/quota plugin over a quota store and usage
@@ -85,8 +94,14 @@ func (p *Plugin) Execute(c *plugin.Context, phase plugin.Phase) error {
 // unreachable ⇒ reject 503 (fail-closed). The reserved amount is stashed on the
 // Context for Post to settle.
 func (p *Plugin) reserve(c *plugin.Context) error {
+	if c.PricingSnapshot == nil {
+		c.PricingSnapshot = p.dyn()
+	}
 	est := p.estimate(c)
 	c.Reserved = est
+	if p.accounting != nil {
+		return p.reserveAccounted(c)
+	}
 
 	ok, err := p.quota.TryDebit(c.Ctx, scopesOf(c), est)
 	if err != nil {
@@ -115,35 +130,88 @@ func (p *Plugin) reserve(c *plugin.Context) error {
 // disconnect cancels c.Ctx, but the refund must still land — quota is money.
 // We preserve the deadline (if any) as an upper bound but drop cancellation.
 func (p *Plugin) settle(c *plugin.Context) error {
+	if c.BillingDone {
+		return nil
+	}
 	ctx, cancel := settleContext(c.Ctx)
 	defer cancel()
 	var actual int64
 	usage := usageOf(c)
 	pricing, pricingOK := p.pricingFor(c)
 	if usage != nil && pricingOK {
-		actual = Cost(usage, pricing)
+		if p.accounting != nil {
+			var err error
+			actual, err = checkedCost(usage, pricing)
+			if err != nil {
+				c.BillingUncertain = true
+			}
+		} else {
+			actual = Cost(usage, pricing)
+		}
 	}
 
+	if p.accounting != nil {
+		if c.ReservationID == "" {
+			return nil // Pre did not reserve, so there is nothing to refund.
+		}
+		outcome, reason := "known", ""
+		if !c.ChargePossible && usage == nil {
+			outcome = "released"
+		} else if c.BillingUncertain || usage == nil || !pricingOK || actual < 0 {
+			outcome, reason = "unknown", "upstream usage or final charge is not confirmed"
+		}
+		// In accounting mode the usage row is persisted inside the reservation's
+		// settlement transaction (exactly once, via the reservation's durable
+		// result and its recovery replay). The fail-open async recorder is
+		// bypassed entirely so a crash between settlement and the async flush
+		// can never lose the ledger row the E0 attribution views count on.
+		var record *UsageRecord
+		if outcome == "known" && usage != nil && pricingOK {
+			r := p.usageRecord(c, actual, pricing)
+			record = &r
+		}
+		if outcome != "known" {
+			actual = 0 // unknown is a state, never a zero-cost accounting fact
+		}
+		if err := p.accounting.Finish(ctx, Settlement{
+			ReservationID: c.ReservationID, Outcome: outcome, Actual: actual, Reason: reason,
+			AttemptRisk: outcome == "known" && c.BillingAttemptRisk, Usage: record,
+		}); err != nil {
+			return err
+		}
+		c.BillingDone = true
+		return nil
+	}
+
+	// Legacy path (no accounting coordinator): settle the pre-debit difference
+	// and record usage through the fail-open async recorder.
 	if delta := c.Reserved - actual; delta != 0 {
 		if err := p.quota.Settle(ctx, scopesOf(c), delta); err != nil {
 			return err
 		}
 	}
-
 	if usage == nil {
 		return nil // nothing delivered → no usage record
 	}
+	return p.recorder.Record(ctx, p.usageRecord(c, actual, pricing))
+}
+
+func (p *Plugin) usageRecord(c *plugin.Context, actual int64, pricing config.Pricing) UsageRecord {
+	usage := usageOf(c)
 	// Cache discount reporting: how much the cache multiplier saved vs full price.
 	// Zero when no cache hit, no pricing resolved, or multiplier unconfigured
 	// (= full price). FullCost - Cost is non-negative whenever pricing resolved.
 	discount := int64(0)
-	if usage.CachedPromptTokens > 0 && pricingOK {
+	if usage.CachedPromptTokens > 0 {
 		discount = FullCost(usage, pricing) - actual
 		if discount < 0 {
 			discount = 0 // defensive: should not happen
 		}
 	}
-	return p.recorder.Record(ctx, UsageRecord{
+	return UsageRecord{
+		ApplicationID:       c.ApplicationID,
+		Environment:         c.Environment,
+		Currency:            strings.ToLower(pricing.Currency),
 		Tenant:              c.Tenant,
 		Group:               c.Group,
 		APIKeyID:            c.APIKeyID,
@@ -158,7 +226,7 @@ func (p *Plugin) settle(c *plugin.Context) error {
 		RequestID:           c.RequestID,
 		SessionID:           c.SessionID,
 		TraceID:             c.TraceID,
-	})
+	}
 }
 
 // settleContext returns a context and cancel func. The context inherits the
@@ -186,7 +254,20 @@ func settleContext(parent context.Context) (ctx context.Context, cancel context.
 // the estimate is never 0 when a rate exists (which would bypass the quota
 // pre-debit). Prompt cost is charged exactly at Post.
 func (p *Plugin) estimate(c *plugin.Context) int64 {
-	maxRate, maxDefault := p.candidateBounds(c.Request.Model)
+	maxRate, maxDefault := int64(0), int64(0)
+	snapshot := c.PricingSnapshot
+	if snapshot == nil {
+		snapshot = p.dyn()
+	}
+	for _, m := range snapshot.Models {
+		if m.Alias != c.Request.Model {
+			continue
+		}
+		for _, u := range m.Upstreams {
+			maxRate = max(maxRate, u.Pricing.CompletionPer1M)
+			maxDefault = max(maxDefault, int64(u.DefaultMaxTokens))
+		}
+	}
 	effTokens := maxDefault
 	if effTokens == 0 {
 		effTokens = p.maxTokensCeiling // global fallback; closes the est=0 bypass
@@ -194,32 +275,20 @@ func (p *Plugin) estimate(c *plugin.Context) int64 {
 	if c.Request.MaxTokens != nil {
 		effTokens = int64(*c.Request.MaxTokens)
 	}
-	// round-half-up on the per-million division, matching Cost.
-	return (effTokens*maxRate + 500_000) / 1_000_000
-}
-
-// candidateBounds returns the max completion rate and max DefaultMaxTokens
-// across the alias's candidate upstreams.
-func (p *Plugin) candidateBounds(alias string) (maxRate, maxDefault int64) {
-	for _, m := range p.dyn().Models {
-		if m.Alias != alias {
-			continue
-		}
-		for _, u := range m.Upstreams {
-			if u.Pricing.CompletionPer1M > maxRate {
-				maxRate = u.Pricing.CompletionPer1M
-			}
-			if int64(u.DefaultMaxTokens) > maxDefault {
-				maxDefault = int64(u.DefaultMaxTokens)
-			}
-		}
+	// Reject an overflowing request rather than wrapping a monetary amount.
+	if effTokens < 0 || maxRate < 0 || (maxRate > 0 && effTokens > (math.MaxInt64-500_000)/maxRate) {
+		return -1
 	}
-	return maxRate, maxDefault
+	return (effTokens*maxRate + 500_000) / 1_000_000
 }
 
 // pricingFor resolves the hit provider's pricing for the request's alias.
 func (p *Plugin) pricingFor(c *plugin.Context) (config.Pricing, bool) {
-	mu, ok := p.dyn().ResolveModel(c.Request.Model, c.Provider)
+	snapshot := c.PricingSnapshot
+	if snapshot == nil {
+		snapshot = p.dyn()
+	}
+	mu, ok := snapshot.ResolveModel(c.Request.Model, c.Provider)
 	if !ok {
 		return config.Pricing{}, false
 	}
@@ -242,7 +311,7 @@ func scopesOf(c *plugin.Context) []string {
 		out = append(out, "tenant:"+c.Tenant)
 	}
 	if c.Group != "" {
-		out = append(out, "group:"+c.Group)
+		out = append(out, GroupScope(c.Tenant, c.Group))
 	}
 	if c.APIKeyID != "" {
 		out = append(out, "key:"+c.APIKeyID)

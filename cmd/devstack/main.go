@@ -184,8 +184,9 @@ func main() {
 	dyn := &config.Dynamic{
 		Version: "devstack-v1",
 		Providers: []config.Provider{{
-			Name: "mock-openai", Type: "openai", Adapter: "openai",
-			BaseURL: mock.URL(), APIKeyRef: "plain://" + upstreamKey,
+			Name: "mock-openai", Type: "openai",
+			Endpoints: []config.ProviderEndpoint{{ID: "openai", Adapter: "openai", BaseURL: mock.URL()}},
+			APIKeyRef: "plain://" + upstreamKey,
 			Timeouts: config.ProviderTimeouts{
 				Connect: 2 * time.Second, FirstByte: 5 * time.Second, Overall: 30 * time.Second,
 			},
@@ -214,7 +215,7 @@ func main() {
 	fail("seed quota", stores.SetQuota(context.Background(), quotaScope, 1_000_000_000, "usd"))
 
 	authn := auth.NewAuthenticator(stores.KeyStore, auth.Options{})
-	billingPlugin := billing.NewPlugin(func() *config.Dynamic { return dyn }, stores.Quota, stores.UsageRecorder)
+	billingPlugin := billing.NewPlugin(func() *config.Dynamic { return dyn }, stores.Quota, stores.UsageRecorder, billing.WithAccounting(stores.Accounting))
 	chain := plugin.NewChain(billingPlugin)
 
 	dispWatcher := app.NewDispatcherWatcher(func() *config.Dynamic { return dyn }, proxy.DispatcherConfig{})

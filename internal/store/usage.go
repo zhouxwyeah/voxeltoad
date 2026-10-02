@@ -32,21 +32,29 @@ func (r *UsageRepo) RecordBatch(ctx context.Context, recs []billing.UsageRecord)
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, rec := range recs {
-			if err := tx.Exec(
-				`INSERT INTO usage_records
-				   (tenant, group_name, api_key_id, provider, provider_endpoint, model,
-				    prompt_tokens, completion_tokens, cost,
-				    request_id, session_id, trace_id,
-				    cached_prompt_tokens, cache_discount_micros)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				rec.Tenant, rec.Group, rec.APIKeyID, rec.Provider, rec.ProviderEndpoint, rec.Model,
-				rec.PromptTokens, rec.CompletionTokens, rec.Cost,
-				rec.RequestID, rec.SessionID, rec.TraceID,
-				rec.CachedPromptTokens, rec.CacheDiscountMicros,
-			).Error; err != nil {
+			if err := insertUsageRecord(tx, rec); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// insertUsageRecord writes one usage row on the given transaction. Shared by
+// the async recorder sink and the accounting settlement, which persists the
+// usage row atomically with the reservation's financial application so the
+// ledger row can never be lost between settlement and an async flush.
+func insertUsageRecord(tx *gorm.DB, rec billing.UsageRecord) error {
+	return tx.Exec(
+		`INSERT INTO usage_records
+		   (tenant, group_name, api_key_id, provider, provider_endpoint, model,
+		    prompt_tokens, completion_tokens, cost,
+		    request_id, session_id, trace_id,
+		    cached_prompt_tokens, cache_discount_micros, application_id, environment, currency)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		rec.Tenant, rec.Group, rec.APIKeyID, rec.Provider, rec.ProviderEndpoint, rec.Model,
+		rec.PromptTokens, rec.CompletionTokens, rec.Cost,
+		rec.RequestID, rec.SessionID, rec.TraceID,
+		rec.CachedPromptTokens, rec.CacheDiscountMicros, rec.ApplicationID, rec.Environment, rec.Currency,
+	).Error
 }

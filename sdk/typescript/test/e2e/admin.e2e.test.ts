@@ -136,8 +136,13 @@ describe.skipIf(!enabled)("admin API contract (generated client)", () => {
         body: {
           name: pName,
           type: "o",
-          adapter: "openai",
-          base_url: "https://api.example.com",
+          endpoints: [
+            {
+              id: "openai",
+              adapter: "openai",
+              base_url: "https://api.example.com",
+            },
+          ],
           api_key_ref: "plain://k",
         },
       }),

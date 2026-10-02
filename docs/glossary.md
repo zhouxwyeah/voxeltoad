@@ -80,9 +80,11 @@ and refined through `grill-with-docs` sessions.
   ADR-0031.)
 - **Usage** — token accounting (prompt/completion/total) taken from the upstream
   response, never from a local estimate. `internal/adapter.Usage`.
-- **Pricing** — per-million-token rates used to compute cost from Usage. Granularity
-  (alias vs per-provider) is deferred to step 6. (See ADR-0012; supersedes
-  ADR-0004.)
+- **Pricing** — per-upstream, per-million-token rates and cache multipliers used
+  to compute cost from upstream Usage. Enterprise requests freeze the dispatcher
+  candidate-price snapshot at reservation and use that same version at settlement.
+  An explicit zero price is distinct from missing pricing; currencies must agree
+  across reachable candidates and applicable funds. (See ADR-0012/0052.)
 
 ## Tenancy & client authentication
 
@@ -101,16 +103,23 @@ and refined through `grill-with-docs` sessions.
   authentication is cache-first with a fallback lookup on miss, so keys are
   real-time without bloating the config snapshot. (See ADR-0006.)
 - **Application** — a long-lived, tenant-scoped business system or product that
-  consumes AI. The stable workload identity for usage attribution and future
-  budget/routing/model-access policy; distinct from a Group (organizational
+  consumes AI. The stable workload identity for usage attribution and periodic
+  budgets (routing/model-access policy remain future work); distinct from a Group (organizational
   consumer/owner), APIKey (credential), Agent Run (transient execution), and
   Workload Profile (per-request routing context). Has one owning Group but may be
   consumed by keys from multiple Groups in the same Tenant. (See ADR-0051.)
 - **Application binding** — the trusted association from an APIKey (or a future
   server-resolved workload credential) to at most one Application. The data plane
   derives `application_id` from the authenticated credential; a caller-supplied
-  header cannot establish this governance identity. Legacy unbound keys are
-  recorded as unattributed. (See ADR-0051.)
+  header cannot establish this governance identity. New enterprise keys require
+  same-tenant consuming Group + Application + dev/staging/prod. Legacy keys may
+  complete missing identity once without changing nonempty fields; rebinding
+  requires a new key. Desktop nil Application remains valid. (See ADR-0051.)
+- **Unbound / unattributed** — `unbound=true` selects legacy keys with incomplete
+  governance identity for repair (non-revoked, not necessarily unexpired or still
+  callable); `unattributed=true` filters historical business ledgers missing
+  application attribution. Key counts are not request percentages.
+  Historical snapshots are never guessed from a later key binding.
 - **Application environment** — a controlled credential attribute such as `dev`,
   `staging`, or `prod`, snapshotted into request/usage records. It does not create
   a separate Application or an `ApplicationDeployment` entity. (See ADR-0051.)
@@ -149,8 +158,9 @@ and refined through `grill-with-docs` sessions.
   injects when a request omits `max_tokens` (required by Claude). (See ADR-0009.)
 - **Failover** — trying a backup provider on a retryable upstream failure
   (connection/timeout/5xx only; never 4xx). Streaming fails over only before the
-  first byte is sent to the client; after that, errors propagate. Failed
-  attempts are not billed. (See ADR-0011.)
+  first byte is sent to the client; after that, errors propagate. Failed attempts
+  with uncertain charges keep the reservation unknown; a successful fallback does
+  not prove the earlier attempt was free. (See ADR-0011/0052 implementation.)
 - **Routing strategy** — how a Route picks among candidate providers: `priority`
   (first healthy), `weighted` (per-route/provider weight), `round_robin`
   (per-instance cursor in P0). (See ADR-0011.)
@@ -201,34 +211,60 @@ and refined through `grill-with-docs` sessions.
   completion/1_000_000×CompletionPer1M, using the actually-hit provider's
   ModelUpstream.Pricing (aligns with llm.provider; failover bills the serving
   provider). (See ADR-0012.)
-- **Quota** — the current implementation term for a non-recurring Cost Budget
-  balance. It maps to a `non_recurring` BudgetAccount in the enterprise budget
-  model; distinct from rate limits and Token Allowance. (See ADR-0012, ADR-0052.)
-- **BudgetPolicy** — enterprise configuration defining a cost or token boundary,
-  governance scope, calendar/non-recurring period, hard/soft behavior, warning
-  thresholds, timezone, and allowed overage action. (See ADR-0052.)
-- **BudgetAccount** — one concrete BudgetPolicy period with limit, reserved,
-  committed, released, and period start/end state. Hard accounts participate in
-  atomic reservation/settlement; soft accounts emit events only. (See ADR-0052.)
-- **Token Allowance** — an optional token-total boundary independent from the
-  authoritative Cost Budget and from TPM rate limiting. Final accounting uses
-  provider-reported actual Usage rather than a fabricated local count.
-  (See ADR-0052.)
+- **Quota** — the retained non-recurring balance in `quotas`, not migrated into
+  BudgetAccount in E1. Top-ups cannot change an existing scope's currency. Group
+  scopes use `group:<tenant>/<group>` with each name path-escaped, not an ambiguous
+  unqualified group name. Distinct from periodic budgets, rate limits, and Token
+  Allowance. (See ADR-0012/0052 implementation clarification.)
+- **Period spend control** — E1's cost control: atomically reserve an output-cost
+  estimate, settle actual cost, and reject new requests after exhaustion. In-flight
+  actual cost can exceed the reservation and limit; this is not a strict hard
+  spending cap and has no promised fixed maximum overage.
+- **BudgetPolicy** — current cost configuration: same-tenant scope
+  (tenant/consuming Group/Application/Application+environment/Key), daily/weekly/
+  monthly period, IANA timezone (UTC default, Monday week start), currency, limit,
+  `soft`/`enforce`, thresholds, enabled state, and version. Only limit/enabled are
+  mutable; no hard delete. Token Allowance, automatic degradation, and external
+  notifications are not implemented in E1. (See ADR-0052.)
+- **BudgetAccount** — one policy period with limit, reserved, committed, released,
+  and start/end. `available = limit - committed - reserved` is derived, not stored.
+  Enforce accounts reject insufficient reservations; soft accounts record the same
+  spend and events without blocking. Accounts are created lazily; late settlement
+  always uses the originally reserved period, not the current period.
+- **Billing reservation** — a durable financial operation identified by a fresh
+  server-generated ID, never by client_request_id. Freezes authenticated identity,
+  currency, estimate, candidate-price snapshot and participating quota/account
+  targets. Gateway request_id remains a correlation field. The AccountingStore
+  coordinator reserves and settles legacy balances plus periodic accounts together.
+- **Unknown charge** — an upstream call may have incurred costs but final Usage or
+  charge cannot be confirmed. The reservation remains held; stale scanning only
+  marks it for review, never refunds it. `released_unknown` is an explicit risk
+  release, not a zero-cost fact; later known settlement applies only the required
+  delta, without a second refund. Manual resolution requires global budget.resolve,
+  version, operator, reason, and evidence.
+- **Budget event** — durable threshold/overspend/unknown or manual-resolution
+  evidence in `budget_events`; thresholds use actual committed spend and deduplicate
+  by account and threshold. It is not an external notification delivery system.
+- **Token Allowance** — a planned token-total boundary independent from cost and
+  TPM. Not part of current E1; reliable upstream Usage, not a fabricated local
+  count, would be its accounting fact. (See ADR-0052.)
 - **ResourceUsage** — an accounting envelope whose source is explicitly either
   `provider_billed` or `self_hosted_compute`. Provider token/cost facts must not be
   misrepresented as GPU use; self-hosted allocation requires explicit resource
   measurements and an internal pricing rule. (See ADR-0052.)
-- **Quota store** — the shared, strongly-consistent backend (PG row update /
-  Redis atomic) holding balances. Required from P0 because quota is money;
-  multi-instance overspend is not acceptable — diverges from the in-memory
-  default baseline. (See ADR-0012.)
-- **Usage record** — an audit/reconciliation row (`usage_records`) written
-  async/batched to PG; separate from the fast quota debit. A crash may lose a
-  not-yet-flushed record (under-bill) but must not corrupt the balance.
-  (See ADR-0012.)
-- **Partial-stream billing** — when a stream drops before the trailing usage
-  chunk, bill the usage actually received (best-effort, never zero when content
-  was delivered, never fabricated). (See ADR-0012.)
+- **Quota store** — the shared, strongly consistent PG balance backend. Enterprise
+  AccountingRepo coordinates it with periodic accounts in one transaction;
+  concurrent reservation must be atomic, while actual in-flight overage is allowed.
+  No Redis accounting implementation is included in E1. (See ADR-0012/0052.)
+- **Usage record** — an async/batched business report row (`usage_records`) for
+  known Usage/cost, including app/env/currency snapshots. A crash may lose an
+  unflushed row; reservation/account is the financial authority, not this report.
+  Historical empty currency means unknown and must not be backfilled from current
+  prices. (See ADR-0012/0052.)
+- **Partial-stream billing** — settle only a confirmed usage/charge using frozen
+  prices. A missing final Usage or uncertain failed attempt keeps the reservation
+  unknown, without fabricated tokens or automatic zero-cost refund. (See ADR-0052
+  implementation clarification.)
 - **Completion hook** — the single point (non-streaming: after Forward;
   streaming: when the relay loop ends, including on drop) where TPM debit, quota
   debit, and the usage record are triggered together for consistency. Requires
@@ -285,11 +321,12 @@ and refined through `grill-with-docs` sessions.
 - **ToolCallAudit** — a metadata-only audit event recording tool-call visibility
   (tool name, call id, outcome class) from forwarded requests/responses. The
   gateway does not execute tools or host MCP/A2A runtime. (See ADR-0056.)
-- **Kill Switch** — synchronous emergency stop available only at trusted
-  governance boundaries: Tenant disablement, Application disablement (stops all
-  bound keys), or APIKey revocation. Takes effect within key cache TTL.
-  Session-level stop is not a safety control because the session identifier is
-  forgeable. (See ADR-0056.)
+- **Kill Switch** — stop at a trusted governance boundary: Tenant disablement,
+  Application disablement (all bound keys), or APIKey revocation. Takes effect at
+  authentication within key-cache TTL (currently one minute by default), not an
+  instant cross-instance invalidation or truncation of an in-flight stream.
+  Session-level stop is not a safety control because session IDs are forgeable.
+  (See ADR-0051/0056.)
 
 ## Engineering environment
 

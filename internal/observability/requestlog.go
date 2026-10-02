@@ -13,9 +13,11 @@ import (
 // credentials (design/observability.md §日志约定). Fields mirror
 // RequestTelemetry; the two are assembled together at the request's end.
 type RequestLog struct {
-	Tenant   string
-	Group    string
-	APIKeyID string
+	Tenant        string
+	Group         string
+	APIKeyID      string
+	ApplicationID *int64 `json:"application_id"`
+	Environment   string `json:"environment"`
 
 	Provider       string
 	ModelRequested string
@@ -126,6 +128,11 @@ func (a *AsyncRequestLogRecorder) Start() {
 // Record enqueues a row without blocking; drops (and counts) when the buffer is
 // full (fail-open).
 func (a *AsyncRequestLogRecorder) Record(_ context.Context, r RequestLog) {
+	// The queued identity must not alias mutable key/config state.
+	if r.ApplicationID != nil {
+		id := *r.ApplicationID
+		r.ApplicationID = &id
+	}
 	select {
 	case a.buf <- r:
 	default:

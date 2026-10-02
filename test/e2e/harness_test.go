@@ -49,8 +49,15 @@ type Harness struct {
 type HarnessOption func(*harnessConfig)
 
 type harnessConfig struct {
-	rateLimits *ratelimit.Limits
-	dispCfg    proxy.DispatcherConfig
+	rateLimits   *ratelimit.Limits
+	dispCfg      proxy.DispatcherConfig
+	authCacheTTL time.Duration
+}
+
+// WithAuthCacheTTL bounds disablement propagation without waiting for the
+// production one-minute cache in integration tests.
+func WithAuthCacheTTL(ttl time.Duration) HarnessOption {
+	return func(c *harnessConfig) { c.authCacheTTL = ttl }
 }
 
 // WithRateLimits installs a rate-limit plugin (in front of billing) in the
@@ -107,8 +114,8 @@ func NewHarness(t *testing.T, opts ...HarnessOption) *Harness {
 		t.Fatalf("open stores: %v", err)
 	}
 
-	authn := auth.NewAuthenticator(stores.KeyStore, auth.Options{})
-	billingPlugin := billing.NewPlugin(cfgStore.Current, stores.Quota, stores.UsageRecorder)
+	authn := auth.NewAuthenticator(stores.KeyStore, auth.Options{CacheTTL: hc.authCacheTTL})
+	billingPlugin := billing.NewPlugin(cfgStore.Current, stores.Quota, stores.UsageRecorder, billing.WithAccounting(stores.Accounting))
 	var plugins []plugin.Plugin
 	if hc.rateLimits != nil {
 		plugins = append(plugins, ratelimit.NewPlugin(ratelimit.NewMemoryLimiter(), *hc.rateLimits))
@@ -124,6 +131,13 @@ func NewHarness(t *testing.T, opts ...HarnessOption) *Harness {
 		proxy.WithPlugins(chain),
 		proxy.WithDispatcherProvider(dispWatcher.Current),
 		proxy.WithAuditRecorder(stores.RequestLog),
+		proxy.WithTracePayloadRecorder(stores.TracePayload),
+		proxy.WithSettingsSource(func() *config.GatewaySettings {
+			if snapshot := cfgStore.Current(); snapshot != nil {
+				return snapshot.Settings
+			}
+			return nil
+		}),
 	))
 
 	h := &Harness{

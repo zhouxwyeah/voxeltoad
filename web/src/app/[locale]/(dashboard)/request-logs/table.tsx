@@ -56,6 +56,8 @@ export function RequestLogsTable({
         accessorKey: "tenant",
         header: t("columns.tenant"),
       },
+      { accessorKey: "application_id", header: t("identity.application"), cell: ({ row }) => String(row.original.application_id ?? t("identity.unattributed")) },
+      { accessorKey: "environment", header: t("identity.environment"), cell: ({ row }) => String(row.original.environment || t("identity.unattributed")) },
       {
         accessorKey: "provider",
         header: t("columns.provider"),
@@ -199,7 +201,7 @@ export function RequestLogsTable({
         },
       },
     ],
-    [t],
+    [t, providerAdapters],
   );
 
   const table = useReactTable({

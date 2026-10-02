@@ -1,6 +1,25 @@
 {
   "heading": "API 密钥",
   "subtitle": "管理本租户的客户端 API 密钥。明文密钥仅在创建时展示一次，之后无法找回。",
+  "identity": {
+    "group": "消费团队",
+    "application": "应用",
+    "environment": "环境",
+    "unbound": "未绑定",
+    "emptyUnbound": "没有需要补齐身份绑定的有效 API 密钥。",
+    "completeBinding": "补齐绑定",
+    "showAll": "全部 API 密钥",
+    "showUnbound": "未绑定 API 密钥",
+    "unboundHint": "身份未完整绑定的有效密钥。可一次性补齐绑定，历史请求不会重新归因。",
+    "bindingHint": "选择消费团队、已启用应用与环境。消费团队可以不同于应用所属团队，已有身份字段不可变更。",
+    "immutable": "此身份已固定。需要更换团队、应用或环境时，请签发新密钥。",
+    "createGroup": "请先创建消费团队",
+    "createApplication": "请先创建或启用应用"
+  },
+  "state": {
+    "error": "无法加载 API 密钥或关联依赖。",
+    "retry": "重试"
+  },
   "columns": {
     "keyId": "密钥 ID",
     "revoked": "状态"
@@ -10,7 +29,10 @@
     "revoked": "已撤销"
   },
   "form": {
-    "keyId": { "label": "密钥 ID *", "placeholder": "如 prod-app-1" },
+    "keyId": {
+      "label": "密钥 ID *",
+      "placeholder": "如 prod-app-1"
+    },
     "allowedModels": {
       "label": "允许的模型（可选）",
       "placeholder": "选择模型…",
@@ -33,6 +55,7 @@
   "actions": {
     "create": "创建密钥",
     "save": "保存",
+    "saved": "API 密钥已更新",
     "revoke": "撤销",
     "emptyState": "暂无 API 密钥。点击「创建密钥」以签发。"
   }

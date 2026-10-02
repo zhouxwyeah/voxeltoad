@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"voxeltoad/internal/apperr"
+	"voxeltoad/internal/authz"
 	"voxeltoad/internal/store"
 )
 
@@ -18,7 +19,7 @@ import (
 func mountApplications(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 	apps := g.Group("/applications", auth.auditMutation("application", resourceIDFrom))
 
-	apps.POST("", func(c *gin.Context) {
+	apps.POST("", auth.requirePermission(authz.PermApplicationWrite), func(c *gin.Context) {
 		op := operatorFrom(c)
 		var body struct {
 			Name       string `json:"name"`
@@ -56,7 +57,7 @@ func mountApplications(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 		c.JSON(http.StatusCreated, app)
 	})
 
-	apps.GET("", func(c *gin.Context) {
+	apps.GET("", auth.requirePermission(authz.PermApplicationRead), func(c *gin.Context) {
 		op := operatorFrom(c)
 		repo := store.NewApplicationRepo(db, *op.TenantID)
 		list, next, err := repo.List(c.Request.Context(), c.Query("cursor"), parseLimit(c))
@@ -67,7 +68,7 @@ func mountApplications(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 		c.JSON(http.StatusOK, listEnvelope(list, next))
 	})
 
-	apps.PATCH("/:name", func(c *gin.Context) {
+	apps.PATCH("/:name", auth.requirePermission(authz.PermApplicationWrite), func(c *gin.Context) {
 		op := operatorFrom(c)
 		var body struct {
 			Enabled *bool `json:"enabled"`
@@ -90,11 +91,20 @@ func mountApplications(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 			appErr(c, apperr.ApplicationNotFound)
 			return
 		}
+		app, found, err := repo.Get(c.Request.Context(), name)
+		if err != nil {
+			internalErr(c, err)
+			return
+		}
+		if !found {
+			appErr(c, apperr.ApplicationNotFound)
+			return
+		}
 		setResourceID(c, name)
-		c.JSON(http.StatusOK, gin.H{"name": name, "enabled": *body.Enabled})
+		c.JSON(http.StatusOK, app)
 	})
 
-	apps.DELETE("/:name", func(c *gin.Context) {
+	apps.DELETE("/:name", auth.requirePermission(authz.PermApplicationWrite), func(c *gin.Context) {
 		op := operatorFrom(c)
 		name := c.Param("name")
 		repo := store.NewApplicationRepo(db, *op.TenantID)
@@ -105,11 +115,15 @@ func mountApplications(g *gin.RouterGroup, db *store.DB, auth *rbac) {
 		}
 		if len(refs) > 0 {
 			appErrMsg(c, apperr.ApplicationReferenced,
-				"api_key(s) "+strings.Join(refs, ", ")+"; revoke or repoint them first")
+				"api_key(s) "+strings.Join(refs, ", ")+" retain this application; disable the application instead")
 			return
 		}
 		ok, err := repo.Delete(c.Request.Context(), name)
 		if err != nil {
+			if isConstraintViolation(err) {
+				appErr(c, apperr.ApplicationReferenced)
+				return
+			}
 			internalErr(c, err)
 			return
 		}

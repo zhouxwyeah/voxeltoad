@@ -130,7 +130,8 @@ func TestGlobalCRUD_RequiresAuth(t *testing.T) {
 
 	// No token → 401.
 	rr := do(t, h, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "p", "adapter": "openai", "base_url": "u", "api_key_ref": "plain://k",
+		"name": "p", "api_key_ref": "plain://k",
+		"endpoints": []map[string]any{{"adapter": "openai", "base_url": "u"}},
 	})
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated create status = %d, want 401; body=%s", rr.Code, rr.Body.String())
@@ -139,7 +140,8 @@ func TestGlobalCRUD_RequiresAuth(t *testing.T) {
 	// With a super-admin token → 201.
 	tok := login(t, h, "root@x", "pw-123456")
 	rr = doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "p", "adapter": "openai", "base_url": "u", "api_key_ref": "plain://k",
+		"name": "p", "api_key_ref": "plain://k",
+		"endpoints": []map[string]any{{"adapter": "openai", "base_url": "u"}},
 	})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("authenticated create status = %d, want 201; body=%s", rr.Code, rr.Body.String())
@@ -162,7 +164,8 @@ func TestGlobalConfig_RejectsTenantAdmin(t *testing.T) {
 
 	// tenant-admin may not create global config → 403.
 	rr := doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "p", "adapter": "openai", "base_url": "u", "api_key_ref": "plain://k",
+		"name": "p", "api_key_ref": "plain://k",
+		"endpoints": []map[string]any{{"adapter": "openai", "base_url": "u"}},
 	})
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("tenant-admin global create status = %d, want 403; body=%s", rr.Code, rr.Body.String())
@@ -202,7 +205,8 @@ func TestAudit_RecordsMutations(t *testing.T) {
 	tok := login(t, h, "root@x", "pw-123456")
 
 	rr := doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "audited", "adapter": "openai", "base_url": "u", "api_key_ref": "plain://k",
+		"name": "audited", "api_key_ref": "plain://k",
+		"endpoints": []map[string]any{{"adapter": "openai", "base_url": "u"}},
 	})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create status = %d; body=%s", rr.Code, rr.Body.String())

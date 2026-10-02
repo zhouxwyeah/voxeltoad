@@ -19,9 +19,11 @@ import (
 // timings, and classifications. Prompt/completion bodies and raw credentials
 // MUST NOT be placed here (privacy rule, design/observability.md §日志约定).
 type RequestTelemetry struct {
-	Tenant   string
-	Group    string
-	APIKeyID string
+	Tenant        string
+	Group         string
+	APIKeyID      string
+	ApplicationID *int64 `json:"application_id"`
+	Environment   string `json:"environment"`
 
 	ModelRequested string
 	ModelResolved  string
@@ -188,6 +190,10 @@ func recordSpan(ctx context.Context, t RequestTelemetry) {
 		attribute.String(AttrSessionSource, t.SessionSource),
 		attribute.String(AttrAgentType, t.AgentType),
 		attribute.String(AttrIngressProtocol, t.IngressProtocol),
+	}
+	attrs = append(attrs, attribute.String(AttrEnvironment, t.Environment))
+	if t.ApplicationID != nil {
+		attrs = append(attrs, attribute.Int64(AttrApplicationID, *t.ApplicationID))
 	}
 	if t.ErrorDetail != "" {
 		attrs = append(attrs, attribute.String(AttrErrorDetail, t.ErrorDetail))

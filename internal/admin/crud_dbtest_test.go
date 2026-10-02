@@ -127,8 +127,8 @@ func TestProviderCRUD(t *testing.T) {
 
 	// Create.
 	rr := doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "openai-prod", "type": "openai", "adapter": "openai",
-		"base_url": "https://api.openai.com/v1", "api_key_ref": "env://OPENAI_KEY",
+		"name": "openai-prod", "type": "openai",
+		"endpoints": []map[string]any{{"adapter": "openai", "base_url": "https://api.openai.com/v1"}}, "api_key_ref": "env://OPENAI_KEY",
 	})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201; body=%s", rr.Code, rr.Body.String())
@@ -170,17 +170,17 @@ func TestProviderPatch(t *testing.T) {
 
 	// Seed a provider.
 	rr := doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "openai-prod", "type": "openai", "adapter": "openai",
-		"base_url": "https://api.openai.com/v1", "api_key_ref": "env://OPENAI_KEY",
+		"name": "openai-prod", "type": "openai",
+		"endpoints": []map[string]any{{"adapter": "openai", "base_url": "https://api.openai.com/v1"}}, "api_key_ref": "env://OPENAI_KEY",
 		"weight": 10,
 	})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("seed create status = %d; body=%s", rr.Code, rr.Body.String())
 	}
 
-	// Patch only base_url; everything else must be preserved.
+	// Replace endpoints; all other provider fields must be preserved.
 	rr = doAuth(t, h, tok, http.MethodPatch, "/api/v1/providers/openai-prod", map[string]any{
-		"base_url": "https://upstream.example.com/v1",
+		"endpoints": []map[string]any{{"adapter": "openai", "base_url": "https://upstream.example.com/v1"}},
 	})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("patch status = %d, want 200; body=%s", rr.Code, rr.Body.String())
@@ -189,8 +189,13 @@ func TestProviderPatch(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &patched); err != nil {
 		t.Fatalf("decode patched provider: %v; body=%s", err, rr.Body.String())
 	}
-	if patched["base_url"] != "https://upstream.example.com/v1" {
-		t.Errorf("patched base_url = %v, want updated", patched["base_url"])
+	endpoints, ok := patched["endpoints"].([]any)
+	if !ok || len(endpoints) != 1 {
+		t.Fatalf("patched endpoints = %v, want one endpoint", patched["endpoints"])
+	}
+	endpoint, ok := endpoints[0].(map[string]any)
+	if !ok || endpoint["adapter"] != "openai" || endpoint["base_url"] != "https://upstream.example.com/v1" {
+		t.Errorf("patched endpoint = %v, want openai with updated base_url", endpoints[0])
 	}
 	if patched["weight"] != float64(10) {
 		t.Errorf("patched weight = %v, want preserved 10", patched["weight"])
@@ -209,7 +214,7 @@ func TestProviderPatch(t *testing.T) {
 
 	// Patch with unknown adapter → 400.
 	rr = doAuth(t, h, tok, http.MethodPatch, "/api/v1/providers/openai-prod", map[string]any{
-		"adapter": "no-such-adapter",
+		"endpoints": []map[string]any{{"adapter": "no-such-adapter", "base_url": "https://upstream.example.com/v1"}},
 	})
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("patch bad adapter status = %d, want 400", rr.Code)
@@ -234,10 +239,10 @@ func TestModelPatch(t *testing.T) {
 
 	// Seed provider + model.
 	_ = doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "p1", "type": "openai", "adapter": "openai", "base_url": "https://x", "api_key_ref": "env://K",
+		"name": "p1", "type": "openai", "endpoints": []map[string]any{{"adapter": "openai", "base_url": "https://x"}}, "api_key_ref": "env://K",
 	})
 	_ = doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "p2", "type": "openai", "adapter": "openai", "base_url": "https://y", "api_key_ref": "env://K",
+		"name": "p2", "type": "openai", "endpoints": []map[string]any{{"adapter": "openai", "base_url": "https://y"}}, "api_key_ref": "env://K",
 	})
 	rr := doAuth(t, h, tok, http.MethodPost, "/api/v1/models", map[string]any{
 		"alias": "chat",
@@ -292,7 +297,7 @@ func TestRoutePatch(t *testing.T) {
 
 	// Seed provider + model + route.
 	_ = doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "rp1", "type": "openai", "adapter": "openai", "base_url": "https://x", "api_key_ref": "env://K",
+		"name": "rp1", "type": "openai", "endpoints": []map[string]any{{"adapter": "openai", "base_url": "https://x"}}, "api_key_ref": "env://K",
 	})
 	_ = doAuth(t, h, tok, http.MethodPost, "/api/v1/models", map[string]any{
 		"alias": "rchat",
@@ -398,8 +403,8 @@ func TestProvider_CreateWithEncryptedCredential(t *testing.T) {
 	h, db, tok := authedAdmin(t)
 
 	rr := doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "openai-enc", "type": "openai", "adapter": "openai",
-		"base_url": "https://api.openai.com/v1", "api_key": "sk-encrypt-me",
+		"name": "openai-enc", "type": "openai",
+		"endpoints": []map[string]any{{"adapter": "openai", "base_url": "https://api.openai.com/v1"}}, "api_key": "sk-encrypt-me",
 	})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201; body=%s", rr.Code, rr.Body.String())
@@ -435,8 +440,8 @@ func TestProvider_CredentialEndpoint(t *testing.T) {
 
 	// Create provider without a credential.
 	rr := doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "openai-cred", "type": "openai", "adapter": "openai",
-		"base_url": "https://api.openai.com/v1", "api_key_ref": "env://OPENAI_KEY",
+		"name": "openai-cred", "type": "openai",
+		"endpoints": []map[string]any{{"adapter": "openai", "base_url": "https://api.openai.com/v1"}}, "api_key_ref": "env://OPENAI_KEY",
 	})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201; body=%s", rr.Code, rr.Body.String())
@@ -495,8 +500,8 @@ func TestProvider_CredentialEndpointRequiresCredentialService(t *testing.T) {
 
 	// Create a provider with an env ref first.
 	rr := doAuth(t, h, token, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "openai-no-cred", "type": "openai", "adapter": "openai",
-		"base_url": "https://api.openai.com/v1", "api_key_ref": "env://OPENAI_KEY",
+		"name": "openai-no-cred", "type": "openai",
+		"endpoints": []map[string]any{{"adapter": "openai", "base_url": "https://api.openai.com/v1"}}, "api_key_ref": "env://OPENAI_KEY",
 	})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201; body=%s", rr.Code, rr.Body.String())
@@ -569,7 +574,7 @@ func TestRoute_RejectsUnknownModelAlias(t *testing.T) {
 	h, _, tok := authedAdmin(t)
 	// Seed a provider so the only failure is the unknown model alias.
 	_ = doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "p1", "type": "o", "adapter": "openai", "base_url": "u", "api_key_ref": "plain://k",
+		"name": "p1", "type": "o", "endpoints": []map[string]any{{"adapter": "openai", "base_url": "u"}}, "api_key_ref": "plain://k",
 	})
 	rr := doAuth(t, h, tok, http.MethodPost, "/api/v1/routes", map[string]any{
 		"model_alias": "ghost-model", "strategy": "priority",
@@ -589,10 +594,10 @@ func TestRoute_RejectsProviderNotInUpstreams(t *testing.T) {
 	h, _, tok := authedAdmin(t)
 	// Two providers; only p1 is an upstream of m1.
 	_ = doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "p1", "type": "o", "adapter": "openai", "base_url": "u", "api_key_ref": "plain://k",
+		"name": "p1", "type": "o", "endpoints": []map[string]any{{"adapter": "openai", "base_url": "u"}}, "api_key_ref": "plain://k",
 	})
 	_ = doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "p2", "type": "o", "adapter": "openai", "base_url": "u", "api_key_ref": "plain://k",
+		"name": "p2", "type": "o", "endpoints": []map[string]any{{"adapter": "openai", "base_url": "u"}}, "api_key_ref": "plain://k",
 	})
 	_ = doAuth(t, h, tok, http.MethodPost, "/api/v1/models", map[string]any{
 		"alias": "m1", "upstreams": []map[string]any{
@@ -616,10 +621,10 @@ func TestRoute_RejectsProviderNotInUpstreams(t *testing.T) {
 func TestRoute_AcceptsSubset(t *testing.T) {
 	h, _, tok := authedAdmin(t)
 	_ = doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "p1", "type": "o", "adapter": "openai", "base_url": "u", "api_key_ref": "plain://k",
+		"name": "p1", "type": "o", "endpoints": []map[string]any{{"adapter": "openai", "base_url": "u"}}, "api_key_ref": "plain://k",
 	})
 	_ = doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "p2", "type": "o", "adapter": "openai", "base_url": "u", "api_key_ref": "plain://k",
+		"name": "p2", "type": "o", "endpoints": []map[string]any{{"adapter": "openai", "base_url": "u"}}, "api_key_ref": "plain://k",
 	})
 	_ = doAuth(t, h, tok, http.MethodPost, "/api/v1/models", map[string]any{
 		"alias": "m1", "upstreams": []map[string]any{
@@ -643,10 +648,10 @@ func TestRoute_AcceptsSubset(t *testing.T) {
 func TestModel_UpdateBreaksRouteSubset(t *testing.T) {
 	h, _, tok := authedAdmin(t)
 	_ = doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "p1", "type": "o", "adapter": "openai", "base_url": "u", "api_key_ref": "plain://k",
+		"name": "p1", "type": "o", "endpoints": []map[string]any{{"adapter": "openai", "base_url": "u"}}, "api_key_ref": "plain://k",
 	})
 	_ = doAuth(t, h, tok, http.MethodPost, "/api/v1/providers", map[string]any{
-		"name": "p2", "type": "o", "adapter": "openai", "base_url": "u", "api_key_ref": "plain://k",
+		"name": "p2", "type": "o", "endpoints": []map[string]any{{"adapter": "openai", "base_url": "u"}}, "api_key_ref": "plain://k",
 	})
 	_ = doAuth(t, h, tok, http.MethodPost, "/api/v1/models", map[string]any{
 		"alias": "m1", "upstreams": []map[string]any{

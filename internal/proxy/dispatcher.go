@@ -9,6 +9,7 @@ import (
 
 	"voxeltoad/internal/adapter"
 	"voxeltoad/internal/config"
+	"voxeltoad/internal/plugin"
 )
 
 // DispatcherConfig configures failover behavior.
@@ -162,7 +163,11 @@ func (d *Dispatcher) Forward(ctx context.Context, alias string, req *adapter.Uni
 			configMismatches++
 			continue
 		}
+		if err := beforeAccountedUpstream(ctx); err != nil {
+			return nil, DispatchResult{}, err
+		}
 		resp, err := fwd.Forward(ctx, preq)
+		accountUpstreamResult(ctx, err)
 		if err == nil {
 			d.breaker.MarkSuccess(key)
 			return resp, DispatchResult{
@@ -207,7 +212,11 @@ func (d *Dispatcher) ForwardStream(ctx context.Context, alias string, req *adapt
 			configMismatches++
 			continue
 		}
+		if err := beforeAccountedUpstream(ctx); err != nil {
+			return nil, DispatchResult{}, err
+		}
 		sr, upstreamID, err := fwd.ForwardStream(ctx, preq)
+		accountUpstreamResult(ctx, err)
 		if err == nil {
 			d.breaker.MarkSuccess(key)
 			return sr, DispatchResult{Provider: key.Provider, Endpoint: key.Endpoint, ModelResolved: preq.Model, Fallback: i > 0, RetryCount: i, UpstreamRequestID: upstreamID}, nil
@@ -219,6 +228,77 @@ func (d *Dispatcher) ForwardStream(ctx context.Context, alias string, req *adapt
 		d.breaker.MarkFailure(key)
 	}
 	return nil, DispatchResult{RetryCount: len(keys)}, failoverExhausted(lastErr, configMismatches, len(keys))
+}
+
+// accountingSnapshot excludes model upstreams unreachable through this route.
+// It does not run candidate ordering (and therefore does not advance round-robin).
+func (d *Dispatcher) accountingSnapshot(alias, protocol string) *config.Dynamic {
+	if d.preparer == nil {
+		return nil
+	}
+	d.router.mu.Lock()
+	route, ok := d.router.routes[alias]
+	if !ok {
+		route = d.router.routes[wildcardAlias]
+	}
+	d.router.mu.Unlock()
+	dyn := d.preparer.dyn
+	result := &config.Dynamic{Version: dyn.Version}
+	for _, model := range dyn.Models {
+		if model.Alias != alias {
+			continue
+		}
+		filtered := model
+		filtered.Upstreams = nil
+		for _, u := range model.Upstreams {
+			for _, candidate := range route.Providers {
+				if candidate.Name != u.Provider {
+					continue
+				}
+				ep, _ := d.endpointFor(u.Provider, protocol)
+				if _, exists := d.forwarders[EndpointKey{Provider: u.Provider, Endpoint: ep}]; exists {
+					filtered.Upstreams = append(filtered.Upstreams, u)
+				}
+				break
+			}
+		}
+		result.Models = append(result.Models, filtered)
+	}
+	return result
+}
+
+type accountingContextKey struct{}
+
+func beforeAccountedUpstream(ctx context.Context) error {
+	if pc, ok := ctx.Value(accountingContextKey{}).(*plugin.Context); ok && pc.BeforeUpstream != nil {
+		return pc.BeforeUpstream(ctx)
+	}
+	return nil
+}
+
+func accountUpstreamResult(ctx context.Context, err error) {
+	pc, ok := ctx.Value(accountingContextKey{}).(*plugin.Context)
+	if !ok {
+		return
+	}
+	if err == nil {
+		pc.ChargePossible = true
+		// The successful attempt's usage is authoritative for this request.
+		// Uncertainty collected from earlier retryable attempts becomes a
+		// recorded attempt risk instead of holding the reservation in
+		// unknown, so failovers do not pile onto the manual queue.
+		if pc.BillingUncertain {
+			pc.BillingAttemptRisk = true
+			pc.BillingUncertain = false
+		}
+		return
+	}
+	var ue *upstreamError
+	if errors.As(err, &ue) && (ue.kind == errBuild || (ue.kind == errUpstream4xx && ue.body != nil)) {
+		return // explicit rejection or a request that could not be built
+	}
+	pc.ChargePossible = true
+	pc.BillingUncertain = true // this attempt may have consumed unreported tokens
 }
 
 // retryable reports whether a forwarding error is eligible for failover.

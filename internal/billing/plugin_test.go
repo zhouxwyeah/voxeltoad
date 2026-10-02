@@ -269,7 +269,7 @@ func TestPlugin_MultiScopeSettle(t *testing.T) {
 	q := billing.NewMemoryQuotaStore()
 	// All three scopes configured; TryDebit is all-or-nothing.
 	q.SetBalance("tenant:acme", 100000)
-	q.SetBalance("group:team-a", 100000)
+	q.SetBalance("group:acme/team-a", 100000)
 	q.SetBalance("key:k1", 100000)
 	rec := billing.NewMemoryUsageRecorder()
 	p := billing.NewPlugin(billingDyn(), q, rec)
@@ -288,7 +288,7 @@ func TestPlugin_MultiScopeSettle(t *testing.T) {
 	if bal := q.Balance("tenant:acme"); bal != 70000 {
 		t.Errorf("tenant scope balance = %d, want 70000", bal)
 	}
-	if bal := q.Balance("group:team-a"); bal != 70000 {
+	if bal := q.Balance("group:acme/team-a"); bal != 70000 {
 		t.Errorf("group scope balance = %d, want 70000", bal)
 	}
 	if bal := q.Balance("key:k1"); bal != 70000 {
@@ -302,9 +302,9 @@ func TestPlugin_MultiScopeSettle(t *testing.T) {
 	}
 	// delta = 30000 − 20000 = 10000 refunded to EACH scope → 80000 each.
 	for scope, want := range map[string]int64{
-		"tenant:acme":  80000,
-		"group:team-a": 80000,
-		"key:k1":       80000,
+		"tenant:acme":       80000,
+		"group:acme/team-a": 80000,
+		"key:k1":            80000,
 	} {
 		if bal := q.Balance(scope); bal != want {
 			t.Errorf("%s balance = %d, want %d (multi-scope settle)", scope, bal, want)

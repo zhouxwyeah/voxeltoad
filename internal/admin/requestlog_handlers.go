@@ -55,7 +55,17 @@ func mountRequestLogs(g *gin.RouterGroup, db *store.DB) {
 				return
 			}
 			for i := range sessions {
-				sessions[i].Cost = costs[sessions[i].SessionID]
+				amounts := costs[sessions[i].SessionID]
+				sessions[i].CostsByCurrency = amounts
+				switch len(amounts) {
+				case 0:
+					zero := int64(0)
+					sessions[i].Cost = &zero
+					sessions[i].CostsByCurrency = []store.CurrencyCost{}
+				case 1:
+					sessions[i].Cost = &amounts[0].Cost
+					sessions[i].Currency = amounts[0].Currency
+				}
 			}
 		}
 
@@ -71,27 +81,34 @@ func mountRequestLogs(g *gin.RouterGroup, db *store.DB) {
 		if !ok {
 			return
 		}
+		applicationID, environment, unattributed, ok := parseAttributionFilter(c)
+		if !ok {
+			return
+		}
 		repo := store.NewRequestLogQueryRepo(db, tenant)
-	filter := store.RequestLogFilter{
-		Provider:          c.Query("provider"),
-		ModelRequested:    c.Query("model_requested"),
-		ErrorType:         c.Query("error_type"),
-		BlockedBy:         c.Query("blocked_by"),
-		Tenant:            c.Query("tenant"),
-		GroupName:         c.Query("group_name"),
-		APIKeyID:          c.Query("api_key_id"),
-		Stream:            parseBoolQuery(c, "stream"),
-		Fallback:          parseBoolQuery(c, "fallback"),
-		AgentType:         c.Query("agent_type"),
-		IngressProtocol:   c.Query("ingress_protocol"),
-		ProviderEndpoint:  c.Query("provider_endpoint"),
-		SessionID:         c.Query("session_id"),
-		RequestID:         c.Query("request_id"),
-		ClientRequestID:   c.Query("client_request_id"),
-		UpstreamRequestID: c.Query("upstream_request_id"),
-		From:              from,
-		To:                to,
-	}
+		filter := store.RequestLogFilter{
+			ApplicationID:     applicationID,
+			Environment:       environment,
+			Unattributed:      unattributed,
+			Provider:          c.Query("provider"),
+			ModelRequested:    c.Query("model_requested"),
+			ErrorType:         c.Query("error_type"),
+			BlockedBy:         c.Query("blocked_by"),
+			Tenant:            c.Query("tenant"),
+			GroupName:         c.Query("group_name"),
+			APIKeyID:          c.Query("api_key_id"),
+			Stream:            parseBoolQuery(c, "stream"),
+			Fallback:          parseBoolQuery(c, "fallback"),
+			AgentType:         c.Query("agent_type"),
+			IngressProtocol:   c.Query("ingress_protocol"),
+			ProviderEndpoint:  c.Query("provider_endpoint"),
+			SessionID:         c.Query("session_id"),
+			RequestID:         c.Query("request_id"),
+			ClientRequestID:   c.Query("client_request_id"),
+			UpstreamRequestID: c.Query("upstream_request_id"),
+			From:              from,
+			To:                to,
+		}
 		if c.Query("format") == "csv" {
 			rows, _, err := repo.List(c.Request.Context(), filter, "", 2000)
 			if err != nil {
@@ -152,7 +169,7 @@ func exportRequestLogsCSV(c *gin.Context, rows []store.RequestLogRow) {
 		"ttft_ms", "duration_ms", "error_type", "blocked_by", "fallback",
 		"request_id", "client_request_id", "session_id", "trace_id", "session_source", "agent_type",
 		"cache_hit", "cache_tier", "cache_source", "cached_prompt_tokens",
-		"upstream_request_id", "ingress_protocol", "provider_endpoint", "created_at"}
+		"upstream_request_id", "ingress_protocol", "provider_endpoint", "created_at", "application_id", "environment"}
 	out := make([][]string, len(rows))
 	for i, r := range rows {
 		out[i] = []string{
@@ -167,9 +184,11 @@ func exportRequestLogsCSV(c *gin.Context, rows []store.RequestLogRow) {
 			r.RequestID, r.ClientRequestID, r.SessionID, r.TraceID, r.SessionSource, r.AgentType,
 			fmt.Sprintf("%t", r.CacheHit), r.CacheTier, r.CacheSource,
 			fmt.Sprintf("%d", r.CachedPromptTokens),
-		r.UpstreamRequestID, r.IngressProtocol, r.ProviderEndpoint,
+			r.UpstreamRequestID, r.IngressProtocol, r.ProviderEndpoint,
 			r.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			csvApplicationID(r.ApplicationID), r.Environment,
 		}
+		sanitizeLedgerCSVRow(out[i])
 	}
 	writeCSV(c, "request_logs.csv", headers, out)
 }

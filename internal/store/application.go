@@ -166,9 +166,8 @@ func (r *ApplicationRepo) Delete(ctx context.Context, name string) (bool, error)
 	return res.RowsAffected > 0, nil
 }
 
-// ApplicationReferencedByAPIKeys returns the key_id of every active
-// (non-revoked) api_key bound to the named application. Empty when no
-// references exist. Mirrors GroupReferencedByAPIKeys.
+// ApplicationReferencedByAPIKeys includes revoked keys, whose retained rows
+// still prevent deletion. Mirrors GroupReferencedByAPIKeys.
 func (r *ApplicationRepo) ApplicationReferencedByAPIKeys(ctx context.Context, name string) ([]string, error) {
 	var rows []struct {
 		KeyID string
@@ -177,31 +176,8 @@ func (r *ApplicationRepo) ApplicationReferencedByAPIKeys(ctx context.Context, na
 		`SELECT k.key_id
 		 FROM api_keys k
 		 JOIN applications a ON a.id = k.application_id
-		 WHERE k.tenant_id = ? AND a.tenant_id = ? AND a.name = ? AND k.revoked_at IS NULL`,
+		 WHERE k.tenant_id = ? AND a.tenant_id = ? AND a.name = ?`,
 		r.tenantID, r.tenantID, name,
-	).Scan(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make([]string, len(rows))
-	for i, row := range rows {
-		out[i] = row.KeyID
-	}
-	return out, nil
-}
-
-// OrphanKeys returns the key_id of every active (non-revoked) api_key in the
-// bound tenant that has no Application binding (application_id IS NULL). This
-// quantifies migration debt so operators can track unattributed traffic
-// (ADR-0051: unbound keys are measurable migration debt, not a supported
-// long-term mode).
-func (r *ApplicationRepo) OrphanKeys(ctx context.Context) ([]string, error) {
-	var rows []struct {
-		KeyID string
-	}
-	if err := r.db.WithContext(ctx).Raw(
-		`SELECT key_id FROM api_keys
-		 WHERE tenant_id = ? AND application_id IS NULL AND revoked_at IS NULL`,
-		r.tenantID,
 	).Scan(&rows).Error; err != nil {
 		return nil, err
 	}

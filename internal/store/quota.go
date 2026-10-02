@@ -3,8 +3,13 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
+	"strings"
 
 	"gorm.io/gorm"
+
+	"voxeltoad/internal/billing"
 )
 
 // QuotaRepo is the PostgreSQL implementation of billing.QuotaStore (ADR-0013/
@@ -60,19 +65,35 @@ func (r *QuotaRepo) BalanceWithCurrency(ctx context.Context, scope string) (int6
 
 // TopUp atomically adds delta micro-units to a scope's balance, creating the
 // row at delta when absent (ADR-0019). Unlike SetBalance, which overwrites, this
-// is a single conditional-free increment (balance = balance + delta) and so can
+// is a currency-checked increment (balance = balance + delta) and so can
 // run concurrently with hot-path TryDebit/Settle without losing updates — a
 // top-up never clobbers a debit that landed between read and write, because
 // there is no read. Use this for admin credit; use SetBalance only for
 // authoritative resets.
 func (r *QuotaRepo) TopUp(ctx context.Context, scope string, delta int64, currency string) error {
-	return r.db.WithContext(ctx).Exec(
+	if strings.HasPrefix(scope, "group:") {
+		if _, _, err := billing.ParseGroupScope(scope); err != nil {
+			return err
+		}
+	}
+	currency = strings.ToLower(currency)
+	if !validCurrency(currency) {
+		return fmt.Errorf("%w: invalid quota currency", billing.ErrInvalidPolicy)
+	}
+	res := r.db.WithContext(ctx).Exec(
 		`INSERT INTO quotas (scope, balance, currency, updated_at)
 		 VALUES (?, ?, ?, now())
 		 ON CONFLICT (scope) DO UPDATE SET balance = quotas.balance + EXCLUDED.balance,
-		     currency = EXCLUDED.currency, updated_at = now()`,
+		     updated_at = now() WHERE lower(quotas.currency) = EXCLUDED.currency`,
 		scope, delta, currency,
-	).Error
+	)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 1 {
+		return fmt.Errorf("%w: quota %s", billing.ErrCurrencyMismatch, scope)
+	}
+	return nil
 }
 
 // TryDebit conditionally debits est from every configured scope in one
@@ -86,7 +107,7 @@ func (r *QuotaRepo) TryDebit(ctx context.Context, scopes []string, est int64) (b
 	}
 	ok := true
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, scope := range scopes {
+		for _, scope := range sortedQuotaScopes(scopes) {
 			res := tx.Exec(
 				`UPDATE quotas SET balance = balance - ?, updated_at = now()
 				 WHERE scope = ? AND balance >= ?`,
@@ -131,7 +152,7 @@ func (r *QuotaRepo) Settle(ctx context.Context, scopes []string, delta int64) er
 		return nil
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, scope := range scopes {
+		for _, scope := range sortedQuotaScopes(scopes) {
 			if err := tx.Exec(
 				`UPDATE quotas SET balance = balance + ?, updated_at = now()
 				 WHERE scope = ?`,
@@ -142,6 +163,19 @@ func (r *QuotaRepo) Settle(ctx context.Context, scopes []string, delta int64) er
 		}
 		return nil
 	})
+}
+
+func sortedQuotaScopes(scopes []string) []string {
+	out := append([]string(nil), scopes...)
+	sort.Strings(out)
+	n := 0
+	for _, scope := range out {
+		if n == 0 || out[n-1] != scope {
+			out[n] = scope
+			n++
+		}
+	}
+	return out[:n]
 }
 
 // errRollback aborts a TryDebit transaction on insufficient balance without

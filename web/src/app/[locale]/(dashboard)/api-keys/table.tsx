@@ -19,9 +19,11 @@ export function APIKeysTable({
   rows,
   nextCursor,
   onEdit,
+  unbound,
 }: {
   rows: KeyRow[];
   nextCursor: string;
+  unbound: boolean;
   onEdit?: (row: KeyRow) => void;
 }) {
   const router = useRouter();
@@ -36,6 +38,9 @@ export function APIKeysTable({
   const columns: ColumnDef<KeyRow>[] = useMemo(
     () => [
       { accessorKey: "key_id", header: tK("columns.keyId") },
+      { accessorKey: "group_id", header: tK("identity.group"), cell: ({ row }) => String(row.original.group_id ?? tK("identity.unbound")) },
+      { accessorKey: "application_id", header: tK("identity.application"), cell: ({ row }) => String(row.original.application_id ?? tK("identity.unbound")) },
+      { accessorKey: "environment", header: tK("identity.environment"), cell: ({ row }) => String(row.original.environment || tK("identity.unbound")) },
     ],
     [tK],
   );
@@ -96,7 +101,7 @@ export function APIKeysTable({
                   colSpan={columns.length + 1}
                   className="px-4 py-10 text-center text-muted-foreground"
                 >
-                  {tK("actions.emptyState")}
+                  {tK(unbound ? "identity.emptyUnbound" : "actions.emptyState")}
                 </td>
               </tr>
             ) : (
@@ -121,7 +126,7 @@ export function APIKeysTable({
                           size="sm"
                           onClick={() => onEdit(row.original)}
                         >
-                          {tCommon("actions.edit")}
+                          {row.original.group_id && row.original.application_id && row.original.environment ? tCommon("actions.edit") : tK("identity.completeBinding")}
                         </Button>
                       )}
                       <Button

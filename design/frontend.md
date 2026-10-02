@@ -7,7 +7,7 @@
 ## 0. 一句话定位
 
 **内部运营型后台**(管理型,非实时监控大盘)。管理配置、租户、运营账号、API keys、
-配额充值,只读用量与审计。可接受分钟级数据延迟。
+配额充值、Application 与周期成本预算管理、未知费用核对，只读用量与审计。可接受异步明细的秒级滞后；资金事实取 reservation/account，不从 usage 报表推算余额。
 
 ## 1. 关键认知:不需要契约适配 BFF
 
@@ -88,7 +88,9 @@ client 表单 → Server Action('use server')
 | models(全局共享，GET 对两角色开放) | ✅ 卡片 + CRUD（菜单在 providers 下） | ✅ 卡片只读(菜单隐藏，URL 直达；后端 403 写) |
 | tenants | ✅ 列表/创建/启停(可逆) | ❌ 隐藏 |
 | operators | ✅ 列表/创建/删除 | ❌ 隐藏 |
-| api-keys | ❌(它无租户) | ✅ 自租户增删列 |
+| api-keys / applications | 无租户，使用租户作用域账号管理 | 自租户管理；按 api_key.read/write、application.read/write 逐操作授权 |
+| budgets / accounts / events / reservations | budget.read；显式选 tenant | budget.read；自动绑定自己的 tenant |
+| 预算创建/调整、人工核对 | 分别需要 budget.write / budget.resolve，且 global scope | 只读，即使自定义租户角色误带写权限也被后端拒绝 |
 | usage / usage-summary | ✅ 全局,**带租户切换器**(`?tenant=X`) | ✅ 仅自租户,**无切换器** |
 | audit | ✅ 全局 | ✅ 仅自租户(含 super-admin 对本租户的操作) |
 | quota 充值 | ✅ | ❌ |
@@ -104,7 +106,9 @@ tenant-admin 不带(后端自动 scope)。组件感知角色决定是否渲染�
 - `microToDisplay(micro, currency)` → 展示串(整数运算;按 currency 定小数位,如 JPY 无小数)。
 - `displayToMicro(input, currency)` → int64(避免 `0.1*1e6` 浮点陷阱,用整数/字符串解析)。
 - 覆盖:pricing(`prompt_per_1m`/`completion_per_1m`)、quota `balance`、topup `delta`、
-  usage `cost`、summary 聚合。
+  usage `cost`、summary 聚合、预算 `limit/reserved/committed/released/available`、人工核对 `actual`。
+- currency 必须随费用展示；历史空币种显示未知，不使用当前模型币种回填，不将不同币种求和。预算事件没有独立币种字段时不得猜币种，应显示未知并按关联账户/reservation 核对。
+- 多维预算覆盖同一笔消费，Tenant/Group/Application/Key 的 committed 不能叠加成总费用；旧 quota 余额与周期 available 是不同指标。
 - 散落处理 = 精度 bug 温床,评审直接打回。
 
 ## 7. 取数策略依据:无真实时需求(盘点结论)
@@ -154,6 +158,16 @@ money 模块(若涉及 pricing)全链路成立。
 - **部分字段 PATCH**：`PATCH /api/v1/{resource}/{name}`，指针字段语义（`nil` = 不变），已落地（[ADR-0030](../../docs/adr/0030-config-patch-editing.md)，provider 为 pilot 覆盖全部 4 类资源）。
 
 表单按字段级编辑需求选择路径；routes/plugins 编辑已落地。
+
+### E0/E1 企业治理切片（实现完成，待最终验收）
+
+- **Key / Application**：新 Key 表单要求同租户消费 Group、Application 和 dev/staging/prod；应用 owner 与消费 Group 分开解释。Key 列表显示治理身份；历史项通过 `unbound=true` 分页查看并补齐，已有非空身份不允许改写。Application 页提供迁移入口及停用传播说明（鉴权缓存 TTL，默认 1 分钟；不截断已开始的流）。
+- **归因查询**：usage/request-log 的 URL searchParams 支持 `application_id` / `environment` / `unattributed`，usage 汇总支持应用/环境/币种维度，request-log CSV 保留归因字段；trace summary/detail 显示请求时身份。查询必须先受租户隔离，不能因输入应用 ID 越权。
+- **未归因口径**：未绑定 Key 数与指定窗口未归因请求数/占比、已记录未归因费用分别统计；当前 Key 列表口径为未撤销，不额外排除过期/所属实体停用，不能将其称为“实际可调用 Key 数”，也不得把 Key 数视作流量占比。`unbound=true` 是 Key 补齐入口，`unattributed=true` 是历史业务账本过滤。历史维度缺失、币种未知和异步明细可能不完整须提示，不回填猜测归属。
+- **预算页**：`/budgets` 提供 policies/events/reservations 视图与 URL 游标，`/budgets/{id}` 展示当前/历史周期账户；全局角色先选租户，租户角色没有扩权切换器。创建/编辑和核对均走生成 SDK + Server Actions，按 scope 与 budget 权限双重守卫；无直接余额修改。
+- **资金语义**：enforce 是“预留检查 + 实际费用结算”，在途可能超额，不叫“绝不超支”。账户展示周期/时区/币种与 committed/reserved/released/available；unknown/released_unknown 独立状态展示，actual=null 不是零。人工核对带版本、理由和证据，risk release 必须说明费用仍未知、后续可补账。
+- **交互**：复用现有 Modal/ConfirmModal/Badge/Select/EmptyState 与 money；loading/empty/error/forbidden 有明确落点，写操作确认与双语文案一致。无新增 UI token/基元。当前无邮件/webhook 外部通知、Token Allowance 或预算自动降级 UI。
+- **Desktop**：共享 DTO 可有 nullable app/env，但默认 nil Application 合法；不增加企业 catalog/预算页面或要求桌面补绑。
 
 ## 10. 范围外(后端缺口,记录待议)
 
@@ -212,7 +226,7 @@ web/
 - **RSC 渲染期不能改 cookie**：401 清 cookie 必须走 `/logout` Route Handler（`onAuthExpired` redirect 到它），不能在 RSC 里直接 `clearSession()`（Next 只允许 Server Action / Route Handler 改 cookie）。
 - **`/me` 端点缺失**：登录响应仅 `{token}`,前端拿不到 role/email。切片 0 存 token 即可；角色导航守卫是 `(dashboard)/layout.tsx` 里的接缝,待后端补 current-operator 端点后启用。
 - **e2e 端口冲突前置检查**：`scripts/web-e2e.sh` 的 `assert_port_free` 在启动每个服务前 curl 探测端口——若已被占用（如用户自己的 `make adminstack` / `next dev` 还在），立即报错退出，绝不静默跑到旧/dev 服务器上（曾因 `next start` EADDRINUSE 静默落到 dev server，dev 模式 `127.0.0.1` 跨域阻断 hydration 导致 onClick 假红）。
-- 起法：`make web-e2e`（自动起 adminstack + web + Playwright + 拆栈）；本地开发 `make adminstack` 另起,`cd web && npm run dev`（先 `cp .env.example .env.local`）。
+- 起法：`make web-e2e`（同一隔离 PG 上自动起 adminstack + devstack mock + 真实 gateway + Next + Playwright，再按自身 PID 拆栈）；不读取用户开发库配置。`WEB_E2E_EXTERNAL=1` 才使用显式提供的外部测试服务；自动模式发现端口被占用即退出，不停止他人进程。本地开发 `make adminstack` 另起,`cd web && npm run dev`（先 `cp .env.example .env.local`）。
 
 ## 12. i18n 约定（前端国际化）
 

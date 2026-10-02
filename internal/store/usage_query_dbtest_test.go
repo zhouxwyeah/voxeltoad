@@ -11,6 +11,103 @@ import (
 	"voxeltoad/internal/store"
 )
 
+func TestUsageQuery_AttributionAndCurrencies(t *testing.T) {
+	ctx := context.Background()
+	sink, db := freshUsageRepo(t)
+	appA, appB := int64(901), int64(902)
+	records := []billing.UsageRecord{
+		{Tenant: "acme", ApplicationID: &appA, Environment: "prod", Currency: "USD", Provider: "openai", Model: "chat", Cost: 100, PromptTokens: 10, SessionID: "shared"},
+		{Tenant: "acme", ApplicationID: &appA, Environment: "prod", Currency: "CNY", Provider: "openai", Model: "chat", Cost: 200, PromptTokens: 20, SessionID: "shared"},
+		{Tenant: "acme", ApplicationID: &appA, Environment: "dev", Currency: "USD", Provider: "openai", Model: "chat", Cost: 300},
+		{Tenant: "acme", ApplicationID: &appB, Environment: "prod", Currency: "USD", Provider: "openai", Model: "chat", Cost: 400},
+		{Tenant: "acme", Provider: "openai", Model: "chat", Cost: 50, SessionID: "shared"},
+		{Tenant: "other", ApplicationID: &appA, Environment: "prod", Currency: "USD", Provider: "openai", Model: "chat", Cost: 9999, SessionID: "shared"},
+		{Tenant: "other", Provider: "openai", Model: "chat", Cost: 8888, SessionID: "shared"},
+	}
+	if err := sink.RecordBatch(ctx, records); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
+	if err := db.Exec(`UPDATE usage_records SET created_at = ?`, at).Error; err != nil {
+		t.Fatal(err)
+	}
+	query := store.NewUsageQueryRepo(db, "acme")
+	for _, tc := range []struct {
+		name   string
+		filter store.UsageFilter
+		want   int
+	}{
+		{"all", store.UsageFilter{}, 5},
+		{"application", store.UsageFilter{ApplicationID: &appA}, 3},
+		{"environment", store.UsageFilter{Environment: "prod"}, 3},
+		{"intersection", store.UsageFilter{ApplicationID: &appA, Environment: "prod"}, 2},
+		{"unattributed", store.UsageFilter{Unattributed: true}, 1},
+		{"unattributed-environment", store.UsageFilter{Unattributed: true, Environment: "prod"}, 0},
+		{"parameterized", store.UsageFilter{Environment: "prod' OR 1=1 --"}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, _, err := query.List(ctx, tc.filter, "", 100)
+			if err != nil || len(rows) != tc.want {
+				t.Fatalf("List = %+v, %v; want %d", rows, err, tc.want)
+			}
+			for _, row := range rows {
+				if row.Tenant != "acme" {
+					t.Fatalf("cross-tenant row: %+v", row)
+				}
+				if row.Cost == 100 && (row.ApplicationID == nil || *row.ApplicationID != appA || row.Environment != "prod" || row.Currency != "USD") {
+					t.Fatalf("lost snapshot: %+v", row)
+				}
+				if row.Cost == 50 && (row.ApplicationID != nil || row.Environment != "" || row.Currency != "") {
+					t.Fatalf("historical dimensions invented: %+v", row)
+				}
+			}
+		})
+	}
+	filter := store.UsageFilter{ApplicationID: &appA, Environment: "prod", Provider: "openai", Model: "chat", From: at.Add(-time.Hour), To: at.Add(time.Hour)}
+	for _, dimension := range []string{"application_id", "environment"} {
+		rows, err := query.Summary(ctx, filter.From, filter.To, dimension, filter)
+		if err != nil || len(rows) != 2 {
+			t.Fatalf("Summary(%s) = %+v, %v", dimension, rows, err)
+		}
+		wantKey := "901"
+		if dimension == "environment" {
+			wantKey = "prod"
+		}
+		for _, row := range rows {
+			wantCost := map[string]int64{"USD": 100, "CNY": 200}[row.Currency]
+			if row.GroupKey != wantKey || row.Cost != wantCost || row.RequestCount != 1 {
+				t.Fatalf("mixed currencies or lost filter: %+v", row)
+			}
+		}
+	}
+	legacy, err := query.Summary(ctx, time.Time{}, time.Time{}, "application_id", store.UsageFilter{Unattributed: true})
+	if err != nil || len(legacy) != 1 || legacy[0].GroupKey != "unattributed" || legacy[0].Currency != "" || legacy[0].Cost != 50 {
+		t.Fatalf("legacy summary = %+v, %v", legacy, err)
+	}
+	buckets, err := query.Timeseries(ctx, filter, "day")
+	if err != nil || len(buckets) != 2 {
+		t.Fatalf("Timeseries = %+v, %v", buckets, err)
+	}
+	for _, bucket := range buckets {
+		if bucket.Cost != map[string]int64{"USD": 100, "CNY": 200}[bucket.Currency] || bucket.RequestCount != 1 {
+			t.Fatalf("mixed time-series currencies: %+v", bucket)
+		}
+	}
+	summary, err := query.SummaryBySession(ctx, "shared")
+	if err != nil || summary.Cost != nil || summary.RequestCount != 3 || summary.PromptTokens != 30 || len(summary.CostsByCurrency) != 3 {
+		t.Fatalf("mixed session summary = %+v, %v", summary, err)
+	}
+	costs, err := query.CostBySessions(ctx, []string{"shared", "missing"})
+	if err != nil || len(costs["shared"]) != 3 || len(costs["missing"]) != 0 {
+		t.Fatalf("session costs = %+v, %v", costs, err)
+	}
+	for _, amount := range costs["shared"] {
+		if amount.Cost != map[string]int64{"": 50, "USD": 100, "CNY": 200}[amount.Currency] {
+			t.Fatalf("mixed currencies or tenant leak: %+v", amount)
+		}
+	}
+}
+
 // seedUsage inserts usage rows with explicit created_at so keyset/time-range
 // behavior is deterministic.
 func seedUsageAt(t *testing.T, db *store.DB, tenant string, cost int64, at time.Time) {

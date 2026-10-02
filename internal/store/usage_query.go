@@ -31,6 +31,9 @@ type UsageRow struct {
 	Tenant              string    `json:"tenant"`
 	GroupName           string    `json:"group_name"`
 	APIKeyID            string    `json:"api_key_id"`
+	ApplicationID       *int64    `json:"application_id"`
+	Environment         string    `json:"environment"`
+	Currency            string    `json:"currency"`
 	Provider            string    `json:"provider"`
 	Model               string    `json:"model"`
 	PromptTokens        int       `json:"prompt_tokens"`
@@ -44,6 +47,7 @@ type UsageRow struct {
 // UsageSummaryRow is one aggregate bucket for the requested group_by dimension.
 type UsageSummaryRow struct {
 	GroupKey         string `json:"group_key"`
+	Currency         string `json:"currency"`
 	PromptTokens     int64  `json:"prompt_tokens"`
 	CompletionTokens int64  `json:"completion_tokens"`
 	Cost             int64  `json:"cost"`
@@ -53,18 +57,23 @@ type UsageSummaryRow struct {
 // summaryDimensions whitelists the columns a caller may GROUP BY. This is a
 // closed set (never interpolated from raw input) so the query is injection-safe.
 var summaryDimensions = map[string]string{
-	"tenant":     "tenant",
-	"group_name": "group_name",
-	"api_key_id": "api_key_id",
-	"provider":   "provider",
-	"model":      "model",
+	"tenant":         "tenant",
+	"group_name":     "group_name",
+	"api_key_id":     "api_key_id",
+	"provider":       "provider",
+	"model":          "model",
+	"application_id": "COALESCE(application_id::text, 'unattributed')",
+	"environment":    "environment",
 }
 
 // UsageFilter narrows a usage query. Empty fields are ignored.
 type UsageFilter struct {
-	Provider string
-	Model    string
-	From, To time.Time
+	ApplicationID *int64
+	Environment   string
+	Unattributed  bool
+	Provider      string
+	Model         string
+	From, To      time.Time
 }
 
 // List returns a page of usage rows in (created_at, id) DESC order, bounded by
@@ -81,6 +90,17 @@ func (r *UsageQueryRepo) List(ctx context.Context, f UsageFilter, cursor string,
 	if r.tenant != "" {
 		where = append(where, "tenant = ?")
 		args = append(args, r.tenant)
+	}
+	if f.ApplicationID != nil {
+		where = append(where, "application_id = ?")
+		args = append(args, *f.ApplicationID)
+	}
+	if f.Unattributed {
+		where = append(where, "application_id IS NULL")
+	}
+	if f.Environment != "" {
+		where = append(where, "environment = ?")
+		args = append(args, f.Environment)
 	}
 	if f.Provider != "" {
 		where = append(where, "provider = ?")
@@ -110,7 +130,7 @@ func (r *UsageQueryRepo) List(ctx context.Context, f UsageFilter, cursor string,
 
 	// Fetch limit+1 to detect whether another page exists.
 	args = append(args, limit+1)
-	q := `SELECT id, tenant, group_name, api_key_id, provider, model,
+	q := `SELECT id, tenant, group_name, api_key_id, application_id, environment, currency, provider, model,
 	             prompt_tokens, completion_tokens, cost,
 	             cached_prompt_tokens, cache_discount_micros, created_at
 	      FROM usage_records
@@ -136,9 +156,10 @@ func (r *UsageQueryRepo) List(ctx context.Context, f UsageFilter, cursor string,
 }
 
 // Summary groups usage by the given dimension over an optional [from, to) range
-// and the bound tenant, summing cost/tokens and counting requests. groupBy must
-// be one of the whitelisted dimensions.
-func (r *UsageQueryRepo) Summary(ctx context.Context, from, to time.Time, groupBy string) ([]UsageSummaryRow, error) {
+// and the bound tenant, summing cost/tokens and counting requests per currency.
+// groupBy must be whitelisted. The optional filter narrows attribution/model/
+// provider; the explicit from/to arguments define the time range.
+func (r *UsageQueryRepo) Summary(ctx context.Context, from, to time.Time, groupBy string, filters ...UsageFilter) ([]UsageSummaryRow, error) {
 	col, ok := summaryDimensions[groupBy]
 	if !ok {
 		return nil, fmt.Errorf("usage summary: unsupported group_by %q", groupBy)
@@ -159,16 +180,41 @@ func (r *UsageQueryRepo) Summary(ctx context.Context, from, to time.Time, groupB
 		args = append(args, to)
 	}
 
+	if len(filters) > 0 {
+		f := filters[0]
+		if f.ApplicationID != nil {
+			where = append(where, "application_id = ?")
+			args = append(args, *f.ApplicationID)
+		}
+		if f.Unattributed {
+			where = append(where, "application_id IS NULL")
+		}
+		if f.Environment != "" {
+			where = append(where, "environment = ?")
+			args = append(args, f.Environment)
+		}
+		if f.Provider != "" {
+			where = append(where, "provider = ?")
+			args = append(args, f.Provider)
+		}
+		if f.Model != "" {
+			where = append(where, "model = ?")
+			args = append(args, f.Model)
+		}
+	}
+
+	// Currency is always a grouping dimension: historical unknown currency
+	// remains its own bucket and is never inferred from current configuration.
 	// col is from the whitelist, safe to interpolate.
-	q := `SELECT ` + col + ` AS group_key,
+	q := `SELECT ` + col + ` AS group_key, currency,
 	             COALESCE(SUM(prompt_tokens), 0)     AS prompt_tokens,
 	             COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
 	             COALESCE(SUM(cost), 0)              AS cost,
 	             COUNT(*)                            AS request_count
 	      FROM usage_records
 	      WHERE ` + strings.Join(where, " AND ") + `
-	      GROUP BY ` + col + `
-	      ORDER BY cost DESC`
+	      GROUP BY ` + col + `, currency
+	      ORDER BY currency ASC, cost DESC, group_key ASC`
 
 	var rows []UsageSummaryRow
 	if err := r.db.WithContext(ctx).Raw(q, args...).Scan(&rows).Error; err != nil {
@@ -191,6 +237,7 @@ var timeBuckets = map[string]string{
 // UsageBucket is one time-bucketed aggregate for the timeseries endpoint.
 type UsageBucket struct {
 	BucketStart      time.Time `json:"bucket_start"`
+	Currency         string    `json:"currency"`
 	PromptTokens     int64     `json:"prompt_tokens"`
 	CompletionTokens int64     `json:"completion_tokens"`
 	Cost             int64     `json:"cost"`
@@ -213,6 +260,17 @@ func (r *UsageQueryRepo) Timeseries(ctx context.Context, f UsageFilter, bucket s
 		where = append(where, "tenant = ?")
 		args = append(args, r.tenant)
 	}
+	if f.ApplicationID != nil {
+		where = append(where, "application_id = ?")
+		args = append(args, *f.ApplicationID)
+	}
+	if f.Unattributed {
+		where = append(where, "application_id IS NULL")
+	}
+	if f.Environment != "" {
+		where = append(where, "environment = ?")
+		args = append(args, f.Environment)
+	}
 	if f.Provider != "" {
 		where = append(where, "provider = ?")
 		args = append(args, f.Provider)
@@ -230,15 +288,15 @@ func (r *UsageQueryRepo) Timeseries(ctx context.Context, f UsageFilter, bucket s
 		args = append(args, f.To)
 	}
 
-	q := `SELECT date_trunc(?, created_at)                AS bucket_start,
+	q := `SELECT date_trunc(?, created_at)                AS bucket_start, currency,
 	             COALESCE(SUM(prompt_tokens), 0)         AS prompt_tokens,
 	             COALESCE(SUM(completion_tokens), 0)     AS completion_tokens,
 	             COALESCE(SUM(cost), 0)                  AS cost,
 	             COUNT(*)                                AS request_count
 	      FROM usage_records
 	      WHERE ` + strings.Join(where, " AND ") + `
-	      GROUP BY bucket_start
-	      ORDER BY bucket_start ASC`
+	      GROUP BY bucket_start, currency
+	      ORDER BY bucket_start ASC, currency ASC`
 	// Prepend the trunc literal as the first ?.
 	args = append([]any{trunc}, args...)
 
@@ -256,18 +314,28 @@ func (r *UsageQueryRepo) Timeseries(ctx context.Context, f UsageFilter, bucket s
 // single session_id. Used by the session-trace view to show "what did this
 // session cost?" alongside the request timeline.
 type SessionCostSummary struct {
-	SessionID        string `json:"session_id"`
-	PromptTokens     int64  `json:"prompt_tokens"`
-	CompletionTokens int64  `json:"completion_tokens"`
-	Cost             int64  `json:"cost"`
-	RequestCount     int64  `json:"request_count"`
+	SessionID        string         `json:"session_id"`
+	PromptTokens     int64          `json:"prompt_tokens"`
+	CompletionTokens int64          `json:"completion_tokens"`
+	Cost             *int64         `json:"cost"` // nil for mixed currencies
+	Currency         string         `json:"currency"`
+	CostsByCurrency  []CurrencyCost `json:"costs_by_currency"`
+	RequestCount     int64          `json:"request_count"`
+}
+
+// CurrencyCost is a monetary total in one recorded currency. Empty currency
+// means historical unknown units, never the current tenant's currency.
+type CurrencyCost struct {
+	Currency string `json:"currency"`
+	Cost     int64  `json:"cost"`
 }
 
 // SummaryBySession aggregates cost/tokens for all usage_records rows matching
 // sessionID. The bound tenant scope still applies. session_id must be non-empty.
 // Hits idx_usage_records_session_created (migration 00014).
 func (r *UsageQueryRepo) SummaryBySession(ctx context.Context, sessionID string) (SessionCostSummary, error) {
-	var s SessionCostSummary
+	zero := int64(0)
+	s := SessionCostSummary{SessionID: sessionID, Cost: &zero, CostsByCurrency: []CurrencyCost{}}
 	if sessionID == "" {
 		return s, nil
 	}
@@ -279,18 +347,30 @@ func (r *UsageQueryRepo) SummaryBySession(ctx context.Context, sessionID string)
 		args = append(args, r.tenant)
 	}
 
-	q := `SELECT ? AS session_id,
+	q := `SELECT currency,
 	             COALESCE(SUM(prompt_tokens), 0)     AS prompt_tokens,
 	             COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
 	             COALESCE(SUM(cost), 0)              AS cost,
 	             COUNT(*)                            AS request_count
 	      FROM usage_records
-	      WHERE ` + strings.Join(where, " AND ")
+	      WHERE ` + strings.Join(where, " AND ") + `
+	      GROUP BY currency ORDER BY currency`
 
-	// Prepend sessionID as the first ? (the literal SELECT col).
-	args = append([]any{sessionID}, args...)
-	if err := r.db.WithContext(ctx).Raw(q, args...).Scan(&s).Error; err != nil {
+	var rows []UsageSummaryRow
+	if err := r.db.WithContext(ctx).Raw(q, args...).Scan(&rows).Error; err != nil {
 		return s, err
+	}
+	for _, row := range rows {
+		s.PromptTokens += row.PromptTokens
+		s.CompletionTokens += row.CompletionTokens
+		s.RequestCount += row.RequestCount
+		s.CostsByCurrency = append(s.CostsByCurrency, CurrencyCost{Currency: row.Currency, Cost: row.Cost})
+	}
+	if len(rows) == 1 {
+		s.Cost = &rows[0].Cost
+		s.Currency = rows[0].Currency
+	} else if len(rows) > 1 {
+		s.Cost = nil
 	}
 	return s, nil
 }
@@ -299,15 +379,15 @@ func (r *UsageQueryRepo) SummaryBySession(ctx context.Context, sessionID string)
 // session-list view to merge cost onto the request_logs aggregation.
 type SessionCost struct {
 	SessionID string `json:"session_id"`
-	Cost      int64  `json:"cost"`
+	CurrencyCost
 }
 
-// CostBySessions returns a map of session_id → total cost (micro-units) for the
-// given session_ids. Used to batch-merge cost onto a session-list page (avoids
-// an N+1 of SummaryBySession). The bound tenant scope applies. Sessions with no
-// usage rows are absent from the map (treated as 0 cost by the caller).
-func (r *UsageQueryRepo) CostBySessions(ctx context.Context, sessionIDs []string) (map[string]int64, error) {
-	out := make(map[string]int64, len(sessionIDs))
+// CostBySessions returns per-currency totals for each requested session_id.
+// Used to batch-merge cost onto a session-list page (avoids an N+1 of
+// SummaryBySession). The bound tenant scope applies. Sessions with no usage
+// rows are absent from the map (treated as 0 cost by the caller).
+func (r *UsageQueryRepo) CostBySessions(ctx context.Context, sessionIDs []string) (map[string][]CurrencyCost, error) {
+	out := make(map[string][]CurrencyCost, len(sessionIDs))
 	if len(sessionIDs) == 0 {
 		return out, nil
 	}
@@ -319,17 +399,17 @@ func (r *UsageQueryRepo) CostBySessions(ctx context.Context, sessionIDs []string
 		args = append(args, r.tenant)
 	}
 
-	q := `SELECT session_id, COALESCE(SUM(cost), 0) AS cost
+	q := `SELECT session_id, currency, COALESCE(SUM(cost), 0) AS cost
 	      FROM usage_records
 	      WHERE ` + strings.Join(where, " AND ") + `
-	      GROUP BY session_id`
+	      GROUP BY session_id, currency ORDER BY session_id, currency`
 
 	var rows []SessionCost
 	if err := r.db.WithContext(ctx).Raw(q, args...).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	for _, row := range rows {
-		out[row.SessionID] = row.Cost
+		out[row.SessionID] = append(out[row.SessionID], row.CurrencyCost)
 	}
 	return out, nil
 }

@@ -51,6 +51,8 @@ export function UsageTable({
           return v ?? <span className="text-muted-foreground">—</span>;
         },
       },
+      { accessorKey: "application_id", header: t("identity.application"), cell: ({ row }) => String(row.original.application_id ?? t("identity.unattributed")) },
+      { accessorKey: "environment", header: t("identity.environment"), cell: ({ row }) => String(row.original.environment || t("identity.unattributed")) },
       {
         accessorKey: "model",
         header: t("columns.model"),
@@ -98,13 +100,13 @@ export function UsageTable({
       {
         accessorKey: "cost",
         header: t("columns.cost"),
-        cell: ({ getValue }) => {
+        cell: ({ getValue, row }) => {
           const v = getValue() as number | undefined;
           if (v === undefined || v === null)
             return <span className="text-muted-foreground">—</span>;
           return (
             <span className="tabular-nums text-foreground">
-              {microToDisplay(v)}
+              {microToDisplay(v)} {String(row.original.currency || t("identity.unknownCurrency"))}
             </span>
           );
         },

@@ -246,9 +246,16 @@ func (a *telemetryAcc) emit(ctx context.Context, pc *plugin.Context, audit obser
 		}
 	}
 	tenant, group, keyID := "", "", ""
+	var applicationID *int64
+	environment := ""
 	blockedBy := a.blockedBy
+	if identity, ok := identityFrom(ctx); ok {
+		tenant, group, keyID = identity.Tenant, identity.Group, identity.KeyID
+		applicationID, environment = identity.ApplicationID, identity.Environment
+	}
 	if pc != nil {
 		tenant, group, keyID = pc.Tenant, pc.Group, pc.APIKeyID
+		applicationID, environment = pc.ApplicationID, pc.Environment
 		if blockedBy == "" {
 			blockedBy = pc.BlockedBy
 		}
@@ -256,6 +263,8 @@ func (a *telemetryAcc) emit(ctx context.Context, pc *plugin.Context, audit obser
 	dur := time.Since(a.start)
 
 	observability.RecordTelemetry(ctx, observability.RequestTelemetry{
+		ApplicationID:      applicationID,
+		Environment:        environment,
 		Tenant:             tenant,
 		Group:              group,
 		APIKeyID:           keyID,
@@ -289,6 +298,8 @@ func (a *telemetryAcc) emit(ctx context.Context, pc *plugin.Context, audit obser
 
 	if audit != nil {
 		audit.Record(ctx, observability.RequestLog{
+			ApplicationID:      applicationID,
+			Environment:        environment,
 			Tenant:             tenant,
 			Group:              group,
 			APIKeyID:           keyID,
@@ -326,6 +337,8 @@ func (a *telemetryAcc) emit(ctx context.Context, pc *plugin.Context, audit obser
 	// unjoinable and dropped.
 	if tracePL != nil && a.requestID != "" {
 		tracePL.Record(ctx, observability.TracePayload{
+			ApplicationID:    applicationID,
+			Environment:      environment,
 			RequestID:        a.requestID,
 			ClientRequestID:  a.clientRequestID,
 			SessionID:        a.sessionID,

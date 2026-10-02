@@ -67,6 +67,34 @@ sdk-chat-e2e / adminstack 契约）是 **shell 脚本驱动的独立进程**，�
 fixtures、断言自己的响应，不断言整库绝对行数，因此库级隔离足够。端口分区：
 54329（store dbtest）/ 54330（test/e2e）/ **55431（stack-test-all）** / 5432（本地 dev）。
 
+## 企业 E0/E1 验收（实现完成，待最终交付验收）
+
+企业链路使用隔离 PG + mock，不接真实供应商。现有 `test/e2e/enterprise_e2e_test.go` 覆盖应用归因/两种入站/流式与非流式、停用、历史补齐、预算结算/阈值/耗尽、unknown 核对、soft 与币种冲突；细粒度资金并发和周期行为由 store/billing 测试承接。测试文件存在不代表整套已运行通过，实际执行结果由最终交付逐项登记。
+
+| 验收面 | 必须断言 |
+|---|---|
+| E0 身份 | 同租户 Group/Application/env 新 Key；owner 与消费 Group 可不同；伪造 header 不改变身份；跨租户与只读角色写入拒绝；历史 Key 一次补齐不改已有非空身份 |
+| 归因账本 | usage/request/trace 请求时快照与 app/env 查询、CSV 一致；旧快照不回填；usage 仅已知结算，trace 默认关闭，不能要求每个失败都造三表行；unbound Key 数与 unattributed 流量/费用区分 |
+| 五维资金 | Tenant/消费 Group/Application/Application+env/Key + 旧 quota 整笔原子预留；不足/零额拒绝、并发预留不重复占用；**允许在途实际结算超额**，之后拒绝；soft 不阻断；无预算配置仍走 reservation 幂等结算 |
+| 周期与价格 | 日/周/月、时区/DST、周一起算；并发 rollover 与跨期晚结算；调限额/启停不清账；请求固定 dispatcher 价格版本；币种冲突拒绝与显式零价可辨 |
+| 故障与恢复 | 预留后取消/后续 Pre 拒绝；失败 attempt/断流/缺 Usage 保留 unknown；已知 result 持久化后失败可重试；stale 只标核对；风险释放再补账无双扣双退、版本冲突与事件去重 |
+| 兼容与契约 | 旧 quota API、Application PATCH 对象响应、SDK codegen/contract、Web Server Actions、Desktop nil Application/canary |
+
+### Web E2E 同库组栈
+
+`scripts/web-e2e.sh` 的自动模式由 adminstack 持有临时 embedded PG；devstack 向该库提供本地 mock；真实 gateway 读取同一 admin 的快照并把账本写回同库，Next/Playwright 驱动管理操作与数据面验证。复用现有入口，不新增生产程序。
+
+- 脚本显式清除继承的开发 DSN/持久化/真实演示种子配置，只从自己启动进程的 ready banner 取测试连接；仅清理本次 PID 与临时产物，保留日志以便排障。
+- 自动模式 admin :8090、gateway :12800、mock stack :8080/:8091、Next 默认 :3000；端口已被占用即报错，不能误用或停止用户已有服务。仅显式 `WEB_E2E_EXTERNAL=1` 使用外部测试服务。
+- `web/tests/e2e/budgets.spec.ts` 覆盖登录、平台预算生命周期/金额/版本、租户只读隔离和无权限态；应用/Key/usage/request 场景复用对应 spec。
+- `ci-integration` 已配置为 PR 与 main push 均运行 `make test-db`、`make test-e2e`、`make web-e2e`，依赖 ci-light；原 main-only heavy 回归保留。门禁配置存在不等于本地或 CI 已通过。
+
+### 迁移验收与安全边界
+
+当前企业迁移编号为 00029/00030/00031，main 的 00028 user_agent 保留；本分支缺 00018/00028 合法，但编号不得重复。验证新建库、旧公共 00027 基线升级、新迁移隔离 Up/Down/Up。已执行旧企业 00028 的开发库不能靠重命名迁移修复 goose 历史；用户开发库需要显式重建，测试不得自动删除它。
+
+全量交付需分别记录 `make ci`、`make ci-web`、`make test-db`、`make test-e2e`、关键 `make web-e2e` 的实际结果；不能把未执行/环境阻塞写成通过，不为过门禁跳用例或放宽契约。
+
 ## Profile YAML + 特征标志（核心机制）
 
 借鉴 neutree 的 profile 系统：**所有环境/凭证配置集中在 YAML，按 profile 切换**，并由配置**自动推导特征标志**，无对应能力时自动跳过相关测试。这样 **CI 无需任何真实供应商 key 也能跑完整套**。
@@ -135,7 +163,7 @@ test.skipIf(!features.hasRealOpenAI)("真实 OpenAI 流式补全", async () => {
 1. **chunk 序列完整性** —— 收到的 chunk 数、顺序、首 chunk 含 role、末尾正确终止（`[DONE]`）。
 2. **流式 usage 聚合** —— 流结束后计费入账的 token 数 == mock 注入值。
 3. **首字延迟（TTFT）** —— 第一个 chunk 在合理时间内到达（验证未被错误缓冲攒包）。
-4. **中途错误** —— 上游流到一半断开/报错时，网关向下游传递的错误格式正确，且已消耗 token 仍入账。
+4. **中途错误** —— 上游流到一半断开/报错时，下游错误格式正确；已知完整 Usage 按冻结价格入账，缺尾部 Usage/费用不确定则保留 unknown 占用，不伪造 token 或按零费用退款。
 5. **跨供应商一致性** —— Claude（事件型 SSE）经网关转换后，下游收到的仍是 OpenAI 兼容 chunk。
 
 ```ts
@@ -152,13 +180,13 @@ test("streamed chat completion stitches chunks and bills usage", async () => {
 
 ## 异常路径（必测）
 
-鉴权失败(401)、API Key 无权限(403)、限流触发(429)、配额超限(429)、上游熔断后降级到备用供应商、敏感词拦截、缓存命中直接返回 —— 每条都要有用例。
+鉴权失败(401)、API Key 无权限(403)、限流触发(429)、配额/预算预留不足(402)、上游熔断后降级到备用供应商、敏感词拦截、缓存命中直接返回 —— 每条都要有用例。
 
 ## 测试数据隔离
 
 - 每个创建数据的测试**自清理**。用唯一名 `` `test-${type}-${Date.now()}` ``。
 - 通过 **API Helper** 直接建/删测试数据（租户/Key/配额/路由），不走 UI（UI 是 P1）。
-- 清理按**反向依赖顺序**（policy → role → tenant），失败容错（`catch`/`defer` 忽略删除错误）。
+- 可删除测试资源按**反向依赖顺序**清理；预算策略/资金账本无删除 API，由测试自己持有的隔离库在用例 reset 或退出时清理，不能为测试新增业务删除入口，更不能清空外部/开发库。
 - 测试数据命名**避开** `create/edit/delete` 等词，防止与按钮/选择器文案冲突。
 
 ## Desktop 网关 e2e 模式（无 build tag）
@@ -166,6 +194,7 @@ test("streamed chat completion stitches chunks and bills usage", async () => {
 桌面网关的"组装后真能跑通"测试（`cmd/desktop/wiring_test.go`）与企业级 `test/e2e/harness_test.go` 的 in-process 全栈范式同构,但有几点差异:
 
 - **无 build tag、每 PR 跑**:SQLite in-process(`t.TempDir()` + WAL),<1s,不沾 embedded-postgres 的重量级栈。`e2e` tag 是为控制 PG 的启动成本;desktop 不需要。
+- **企业字段边界**：默认 nil Application 合法，SQLite 无需为了企业预算增加 catalog/schema；共享 DTO 扩展需验证 nullable 字段兼容，Desktop 不装 Accounting。
 - **共享契约面的运行期 canary**:in-process 装配 `proxy.Router` + desktop SQLite sinks + `config.Load` 闭包 + mock 上游(`test/testsupport/mock_upstream.go`,仅 import `net/http`+`httptest`,不拖 `internal/store`/PG)。真打 `/v1/chat/completions`(流式 + 非流式),断言 `request_logs`/`trace_payloads` 落 SQLite 且读 API(`/api/v1/*`)能取回。
 - **配置 CRUD + 热重载 canary**:`internal/desktopapi/config_handlers_test.go` 通过真 API 端点增删改 provider/model/route,验证 YAML 原子写回 + `watcher.Build()` 重建 dispatcher(201 状态证明 rebuild 成功)+ 引用校验(409)+ 手动 reload。
 - **编译期 + 运行期双层守卫**:编译期(`make test` 编译 desktop 三包)抓住共享接口**签名**变更;运行期(wiring_test + config_handlers_test)抓住**语义/装配/热重载**变更。

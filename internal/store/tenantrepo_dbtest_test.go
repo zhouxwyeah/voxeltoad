@@ -4,6 +4,7 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"voxeltoad/internal/store"
@@ -292,7 +293,7 @@ func TestTenantRepo_CreateAPIKeyWithBinding(t *testing.T) {
 	}
 }
 
-func TestTenantRepo_SetAPIKeyApplication_BindUnbind(t *testing.T) {
+func TestTenantRepo_UpdateAPIKey_CompleteIdentityOnce(t *testing.T) {
 	ctx := context.Background()
 	db, tenantA, _ := scopedFixture(t)
 	repoA := store.NewTenantRepo(db, tenantA)
@@ -313,28 +314,31 @@ func TestTenantRepo_SetAPIKeyApplication_BindUnbind(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Bind.
-	ok, err := repoA.SetAPIKeyApplication(ctx, "key_bu", &appID)
+	identity := store.APIKeyIdentity{GroupID: groupAID, ApplicationID: appID, Environment: "prod"}
+	ok, err := repoA.UpdateAPIKey(ctx, "key_bu", store.APIKeyUpdate{Identity: &identity})
 	if err != nil || !ok {
-		t.Fatalf("SetAPIKeyApplication(bind): ok=%v err=%v", ok, err)
+		t.Fatalf("UpdateAPIKey(bind): ok=%v err=%v", ok, err)
 	}
 	keys, _, _ := repoA.ListAPIKeys(ctx, "", 0)
 	if len(keys) != 1 || keys[0].ApplicationID == nil || *keys[0].ApplicationID != appID {
 		t.Errorf("after bind, ApplicationID = %v, want %d", keys[0].ApplicationID, appID)
 	}
 
-	// Unbind.
-	ok, err = repoA.SetAPIKeyApplication(ctx, "key_bu", nil)
-	if err != nil || !ok {
-		t.Fatalf("SetAPIKeyApplication(unbind): ok=%v err=%v", ok, err)
+	// Identical retries are safe; an environment migration requires a new key.
+	if ok, err := repoA.UpdateAPIKey(ctx, "key_bu", store.APIKeyUpdate{Identity: &identity}); err != nil || !ok {
+		t.Fatalf("idempotent retry: ok=%v err=%v", ok, err)
+	}
+	identity.Environment = "staging"
+	if ok, err := repoA.UpdateAPIKey(ctx, "key_bu", store.APIKeyUpdate{Identity: &identity}); ok || !errors.Is(err, store.ErrAPIKeyIdentityImmutable) {
+		t.Fatalf("identity changed: ok=%v err=%v", ok, err)
 	}
 	keys, _, _ = repoA.ListAPIKeys(ctx, "", 0)
-	if len(keys) != 1 || keys[0].ApplicationID != nil {
-		t.Errorf("after unbind, ApplicationID = %v, want nil", keys[0].ApplicationID)
+	if len(keys) != 1 || keys[0].Environment != "prod" {
+		t.Errorf("identity modified after rejected PATCH: %+v", keys)
 	}
 }
 
-func TestTenantRepo_SetAPIKeyEnvironment(t *testing.T) {
+func TestTenantRepo_UpdateAPIKey_RejectsPartialIdentity(t *testing.T) {
 	ctx := context.Background()
 	db, tenantA, _ := scopedFixture(t)
 	repoA := store.NewTenantRepo(db, tenantA)
@@ -347,17 +351,17 @@ func TestTenantRepo_SetAPIKeyEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ok, err := repoA.SetAPIKeyEnvironment(ctx, "key_env", "staging")
-	if err != nil || !ok {
-		t.Fatalf("SetAPIKeyEnvironment: ok=%v err=%v", ok, err)
+	ok, err := repoA.UpdateAPIKey(ctx, "key_env", store.APIKeyUpdate{Identity: &store.APIKeyIdentity{Environment: "staging"}})
+	if ok || !errors.Is(err, store.ErrInvalidAPIKeyIdentity) {
+		t.Fatalf("partial identity accepted: ok=%v err=%v", ok, err)
 	}
 	keys, _, _ := repoA.ListAPIKeys(ctx, "", 0)
-	if len(keys) != 1 || keys[0].Environment != "staging" {
-		t.Errorf("Environment = %q, want staging", keys[0].Environment)
+	if len(keys) != 1 || keys[0].Environment != "" {
+		t.Errorf("partial identity modified key: %+v", keys)
 	}
 }
 
-func TestTenantRepo_SetAPIKeyApplication_CrossTenantBlocked(t *testing.T) {
+func TestTenantRepo_UpdateAPIKey_CrossTenantBlocked(t *testing.T) {
 	ctx := context.Background()
 	db, tenantA, tenantB := scopedFixture(t)
 	repoA := store.NewTenantRepo(db, tenantA)
@@ -384,11 +388,10 @@ func TestTenantRepo_SetAPIKeyApplication_CrossTenantBlocked(t *testing.T) {
 	}
 
 	// Attempt to bind tenant A's key to tenant B's application.
-	ok, err := repoA.SetAPIKeyApplication(ctx, "key_ct", &appBID)
-	if err != nil {
-		t.Fatalf("SetAPIKeyApplication cross-tenant: %v", err)
-	}
-	if ok {
-		t.Error("ok = true, want false (cross-tenant application should not be bindable)")
+	ok, err := repoA.UpdateAPIKey(ctx, "key_ct", store.APIKeyUpdate{Identity: &store.APIKeyIdentity{
+		GroupID: groupAID, ApplicationID: appBID, Environment: "prod",
+	}})
+	if ok || !errors.Is(err, store.ErrInvalidAPIKeyIdentity) {
+		t.Fatalf("cross-tenant binding accepted: ok=%v err=%v", ok, err)
 	}
 }

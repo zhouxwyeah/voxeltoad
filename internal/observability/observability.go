@@ -27,6 +27,8 @@ const (
 	AttrTenant             = "llm.tenant"
 	AttrGroup              = "llm.group"
 	AttrAPIKeyID           = "llm.api_key_id"
+	AttrApplicationID      = "llm.application_id"
+	AttrEnvironment        = "llm.environment"
 	AttrModelRequested     = "llm.model.requested"
 	AttrModelResolved      = "llm.model.resolved"
 	AttrProvider           = "llm.provider"

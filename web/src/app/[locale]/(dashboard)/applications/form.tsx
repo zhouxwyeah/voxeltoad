@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { createApplication } from "./actions";
 import { Button, Input } from "@/components/ui";
 import { Select } from "@/components/ui/select";
+import { modalFormActionsClass } from "@/components/modal";
 
 type GroupRow = Record<string, unknown>;
 
@@ -37,7 +38,6 @@ export function ApplicationForm({
   useEffect(() => {
     if (state?.ok) {
       formRef.current?.reset();
-      setOwnerGroup("");
       onSuccessRef.current?.();
       router.refresh();
     }
@@ -67,7 +67,7 @@ export function ApplicationForm({
           {state.errorKey ? tErr(state.errorKey) : state.error}
         </p>
       )}
-      <div className="flex justify-end gap-3 pt-2">
+      <div className={modalFormActionsClass}>
         <Button type="button" variant="outline" onClick={onCancel}>
           {tCommon("actions.cancel")}
         </Button>
