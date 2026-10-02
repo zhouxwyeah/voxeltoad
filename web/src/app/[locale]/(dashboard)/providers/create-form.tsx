@@ -134,6 +134,7 @@ export function ProviderForm({
   useEffect(() => {
     if (state?.ok && !success) {
       formRef.current?.reset();
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedType("");
       setCustomType("");
       setShowCustom(false);
