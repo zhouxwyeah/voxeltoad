@@ -10,8 +10,8 @@ import { TraceCategories } from "../components/trace/trace-categories";
 import { pickBaseline } from "../components/trace/trace-baseline";
 import { JsonTree } from "../components/trace/json-tree";
 import { PromptFormModal } from "../components/prompts/prompt-form-modal";
-import { getTraceByRowID, listRequestLogs, listTraceBySession } from "../lib/api";
-import type { RequestLogView, TraceDetail, TraceSummary } from "../lib/types";
+import { getTraceByRowID, getDispatchSteps, listRequestLogs, listTraceBySession } from "../lib/api";
+import type { DispatchStep, RequestLogView, TraceDetail, TraceSummary } from "../lib/types";
 import {
   agentLabel,
   agentTone,
@@ -325,6 +325,9 @@ function DetailView({
       {/* Metrics bar — from request_logs */}
       <MetricsBar metrics={metrics} loading={metricsLoading} isError={isError} />
 
+      {/* Dispatch path (ADR-0057) — ordered candidate evaluations */}
+      <DispatchPath requestID={detail.request_id} />
+
       {/* Metadata card — fields the backend already returns but the UI previously hid */}
       <MetadataCard detail={detail} />
 
@@ -417,6 +420,102 @@ function MetaItem({ label, value, mono }: { label: string; value: string; mono?:
     <div className="flex flex-col gap-1">
       <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</dt>
       <dd className={`text-sm text-foreground ${mono ? "font-mono" : ""}`}>{value}</dd>
+    </div>
+  );
+}
+
+/** DispatchPath shows the ordered candidate evaluation sequence (ADR-0057).
+ * Each step is either skipped (no network call) or attempted (with outcome). */
+function DispatchPath({ requestID }: { requestID: string }) {
+  const [steps, setSteps] = useState<DispatchStep[] | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getDispatchSteps(requestID)
+      .then((s) => {
+        if (!cancelled) setSteps(s);
+      })
+      .catch(() => {
+        if (!cancelled) setSteps(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [requestID]);
+
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-border p-4">
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          分发路径
+        </h3>
+        <p className="text-xs text-muted-foreground">加载中…</p>
+      </div>
+    );
+  }
+
+  if (!steps || steps.length === 0) {
+    return null; // No dispatch steps recorded (e.g. older request before ADR-0057)
+  }
+
+  return (
+    <div className="rounded-lg border border-border p-4">
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        分发路径
+      </h3>
+      <div className="flex flex-col gap-2">
+        {steps.map((s, i) => {
+          const isLast = i === steps.length - 1;
+          return (
+            <div key={i} className="flex items-start gap-3">
+              {/* ordinal circle */}
+              <div
+                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-medium ${
+                  s.action === "skipped"
+                    ? "bg-muted text-muted-foreground"
+                    : s.selection_outcome === "selected"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-destructive/10 text-destructive"
+                }`}
+              >
+                {s.ordinal + 1}
+              </div>
+              {/* content */}
+              <div className="flex-1">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="font-medium text-foreground">{s.provider}</span>
+                  {s.endpoint && (
+                    <span className="text-xs text-muted-foreground">/{s.endpoint}</span>
+                  )}
+                  {s.action === "skipped" ? (
+                    <Badge tone="muted">跳过 · {s.skip_reason}</Badge>
+                  ) : s.selection_outcome === "selected" ? (
+                    <Badge tone="success">命中</Badge>
+                  ) : s.selection_outcome === "retryable_failure" ? (
+                    <Badge tone="warning">可重试失败 · {s.error_type}</Badge>
+                  ) : (
+                    <Badge tone="destructive">终态失败 · {s.error_type}</Badge>
+                  )}
+                  {s.duration_ms > 0 && (
+                    <span className="text-xs text-muted-foreground">{formatDuration(s.duration_ms)}</span>
+                  )}
+                  {s.upstream_request_id && (
+                    <span className="font-mono text-xs text-muted-foreground" title={s.upstream_request_id}>
+                      upstream: {shortId(s.upstream_request_id, 12)}
+                    </span>
+                  )}
+                </div>
+              </div>
+              {!isLast && <div className="ml-3 h-4 w-px bg-border" />}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

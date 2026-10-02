@@ -2,7 +2,8 @@
 
 This directory is the Wails v2 packaging layer that turns the desktop personal
 gateway (`cmd/desktop`, `internal/desktopstore`, `internal/desktopapi`) into a
-standard macOS `.app` bundle. See `design/desktop.md` §10 and ADR-0041.
+standard macOS `.app` bundle. See `design/desktop.md` §10, ADR-0041, and
+`docs/desktop/getting-started.md` (end-user install & usage guide).
 
 ## What lives here
 
@@ -71,14 +72,24 @@ The build script (`scripts/build-desktop.sh`) does in order:
 3. `cd deploy/desktop && wails build` → reads `wails.json`, compiles the
    `package main` in this directory (`main.go` imports `internal/desktopapp`),
    embeds `app/dist/`, produces `.app`
+4. (darwin) `codesign --force --deep --sign -` — ad-hoc signature
+5. (darwin) `hdiutil create` — wraps the `.app` into a `.dmg`
 
 ## Signing & notarization
 
 ### Current: ad-hoc signing (no Apple Developer cert needed)
 
+Current default is **ad-hoc signing** (no Apple Developer account needed):
+the bundle is signed with a local identity (`Signature=adhoc`), runs fine on
+the build machine, and the `.dmg` can be shared as-is. Recipients hit
+Gatekeeper on first launch (unsigned-by-a-known-CA) — right-click → Open to
+bypass. This is the pragmatic path for personal distribution; see
+`docs/desktop/getting-started.md` for the end-user instructions.
+
 `scripts/build-desktop.sh` automatically ad-hoc signs the `.app` bundle with
 `codesign --sign -` and creates a `.dmg` for distribution. Users must bypass
 Gatekeeper on first launch:
+
 
 - **方法一（推荐）：** 右键点击 app → 打开 → 确认
 - **方法二：** 终端执行 `xattr -dr com.apple.quarantine voxeltoad-desktop.app`
@@ -100,7 +111,6 @@ For a distributable build that opens without Gatekeeper prompts:
 
 The entitlements (`dist.entitlements.plist`) are already set up with Hardened
 Runtime flags — just swap the signing identity and add notarization.
-
 ## Reuse vs the enterprise gateway
 
 The desktop gateway reuses the enterprise data plane verbatim

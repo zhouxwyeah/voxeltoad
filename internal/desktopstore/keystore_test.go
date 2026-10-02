@@ -58,6 +58,38 @@ func TestKeyStore_LookupByHash_Hit(t *testing.T) {
 	}
 }
 
+func TestKeyStore_DefaultKeyHash(t *testing.T) {
+	db := newTestDB(t)
+	row := APIKeyRow{
+		KeyID:         "default",
+		Hash:          hashOf("default-key"),
+		AllowedModels: "[]",
+	}
+	if err := db.Create(&row).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	ks := NewKeyStore(db)
+	got, err := ks.DefaultKeyHash(context.Background())
+	if err != nil {
+		t.Fatalf("DefaultKeyHash: %v", err)
+	}
+	if got != hashOf("default-key") {
+		t.Errorf("DefaultKeyHash = %s, want %s", got, hashOf("default-key"))
+	}
+
+	if err := ks.RotateDefaultKey(context.Background(), hashOf("rotated")); err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+	got, err = ks.DefaultKeyHash(context.Background())
+	if err != nil {
+		t.Fatalf("DefaultKeyHash after rotate: %v", err)
+	}
+	if got != hashOf("rotated") {
+		t.Errorf("DefaultKeyHash after rotate = %s, want %s", got, hashOf("rotated"))
+	}
+}
+
 func TestKeyStore_LookupByHash_Miss(t *testing.T) {
 	db := newTestDB(t)
 	ks := NewKeyStore(db)

@@ -239,6 +239,30 @@ func TestProviders_CreateDuplicate(t *testing.T) {
 	}
 }
 
+func TestProviders_ValidateProvider(t *testing.T) {
+	ts, _ := newConfigTestServer(t)
+	// Empty endpoints → 400.
+	code, b := reqBody(t, "POST", ts.URL, "/api/v1/providers", map[string]any{
+		"name": "bad1", "type": "x",
+		"endpoints":   []map[string]any{},
+		"api_key_ref": "plain://k", "weight": 1,
+		"timeouts": map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
+	})
+	if code != 400 {
+		t.Errorf("empty endpoints: %d %s, want 400", code, b)
+	}
+	// Unknown adapter → 400.
+	code, b = reqBody(t, "POST", ts.URL, "/api/v1/providers", map[string]any{
+		"name": "bad2", "type": "x",
+		"endpoints":   []map[string]any{{"id": "x", "adapter": "bogus", "base_url": "u"}},
+		"api_key_ref": "plain://k", "weight": 1,
+		"timeouts": map[string]int64{"connect": 1_000_000_000, "first_byte": 1_000_000_000, "overall": 1_000_000_000},
+	})
+	if code != 400 {
+		t.Errorf("unknown adapter: %d %s, want 400", code, b)
+	}
+}
+
 // --- models ---
 
 func TestModels_CRUD(t *testing.T) {

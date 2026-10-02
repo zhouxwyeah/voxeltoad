@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Build the desktop personal gateway as a native installer.
 #
-# Three stages:
+# Five stages:
 #   1. Build the SPA (desktop-ui/) → desktop-ui/dist/
 #   2. Sync dist/ → deploy/desktop/app/dist/ (the //go:embed source)
 #   3. `wails build` under deploy/desktop/ → bundles the platform installer
+#   4. (darwin only) ad-hoc codesign the .app bundle
+#   5. (darwin only) wrap the .app into a distributable .dmg via hdiutil
 #
 # After wails build (darwin only):
 #   - Ad-hoc codesign the .app bundle (identity "-", no Apple Developer cert needed)
@@ -84,14 +86,15 @@ case "$TARGET" in
     CGO_ENABLED=1 "$WAILS_BIN" build -tags desktop -ldflags "$LDFLAGS" -platform darwin/universal
 
     # ---- Ad-hoc code-sign the .app bundle ----
-    # Identity "-" means ad-hoc signing (no Apple Developer cert needed).
-    # This prevents the bundle from being instantly quarantined as damaged;
-    # users still need to right-click → Open on first launch to bypass
-    # Gatekeeper's notarization check.
+    # Identity "-" means ad-hoc signing (no Apple Developer cert needed). The
+    # bundle then runs locally and satisfies Wails' hardened-runtime
+    # expectations; other machines still need right-click → Open on first
+    # launch to bypass Gatekeeper. A Developer ID signature + notarization can
+    # replace this later without script changes beyond the identity argument.
     ENTITLEMENTS="$ROOT/deploy/desktop/build/darwin/dist.entitlements.plist"
     if [ -f "$ENTITLEMENTS" ]; then
       echo
-      echo "  signing with ad-hoc identity (codesign --sign -)"
+      echo "== stage 4: ad-hoc codesign =="
       codesign --force --deep --sign - \
         --entitlements "$ENTITLEMENTS" \
         --options runtime \
@@ -99,16 +102,6 @@ case "$TARGET" in
     else
       echo "  warning: entitlements not found at $ENTITLEMENTS — skipping codesign"
     fi
-
-    # ---- Create DMG for distribution ----
-    DMG_DIR="$ROOT/deploy/desktop/build/bin"
-    DMG="$DMG_DIR/voxeltoad-desktop.dmg"
-    echo "  creating DMG: $DMG"
-    hdiutil create -volname "voxeltoad 桌面" \
-      -srcfolder "$APP" \
-      -ov -format UDZO \
-      "$DMG" >/dev/null
-    echo "  DMG size: $(du -sh "$DMG" | awk '{print $1}')"
     ;;
   windows)
     # Run on Windows. NSIS must be installed (choco install nsis).
@@ -143,19 +136,23 @@ echo
 case "$TARGET" in
   darwin)
     APP="$ROOT/deploy/desktop/build/bin/voxeltoad-desktop.app"
-    DMG="$ROOT/deploy/desktop/build/bin/voxeltoad-desktop.dmg"
-    if [ -d "$APP" ]; then
-      echo "✓ built: $APP"
-      echo "  size: $(du -sh "$APP" | awk '{print $1}')"
-      if [ -f "$DMG" ]; then
-        echo "✓ DMG:   $DMG"
-      fi
-      echo "  open with: open '$APP'"
-      echo "  (first launch: right-click → Open to bypass Gatekeeper)"
-    else
+
+    if [ ! -d "$APP" ]; then
       echo "✗ expected output not found at $APP"
       exit 1
     fi
+    # .dmg for distribution (hdiutil ships with macOS — no external deps).
+    DMG="$ROOT/deploy/desktop/build/bin/voxeltoad-desktop.dmg"
+    echo
+    echo "== stage 5: create .dmg =="
+    hdiutil create -volname voxeltoad-desktop -srcfolder "$APP" -ov -format UDZO "$DMG"
+    echo
+    echo "✓ built: $APP"
+    echo "  size: $(du -sh "$APP" | awk '{print $1}')"
+    echo "  open with: open '$APP'"
+    echo "✓ built: $DMG"
+    echo "  size: $(du -sh "$DMG" | awk '{print $1}')"
+    echo "  signature: $(codesign -dv "$APP" 2>&1 | grep -o 'Signature=.*' || echo unknown)"
     ;;
   windows|windows-cross)
     # Wails names the installer <wails.json:name>-amd64-installer.exe.

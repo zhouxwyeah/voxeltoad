@@ -112,3 +112,103 @@ func TestRetention_NothingToDelete(t *testing.T) {
 		t.Errorf("remaining request_logs = %d, want 1", n)
 	}
 }
+
+// TestRetention_DispatchStepsSweeperOrder verifies that dispatch_steps are
+// cleaned up even when DeleteRequestLogsBefore runs first (the sweeper order).
+// Regression for the orphan bug: DeleteDispatchStepsBefore previously used a
+// request_id IN (SELECT ... FROM request_logs WHERE created_at < ?) subquery,
+// which returned empty after request_logs were already deleted.
+func TestRetention_DispatchStepsSweeperOrder(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now()
+	old := now.Add(-40 * 24 * time.Hour)
+	recent := now.Add(-24 * time.Hour)
+
+	// Seed request_logs + matching dispatch_steps for old and recent requests.
+	for _, ts := range []time.Time{old, recent} {
+		rid := "req-" + ts.Format("20060102")
+		if err := db.Create(&RequestLogRow{
+			Tenant: "default", Provider: "p", ModelRequested: "m",
+			RequestID: rid, SessionID: "sess-" + rid, CreatedAt: ts,
+		}).Error; err != nil {
+			t.Fatalf("seed request_logs: %v", err)
+		}
+		if err := db.Create(&DispatchStepRow{
+			RequestID: rid, Ordinal: 0, Provider: "p", Endpoint: "default",
+			Action: "attempted", SelectionOutcome: "selected", CreatedAt: ts,
+		}).Error; err != nil {
+			t.Fatalf("seed dispatch_steps: %v", err)
+		}
+	}
+
+	cutoff := now.Add(-30 * 24 * time.Hour)
+
+	// Sweeper order: request_logs first, then dispatch_steps.
+	if _, err := db.DeleteRequestLogsBefore(context.Background(), cutoff); err != nil {
+		t.Fatalf("DeleteRequestLogsBefore: %v", err)
+	}
+	nSteps, err := db.DeleteDispatchStepsBefore(context.Background(), cutoff)
+	if err != nil {
+		t.Fatalf("DeleteDispatchStepsBefore: %v", err)
+	}
+	if nSteps != 1 {
+		t.Errorf("deleted dispatch_steps = %d, want 1 (old step must be cleaned even after request_logs deleted)", nSteps)
+	}
+	if n := countRows(t, db, "dispatch_steps"); n != 1 {
+		t.Errorf("remaining dispatch_steps = %d, want 1 (recent)", n)
+	}
+}
+
+// TestRetention_DispatchStepsFavoritesExempt verifies that dispatch_steps
+// belonging to a favorited session are NOT deleted by the time-based sweep,
+// even when the step's created_at is older than the cutoff.
+func TestRetention_DispatchStepsFavoritesExempt(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now()
+	old := now.Add(-40 * 24 * time.Hour)
+
+	// Seed a favorited session with an old request_log + dispatch_step.
+	favSession := "fav-session"
+	if err := db.Create(&RequestLogRow{
+		Tenant: "default", Provider: "p", ModelRequested: "m",
+		RequestID: "fav-req", SessionID: favSession, CreatedAt: old,
+	}).Error; err != nil {
+		t.Fatalf("seed request_logs: %v", err)
+	}
+	if err := db.Create(&SessionFavoriteRow{SessionID: favSession, CreatedAt: now}).Error; err != nil {
+		t.Fatalf("seed session_favorites: %v", err)
+	}
+	if err := db.Create(&DispatchStepRow{
+		RequestID: "fav-req", Ordinal: 0, Provider: "p", Endpoint: "default",
+		Action: "attempted", SelectionOutcome: "selected", CreatedAt: old,
+	}).Error; err != nil {
+		t.Fatalf("seed dispatch_steps: %v", err)
+	}
+
+	cutoff := now.Add(-30 * 24 * time.Hour)
+
+	// Sweeper order: request_logs first (exempts favorite), then dispatch_steps.
+	nLogs, err := db.DeleteRequestLogsBefore(context.Background(), cutoff)
+	if err != nil {
+		t.Fatalf("DeleteRequestLogsBefore: %v", err)
+	}
+	if nLogs != 0 {
+		t.Errorf("deleted request_logs = %d, want 0 (favorited session exempt)", nLogs)
+	}
+
+	nSteps, err := db.DeleteDispatchStepsBefore(context.Background(), cutoff)
+	if err != nil {
+		t.Fatalf("DeleteDispatchStepsBefore: %v", err)
+	}
+	if nSteps != 0 {
+		t.Errorf("deleted dispatch_steps = %d, want 0 (favorited session exempt)", nSteps)
+	}
+
+	// Both rows must survive.
+	if n := countRows(t, db, "dispatch_steps"); n != 1 {
+		t.Errorf("remaining dispatch_steps = %d, want 1 (favorited)", n)
+	}
+	if n := countRows(t, db, "request_logs"); n != 1 {
+		t.Errorf("remaining request_logs = %d, want 1 (favorited)", n)
+	}
+}

@@ -10,7 +10,7 @@ jobs:
   # -------------------------------------------------------------------------
   # Light gate: runs on every PR and every push. Kept fast (target < 5 min).
   # Covers Go fmt/vet/lint/arch/unit-tests, SDK codegen/typecheck/lint/test,
-  # devstack smoke, and web typecheck/lint.
+  # devstack smoke, web typecheck/lint, and desktop-ui typecheck/tests/build.
   # -------------------------------------------------------------------------
   ci-light:
     runs-on: ubuntu-latest
@@ -25,17 +25,23 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Install SDK + web dependencies
+      - name: Install SDK + web + desktop-ui dependencies
         run: |
           make sdk-install
           make sdk-build
           npm ci --prefix web
+          make desktop-ui-install
 
       - name: Run light CI (Go + SDK + devstack smoke)
         run: make ci
 
       - name: Web quality gates (typecheck + lint)
         run: make ci-web
+
+      # Without this the desktop SPA is only compiled at release time by
+      # scripts/build-desktop.sh, so a broken .tsx can sit on main unnoticed.
+      - name: Desktop UI quality gates (typecheck + unit tests + build)
+        run: make ci-desktop-ui
 
   # -------------------------------------------------------------------------
   # Integration gate: runs on PRs and main pushes before delivery. All upstreams

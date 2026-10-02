@@ -180,9 +180,25 @@ and refined through `grill-with-docs` sessions.
   estimated token shape, latency objective, quality floor, and capability needs.
   It is not an identity and does not contain raw prompt/completion bodies in the
   RoutingDecision ledger. (See ADR-0051, ADR-0053.)
-- **Circuit / health state** — per-provider healthy/unhealthy state that
-  failover consults to skip bad providers; in-memory and per-instance in P0
-  (like rate limiting). (See ADR-0011.)
+- **Circuit / health state** — per-provider-endpoint healthy/open/half-open state
+  that failover consults to skip bad endpoints; in-memory and per-instance in P0
+  (like rate limiting). Endpoint granularity follows ADR-0049.
+
+## Desktop distribution observability
+
+- **GatewayRequest (gateway request)** — one client-visible LLM call accepted by the gateway. It is the denominator for desktop request count, final success rate, duration, TTFT, token usage, and estimated cost. Retries, failover attempts, and circuit-skipped candidates do not create extra GatewayRequests. Represented by one `request_logs` row/read projection. (See ADR-0057.)
+- **DispatchStep (dispatch step)** — one ordered decision step while a GatewayRequest is distributed. A step is either `skipped` (a candidate was evaluated but no network call was made) or `attempted` (an upstream call was made with selection outcome `selected`, `retryable_failure`, or `terminal_failure`). For streaming, `selected` is the no-more-failover lock-in point, not final stream success; final delivery outcome belongs to the parent GatewayRequest. Steps preserve request-time facts so old paths are not reconstructed from current config. (See ADR-0057.)
+- **UpstreamAttempt (upstream attempt)** — the `attempted` subset of DispatchSteps. Candidate skips are not attempts and must not inflate attempt count or attempt failure rate.
+- **Request success rate** — successful GatewayRequests divided by completed GatewayRequests, using the final client-visible result. A request that succeeds after failover is successful.
+- **First-attempt success rate** — the share of GatewayRequests whose first real UpstreamAttempt becomes serving and completes successfully. Circuit-skipped candidates do not count as attempts.
+- **Preferred-candidate hit rate** — the share of GatewayRequests ultimately served by the route's highest-ranked configured candidate. A circuit skip lowers this rate even if the first real attempt succeeds.
+- **Actual failover rate** — the share of GatewayRequests where a real UpstreamAttempt fails retryably and a later real attempt is made, derived from DispatchSteps. Distinct from the legacy `request_logs.fallback` boolean, which is candidate-index based and can include non-network config skips while omitting breaker-filtered/exhausted paths.
+- **Attempt failure rate** — failed UpstreamAttempts divided by completed UpstreamAttempts, counting pre-selection failures and a serving stream that ends in an upstream stream error. Diagnostic of upstream/distribution quality; never used as the desktop headline success rate.
+- **Passive provider health** — a desktop read projection derived from recent real request/attempt outcomes, latency, last successful use, and current circuit state. It is not an active availability guarantee and does not generate probe traffic.
+- **Estimated cost** — a non-authoritative desktop statistic computed from locally configured Pricing and actual upstream Usage. It is always labeled as an estimate and is not a balance, budget, quota, invoice, or billing ledger.
+- **SessionProjection (session projection)** — a read-only grouping of GatewayRequests sharing the derived `session_id`. Users can filter, inspect, and favorite it but cannot manually merge or split requests.
+- **SessionFavorite (session favorite)** — local metadata keyed by `session_id` that pins a SessionProjection and exempts its request, DispatchStep, and TracePayload records from ordinary retention until removed. Distinct from a saved prompt template.
+- **SetupReadiness (setup readiness)** — the desktop first-run read model for the Provider → Model → Route → Test dependency chain. It identifies the single next setup action; it is not persisted governance workflow.
 
 ## Claude specifics
 
@@ -201,9 +217,10 @@ and refined through `grill-with-docs` sessions.
   (See ADR-0011.)
 - **Router (component)** — pure candidate ordering by strategy, minus
   breaker-unhealthy providers. (See ADR-0011.)
-- **Circuit breaker** — in-memory consecutive-failure tracker that marks a
-  provider unhealthy with a cooldown (half-open on expiry); per-instance in P0.
-  (See ADR-0011.)
+- **Circuit breaker** — in-memory consecutive-failure tracker keyed by
+  `EndpointKey{Provider, Endpoint}`. It marks an endpoint open during cooldown,
+  re-allows calls in half-open after expiry (without single-probe concurrency gating),
+  and is per-instance in P0. (See ADR-0011/0049.)
 
 ## Billing & quota
 
@@ -286,9 +303,9 @@ and refined through `grill-with-docs` sessions.
 - **request_id** — gateway-generated per-request correlation ID (ADR-0050: always gateway-generated via chi middleware; never the client value). Injected as OTel span attribute `llm.request_id`, stored in `request_logs.request_id` / `trace_payloads.request_id`. Echoed back to the client via the `X-Request-Id` response header. Not a primary key — use `trace_payloads.id` for single-row trace detail lookups.
 - **client_request_id** — client-supplied `X-Request-Id` header value (verbatim after trim; empty when the client sent none). Stored in `request_logs.client_request_id` / `trace_payloads.client_request_id` (migration 00027, ADR-0050) for cross-system correlation; NOT used as the primary correlation key because some agents (Claude Code, Codex) reuse the same id across every request in a session. Echoed back via the `X-Client-Request-Id` response header when present. Indexed for reverse lookup (`idx_request_logs_client_request_id`).
 - **X-Trace-Id (request header)** — NOT read post-ADR-0050. The header was previously a request_id fallback when `X-Request-Id` was absent; after ADR-0050 the gateway ignores it entirely (not backed up, not adopted, not parsed as trace_id). Known clients all use `X-Request-Id` or W3C `traceparent`; no real consumer depends on `X-Trace-Id`. The response-side `X-Trace-Id` echo (from parsed traceparent) is a pre-existing asymmetry per ADR-0040. If a future agent depends on `X-Trace-Id`, introduce a dedicated field (e.g. `client_trace_id`) rather than overloading `client_request_id`.
-- **upstream_request_id** — provider-assigned request ID returned in the upstream response (OpenAI `x-request-id` header, Anthropic `request-id` header/body, Gemini `x-goog-request-id`). Extracted by the Forwarder from `resp.Header` (with adapter body fallback), stored in `request_logs.upstream_request_id` (indexed for reverse lookup). Captured for the final/successful attempt only — per-attempt capture including failed retries is a follow-up. Used for support/reconciliation to map a gateway request to the provider's side. Never echoed to external clients.
+- **upstream_request_id** — provider-assigned request ID returned in the upstream response (OpenAI `x-request-id` header, Anthropic `request-id` header/body, Gemini `x-goog-request-id`). Extracted by the Forwarder from `resp.Header` (with adapter body fallback), stored in `request_logs.upstream_request_id` (indexed for reverse lookup). Currently captured for the final/successful attempt only; ADR-0057 accepts per-attempt capture in DispatchStep, not yet implemented. Used for support/reconciliation to map a gateway request to the provider's side. Never echoed to external clients.
 - **session_id** — client-supplied session key extracted from the `X-Voxeltoad-Session` header (or configured `sessionHeaders`). Stored in `request_logs.session_id` with a `(session_id, created_at)` index, enabling per-session request chain queries via `GET /api/v1/request-logs?session_id=X`.
-- **trace_id** — W3C trace id parsed from the `traceparent` header (the `00-<trace_id>-<span_id>-<trace_flags>` format). Stored in `request_logs.trace_id` and `trace_payloads.trace_id` (both `DEFAULT ''`). The gateway does NOT emit a synthetic `llm.trace_id` OTel span attribute — trace_id is a W3C standard carried by the OTel trace context itself, so a separate attribute would be redundant. Empty when the client sent no `traceparent` or it was malformed. Unlike `request_id`, trace_id is structurally unique per W3C spec, but the gateway does not enforce uniqueness at the DB level (it relies on the W3C contract). Captured alongside `X-Trace-Id` as a secondary trace-correlation header; see ADR-0040 for the entry-id resolution chain.
+- **trace_id** — W3C trace id parsed only from the `traceparent` header (the `00-<trace_id>-<span_id>-<trace_flags>` format). Stored in `request_logs.trace_id` and `trace_payloads.trace_id` (both `DEFAULT ''`). The gateway does NOT emit a synthetic `llm.trace_id` OTel span attribute because the OTel trace context already carries it. Empty when `traceparent` is absent or malformed. The request-side `X-Trace-Id` header is ignored after ADR-0050; the response-side `X-Trace-Id` echo from parsed trace context remains a historical asymmetry.
 - **request_logs** — the data-plane per-request audit ledger. One row per LLM request (success or rejection), written asynchronously fail-open. Read API: `GET /api/v1/request-logs` (offset paginated, CSV exportable). Distinct from `usage_records` (billing) and `audit_logs` (management-plane mutations). (See ADR-0021.)
 
 ## Enterprise governance, data assets & harness

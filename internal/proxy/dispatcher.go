@@ -7,6 +7,8 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/go-chi/chi/v5/middleware"
+
 	"voxeltoad/internal/adapter"
 	"voxeltoad/internal/config"
 	"voxeltoad/internal/plugin"
@@ -29,7 +31,8 @@ type Dispatcher struct {
 	router     *router
 	breaker    *circuitBreaker
 	forwarders map[EndpointKey]*Forwarder
-	preparer   *modelPreparer // optional; nil = pass the request through unchanged
+	preparer   *modelPreparer   // optional; nil = pass the request through unchanged
+	observer   DispatchObserver // optional; nil = no observation (ADR-0057)
 }
 
 // NewDispatcher builds a Dispatcher from routes, an EndpointKey→Forwarder map,
@@ -80,6 +83,14 @@ func (d *Dispatcher) WithModelPreparation(dyn *config.Dynamic) *Dispatcher {
 	return d
 }
 
+// WithObserver installs an optional DispatchObserver (ADR-0057). The observer
+// receives one DispatchStepEvent per candidate evaluation in Forward/ForwardStream.
+// Nil observer (the default) means zero overhead. The observer must not block.
+func (d *Dispatcher) WithObserver(obs DispatchObserver) *Dispatcher {
+	d.observer = obs
+	return d
+}
+
 // endpointFor resolves which endpoint of a provider a request under the given
 // ingress protocol would use (ADR-0049). Returns (endpointID, adapterName).
 // Falls back to ("default", "") when no preparer is configured (single-
@@ -115,6 +126,28 @@ func (d *Dispatcher) SupportsVision(alias string) bool {
 		return false
 	}
 	return d.preparer.modelSupportsVision(alias)
+}
+
+// DispatchStepEvent records one candidate evaluation during a GatewayRequest's
+// dispatch path. It is a read-only observation of a decision already made; the
+// observer must not influence routing. ADR-0057.
+type DispatchStepEvent struct {
+	Ordinal           int // 0-based candidate index (post breaker filtering)
+	Provider          string
+	Endpoint          string
+	Action            string // "skipped" | "attempted"
+	SkipReason        string // "no_forwarder" | "prepare_failed" (skipped only)
+	SelectionOutcome  string // "selected" | "retryable_failure" | "terminal_failure" (attempted only)
+	ErrorType         string // upstream error class (attempted only)
+	UpstreamRequestID string // provider-assigned id (selected only)
+	DurationMs        int    // attempted: Forward/ForwardStream 耗时
+}
+
+// DispatchObserver receives DispatchStepEvents as the Dispatcher evaluates each
+// candidate. Nil observer = zero overhead. The implementation must be safe for
+// concurrent use and must not block (fail-open). ADR-0057.
+type DispatchObserver interface {
+	OnDispatchStep(ctx context.Context, requestID string, step DispatchStepEvent)
 }
 
 // DispatchResult carries the routing-layer facts an emit()/billing caller needs
@@ -162,27 +195,34 @@ func (d *Dispatcher) Forward(ctx context.Context, alias string, req *adapter.Uni
 		return nil, DispatchResult{}, err
 	}
 	keys := d.expandCandidates(ctx, candidates)
+	rid := middleware.GetReqID(ctx)
 	var lastErr error
 	configMismatches := 0
 	for i, key := range keys {
 		fwd, ok := d.forwarders[key]
 		if !ok {
 			lastErr = fmt.Errorf("proxy: no forwarder for %s", key)
+			d.observeStep(ctx, rid, i, key, "skipped", "no_forwarder", "", "", "", 0)
 			continue
 		}
 		preq, err := d.prepare(req, key)
 		if err != nil {
 			lastErr = err // provider doesn't serve this alias; try the next
 			configMismatches++
+			d.observeStep(ctx, rid, i, key, "skipped", "prepare_failed", "", "", "", 0)
 			continue
 		}
+
 		if err := beforeAccountedUpstream(ctx); err != nil {
 			return nil, DispatchResult{}, err
 		}
+		start := time.Now()
 		resp, err := fwd.Forward(ctx, preq)
+		dur := int(time.Since(start).Milliseconds())
 		accountUpstreamResult(ctx, err)
 		if err == nil {
 			d.breaker.MarkSuccess(key)
+			d.observeStep(ctx, rid, i, key, "attempted", "", "selected", "", resp.UpstreamRequestID, dur)
 			return resp, DispatchResult{
 				Provider: key.Provider, Endpoint: key.Endpoint, ModelResolved: preq.Model,
 				Fallback: i > 0, RetryCount: i,
@@ -193,9 +233,11 @@ func (d *Dispatcher) Forward(ctx context.Context, alias string, req *adapter.Uni
 		if !retryable(err) {
 			// non-retryable (e.g. 4xx): stop, don't fail over. This attempt did
 			// resolve a model on this provider even though forwarding failed.
+			d.observeStep(ctx, rid, i, key, "attempted", "", "terminal_failure", errorClass(err), "", dur)
 			return nil, DispatchResult{Provider: key.Provider, Endpoint: key.Endpoint, ModelResolved: preq.Model, Fallback: i > 0, RetryCount: i}, err
 		}
 		d.breaker.MarkFailure(key)
+		d.observeStep(ctx, rid, i, key, "attempted", "", "retryable_failure", errorClass(err), "", dur)
 	}
 	return nil, DispatchResult{RetryCount: len(keys)}, failoverExhausted(lastErr, configMismatches, len(keys))
 }
@@ -211,34 +253,43 @@ func (d *Dispatcher) ForwardStream(ctx context.Context, alias string, req *adapt
 		return nil, DispatchResult{}, err
 	}
 	keys := d.expandCandidates(ctx, candidates)
+	rid := middleware.GetReqID(ctx)
 	var lastErr error
 	configMismatches := 0
 	for i, key := range keys {
 		fwd, ok := d.forwarders[key]
 		if !ok {
 			lastErr = fmt.Errorf("proxy: no forwarder for %s", key)
+			d.observeStep(ctx, rid, i, key, "skipped", "no_forwarder", "", "", "", 0)
 			continue
 		}
 		preq, err := d.prepare(req, key)
 		if err != nil {
 			lastErr = err
 			configMismatches++
+			d.observeStep(ctx, rid, i, key, "skipped", "prepare_failed", "", "", "", 0)
 			continue
 		}
+
 		if err := beforeAccountedUpstream(ctx); err != nil {
 			return nil, DispatchResult{}, err
 		}
+		start := time.Now()
 		sr, upstreamID, err := fwd.ForwardStream(ctx, preq)
+		dur := int(time.Since(start).Milliseconds())
 		accountUpstreamResult(ctx, err)
 		if err == nil {
 			d.breaker.MarkSuccess(key)
+			d.observeStep(ctx, rid, i, key, "attempted", "", "selected", "", upstreamID, dur)
 			return sr, DispatchResult{Provider: key.Provider, Endpoint: key.Endpoint, ModelResolved: preq.Model, Fallback: i > 0, RetryCount: i, UpstreamRequestID: upstreamID}, nil
 		}
 		lastErr = err
 		if !retryable(err) {
+			d.observeStep(ctx, rid, i, key, "attempted", "", "terminal_failure", errorClass(err), "", dur)
 			return nil, DispatchResult{Provider: key.Provider, Endpoint: key.Endpoint, ModelResolved: preq.Model, Fallback: i > 0, RetryCount: i}, err
 		}
 		d.breaker.MarkFailure(key)
+		d.observeStep(ctx, rid, i, key, "attempted", "", "retryable_failure", errorClass(err), "", dur)
 	}
 	return nil, DispatchResult{RetryCount: len(keys)}, failoverExhausted(lastErr, configMismatches, len(keys))
 }
@@ -312,6 +363,46 @@ func accountUpstreamResult(ctx context.Context, err error) {
 	}
 	pc.ChargePossible = true
 	pc.BillingUncertain = true // this attempt may have consumed unreported tokens
+}
+
+// observeStep publishes a DispatchStepEvent to the observer (if installed).
+// Nil observer = zero overhead. Fail-open: panics in the observer are
+// recovered so they can never break the dispatch path. ADR-0057.
+func (d *Dispatcher) observeStep(ctx context.Context, requestID string, ordinal int, key EndpointKey, action, skipReason, outcome, errType, upstreamID string, durMs int) {
+	if d.observer == nil {
+		return
+	}
+	defer func() { _ = recover() }() // ADR-0057: observer must never break dispatch
+	d.observer.OnDispatchStep(ctx, requestID, DispatchStepEvent{
+		Ordinal:           ordinal,
+		Provider:          key.Provider,
+		Endpoint:          key.Endpoint,
+		Action:            action,
+		SkipReason:        skipReason,
+		SelectionOutcome:  outcome,
+		ErrorType:         errType,
+		UpstreamRequestID: upstreamID,
+		DurationMs:        durMs,
+	})
+}
+
+// errorClass extracts a short error classification from a forwarding error for
+// DispatchStepEvent.ErrorType. Mirrors the upstreamError.kind taxonomy.
+func errorClass(err error) string {
+	var ue *upstreamError
+	if errors.As(err, &ue) {
+		switch ue.kind {
+		case errTimeout:
+			return "timeout"
+		case errUpstream4xx:
+			return "upstream_4xx"
+		case errUpstream5xx:
+			return "upstream_5xx"
+		case errBuild:
+			return "build_error"
+		}
+	}
+	return "unknown"
 }
 
 // retryable reports whether a forwarding error is eligible for failover.

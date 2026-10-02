@@ -15,8 +15,9 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import { createProvider, deleteProvider, listProviders, updateProvider } from "../lib/api";
-import type { Provider } from "../lib/types";
+import { createProvider, deleteProvider, getProviderHealth, listProviders, updateProvider } from "../lib/api";
+import type { EndpointHealth, Provider } from "../lib/types";
+import { formatDuration } from "../lib/format";
 
 // Mirrors the admin providers page (web/.../(dashboard)/providers) — same
 // columns, same form fields, same modal sizes. Fields the admin form does not
@@ -41,8 +42,24 @@ const DEFAULT_WEIGHT = 100;
 const PLAIN_REF_PREFIX = "plain://";
 type CredMode = "ref" | "key";
 
+type EndpointRow = {
+  key: string;
+  id: string;
+  adapter: string;
+  base_url: string;
+};
+
+function newEndpointRow(): EndpointRow {
+  return { key: crypto.randomUUID(), id: "", adapter: "openai", base_url: "" };
+}
+
+function endpointToRow(ep: { id?: string; adapter: string; base_url: string }): EndpointRow {
+  return { key: crypto.randomUUID(), id: ep.id ?? "", adapter: ep.adapter, base_url: ep.base_url };
+}
+
 export function Providers() {
   const [rows, setRows] = useState<Provider[]>([]);
+  const [healthMap, setHealthMap] = useState<Map<string, EndpointHealth[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -51,9 +68,16 @@ export function Providers() {
 
   const load = () => {
     setLoading(true);
-    listProviders()
-      .then((r) => {
+    Promise.all([listProviders(), getProviderHealth().catch(() => [])])
+      .then(([r, health]) => {
         setRows(r);
+        const map = new Map<string, EndpointHealth[]>();
+        for (const h of health) {
+          const list = map.get(h.provider) ?? [];
+          list.push(h);
+          map.set(h.provider, list);
+        }
+        setHealthMap(map);
         setError(null);
       })
       .catch((e) => setError(String(e?.message ?? e)))
@@ -99,8 +123,8 @@ export function Providers() {
           <TableRow className="hover:bg-transparent">
             <TableHead>名称</TableHead>
             <TableHead>类型</TableHead>
-            <TableHead>适配器</TableHead>
-            <TableHead>基础 URL</TableHead>
+            <TableHead>端点</TableHead>
+            <TableHead>状态</TableHead>
             <TableHead className="w-0" />
           </TableRow>
         </TableHeader>
@@ -112,15 +136,34 @@ export function Providers() {
               </TableCell>
             </TableRow>
           ) : (
-            rows.map((p) => (
+            rows.map((p) => {
+              const epHealth = healthMap.get(p.name) ?? [];
+              return (
               <TableRow key={p.name}>
                 <TableCell>{p.name}</TableCell>
                 <TableCell>{p.type}</TableCell>
                 <TableCell>
-                  {p.endpoints?.[0]?.adapter ?? ""}
-                  {(p.endpoints?.length ?? 0) > 1 ? ` (+${p.endpoints.length - 1})` : ""}
+                  {p.endpoints && p.endpoints.length > 0 ? (
+                    <div className="flex flex-col gap-1">
+                      {p.endpoints.map((ep, i) => {
+                        const label = ep.adapter === "claude" ? "Anthropic" : ep.adapter === "openai" ? "OpenAI" : ep.adapter;
+                        return (
+                          <div key={i} className="flex items-center gap-2">
+                            <span className="inline-flex w-fit items-center rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
+                              {label}
+                            </span>
+                            <span className="text-xs text-muted-foreground">{ep.base_url}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
                 </TableCell>
-                <TableCell>{p.endpoints?.[0]?.base_url ?? ""}</TableCell>
+                <TableCell>
+                  <HealthBadges health={epHealth} />
+                </TableCell>
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-1">
                     <Button variant="ghost" size="sm" onClick={() => setEditRow(p)}>
@@ -132,7 +175,8 @@ export function Providers() {
                   </div>
                 </TableCell>
               </TableRow>
-            ))
+              );
+            })
           )}
         </TableBody>
       </Table>
@@ -202,8 +246,11 @@ function ProviderForm({
   const dvIsPreset = PRESET_BRANDS.includes(dvType);
   const [typeSelect, setTypeSelect] = useState(dvIsPreset ? dvType : dvType ? CUSTOM_TYPE : "");
   const [customType, setCustomType] = useState(!dvIsPreset && dvType ? dvType : "");
-  const [adapter, setAdapter] = useState(defaultValues?.endpoints?.[0]?.adapter ?? "");
-  const [baseURL, setBaseURL] = useState(defaultValues?.endpoints?.[0]?.base_url ?? "");
+  const [endpoints, setEndpoints] = useState<EndpointRow[]>(
+    defaultValues?.endpoints && defaultValues.endpoints.length > 0
+      ? defaultValues.endpoints.map(endpointToRow)
+      : [newEndpointRow()],
+  );
   const dvApiKeyRef = defaultValues?.api_key_ref ?? "";
   const [credMode, setCredMode] = useState<CredMode>(
     dvApiKeyRef.startsWith(PLAIN_REF_PREFIX) ? "key" : "ref",
@@ -224,8 +271,16 @@ function ProviderForm({
         : apiKey
           ? `${PLAIN_REF_PREFIX}${apiKey}`
           : dvApiKeyRef; // key mode + blank on edit = leave unchanged
-    if (!name.trim() || !typeValue || !adapter || !baseURL.trim() || !ref) {
-      setError("请完整填写名称、类型、适配器、基础 URL 与凭证。");
+    if (!name.trim() || !typeValue || !ref) {
+      setError("请完整填写名称、类型与凭证。");
+      return;
+    }
+    if (endpoints.length === 0) {
+      setError("至少需要一个端点。");
+      return;
+    }
+    if (endpoints.some((ep) => !ep.adapter || !ep.base_url.trim())) {
+      setError("每个端点都需要选择协议并填写基础 URL。");
       return;
     }
     setPending(true);
@@ -237,7 +292,11 @@ function ProviderForm({
         weight: defaultValues?.weight ?? DEFAULT_WEIGHT,
         name: name.trim(),
         type: typeValue,
-        endpoints: [{ id: defaultValues?.endpoints?.[0]?.id ?? "", adapter, base_url: baseURL.trim() }],
+        endpoints: endpoints.map((ep) => ({
+          ...(ep.id ? { id: ep.id } : {}),
+          adapter: ep.adapter,
+          base_url: ep.base_url.trim(),
+        })),
         api_key_ref: ref,
       };
       const res = isEdit ? await updateProvider(body.name, body) : await createProvider(body);
@@ -280,25 +339,63 @@ function ProviderForm({
         />
       )}
 
-      <Field label="适配器" required>
-        <Select value={adapter} onChange={(e) => setAdapter(e.target.value)} required>
-          <option value="" disabled>
-            选择适配器
-          </option>
-          <option value="openai">openai</option>
-          <option value="claude">claude</option>
-        </Select>
-      </Field>
-
-      <Field label="基础 URL" required>
-        <Input
-          type="url"
-          value={baseURL}
-          onChange={(e) => setBaseURL(e.target.value)}
-          placeholder="https://…"
-          required
-        />
-      </Field>
+      <div className="flex flex-col gap-2">
+        <span className="text-sm font-medium text-foreground">端点</span>
+        <p className="text-xs text-muted-foreground">
+          配置一个或多个 (协议, 基础 URL) 端点。运行时按入站协议自动选端点（ADR-0049）。
+        </p>
+        {endpoints.map((ep) => (
+          <div key={ep.key} className="flex flex-col gap-3 rounded-md border border-border p-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="协议" required>
+                <Select
+                  value={ep.adapter}
+                  onChange={(e) =>
+                    setEndpoints((arr) => arr.map((x) => (x.key === ep.key ? { ...x, adapter: e.target.value } : x)))
+                  }
+                  required
+                >
+                  <option value="openai">openai</option>
+                  <option value="claude">claude</option>
+                </Select>
+              </Field>
+              <Field label="基础 URL" required>
+                <Input
+                  type="url"
+                  value={ep.base_url}
+                  onChange={(e) =>
+                    setEndpoints((arr) => arr.map((x) => (x.key === ep.key ? { ...x, base_url: e.target.value } : x)))
+                  }
+                  placeholder="https://…"
+                  required
+                />
+              </Field>
+            </div>
+            {endpoints.length > 1 && (
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setEndpoints((arr) => arr.filter((x) => x.key !== ep.key))}
+                >
+                  移除
+                </Button>
+              </div>
+            )}
+          </div>
+        ))}
+        <div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setEndpoints((arr) => [...arr, newEndpointRow()])}
+          >
+            添加端点
+          </Button>
+        </div>
+      </div>
 
       {/* Credential: one Select chooses between two mutually exclusive inputs. */}
       <Field label="凭证方式" required>
@@ -348,4 +445,52 @@ function ProviderForm({
       </div>
     </form>
   );
+}
+
+/** HealthBadges renders the passive health state for a provider's endpoints.
+ * Shows breaker state (closed/open/half-open/unknown) + success rate + last
+ * seen time. ADR-0057. */
+function HealthBadges({ health }: { health: EndpointHealth[] }) {
+  if (health.length === 0) {
+    return <span className="text-xs text-muted-foreground">未使用</span>;
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      {health.map((h, i) => {
+        const breakerLabel =
+          h.breaker_state === "closed" ? "健康"
+          : h.breaker_state === "open" ? "熔断"
+          : h.breaker_state === "half-open" ? "半开"
+          : "未知";
+        const breakerColor =
+          h.breaker_state === "closed" ? "bg-success/10 text-success"
+          : h.breaker_state === "open" ? "bg-destructive/10 text-destructive"
+          : h.breaker_state === "half-open" ? "bg-warning/10 text-warning"
+          : "bg-muted text-muted-foreground";
+        const successRate = h.attempted > 0 ? Math.round((h.selected / h.attempted) * 100) : null;
+        const lastSeen = h.last_seen ? formatTimeShort(h.last_seen) : null;
+        return (
+          <div key={i} className="flex items-center gap-2 text-xs">
+            <span className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 font-medium ${breakerColor}`}>
+              {breakerLabel}
+            </span>
+            {successRate !== null && (
+              <span className="text-muted-foreground">{successRate}% 成功</span>
+            )}
+            {h.attempted > 0 && h.avg_duration_ms > 0 && (
+              <span className="text-muted-foreground">{formatDuration(h.avg_duration_ms)}</span>
+            )}
+            {lastSeen && (
+              <span className="text-muted-foreground" title={h.last_seen ?? ""}>{lastSeen}</span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function formatTimeShort(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }

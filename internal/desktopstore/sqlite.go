@@ -52,7 +52,7 @@ func Open(path string) (*DB, error) {
 			return nil, err
 		}
 	}
-	if err := gdb.AutoMigrate(&APIKeyRow{}, &RequestLogRow{}, &TracePayloadRow{}, &PromptTemplateRow{}); err != nil {
+	if err := gdb.AutoMigrate(&APIKeyRow{}, &RequestLogRow{}, &TracePayloadRow{}, &PromptTemplateRow{}, &DispatchStepRow{}, &SessionFavoriteRow{}); err != nil {
 		return nil, err
 	}
 	return &DB{gdb}, nil
@@ -113,6 +113,8 @@ type RequestLogRow struct {
 	SessionSource      string    `gorm:"column:session_source"`
 	AgentType          string    `gorm:"column:agent_type;index"`
 	UserAgent          string    `gorm:"column:user_agent"`
+	IngressProtocol    string    `gorm:"column:ingress_protocol"`
+	ProviderEndpoint   string    `gorm:"column:provider_endpoint"`
 	CreatedAt          time.Time `gorm:"column:created_at;index"`
 }
 
@@ -122,28 +124,61 @@ func (*RequestLogRow) TableName() string { return "request_logs" }
 // messages / request_raw are JSON text; response_raw / error_raw are verbatim
 // text (SSE transcripts are not JSON).
 type TracePayloadRow struct {
-	ID              uint      `gorm:"primaryKey;autoIncrement"`
-	RequestID       string    `gorm:"column:request_id;index"`
-	ClientRequestID string    `gorm:"column:client_request_id;index"`
-	SessionID       string    `gorm:"column:session_id;index"`
-	TraceID         string    `gorm:"column:trace_id"`
-	Tenant          string    `gorm:"column:tenant"`
-	Group           string    `gorm:"column:group_name"`
-	APIKeyID        string    `gorm:"column:api_key_id"`
-	Provider        string    `gorm:"column:provider"`
-	ModelRequested  string    `gorm:"column:model_requested"`
-	Stream          bool      `gorm:"column:stream"`
-	AgentType       string    `gorm:"column:agent_type;index"`
-	UserAgent       string    `gorm:"column:user_agent"`
-	StatusCode      int       `gorm:"column:status_code"`
-	StopReason      string    `gorm:"column:stop_reason"`
-	NMessages       int       `gorm:"column:n_messages"`
-	NToolUse        int       `gorm:"column:n_tool_use"`
-	Messages        string    `gorm:"column:messages;type:text"`     // JSON array (adapter.Message[])
-	RequestRaw      string    `gorm:"column:request_raw;type:text"`  // JSON object
-	ResponseRaw     string    `gorm:"column:response_raw;type:text"` // TEXT (SSE transcript)
-	ErrorRaw        string    `gorm:"column:error_raw;type:text"`
-	CreatedAt       time.Time `gorm:"column:created_at;index"`
+	ID               uint      `gorm:"primaryKey;autoIncrement"`
+	RequestID        string    `gorm:"column:request_id;index"`
+	ClientRequestID  string    `gorm:"column:client_request_id;index"`
+	SessionID        string    `gorm:"column:session_id;index"`
+	TraceID          string    `gorm:"column:trace_id"`
+	Tenant           string    `gorm:"column:tenant"`
+	Group            string    `gorm:"column:group_name"`
+	APIKeyID         string    `gorm:"column:api_key_id"`
+	Provider         string    `gorm:"column:provider"`
+	ModelRequested   string    `gorm:"column:model_requested"`
+	Stream           bool      `gorm:"column:stream"`
+	AgentType        string    `gorm:"column:agent_type;index"`
+	UserAgent        string    `gorm:"column:user_agent"`
+	IngressProtocol  string    `gorm:"column:ingress_protocol"`
+	ProviderEndpoint string    `gorm:"column:provider_endpoint"`
+	StatusCode       int       `gorm:"column:status_code"`
+	StopReason       string    `gorm:"column:stop_reason"`
+	NMessages        int       `gorm:"column:n_messages"`
+	NToolUse         int       `gorm:"column:n_tool_use"`
+	Messages         string    `gorm:"column:messages;type:text"`     // JSON array (adapter.Message[])
+	RequestRaw       string    `gorm:"column:request_raw;type:text"`  // JSON object
+	ResponseRaw      string    `gorm:"column:response_raw;type:text"` // TEXT (SSE transcript)
+	ErrorRaw         string    `gorm:"column:error_raw;type:text"`
+	CreatedAt        time.Time `gorm:"column:created_at;index"`
 }
 
 func (*TracePayloadRow) TableName() string { return "trace_payloads" }
+
+// DispatchStepRow mirrors proxy.DispatchStepEvent (ADR-0057): one row per
+// candidate evaluation in a GatewayRequest's dispatch path. Linked to
+// request_logs by request_id (not row id, because steps are published during
+// the dispatch loop, before the request_logs row is written).
+type DispatchStepRow struct {
+	ID                uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	RequestID         string    `gorm:"column:request_id;index:idx_dispatch_steps_req_ord" json:"request_id"`
+	Ordinal           int       `gorm:"column:ordinal;index:idx_dispatch_steps_req_ord" json:"ordinal"`
+	Provider          string    `gorm:"column:provider" json:"provider"`
+	Endpoint          string    `gorm:"column:endpoint" json:"endpoint"`
+	Action            string    `gorm:"column:action" json:"action"`
+	SkipReason        string    `gorm:"column:skip_reason" json:"skip_reason"`
+	SelectionOutcome  string    `gorm:"column:selection_outcome" json:"selection_outcome"`
+	ErrorType         string    `gorm:"column:error_type" json:"error_type"`
+	UpstreamRequestID string    `gorm:"column:upstream_request_id" json:"upstream_request_id"`
+	DurationMs        int       `gorm:"column:duration_ms" json:"duration_ms"`
+	CreatedAt         time.Time `gorm:"column:created_at" json:"created_at"`
+}
+
+func (*DispatchStepRow) TableName() string { return "dispatch_steps" }
+
+// SessionFavoriteRow marks a session as favorited: its request_logs,
+// trace_payloads, and dispatch_steps are exempt from ordinary retention
+// until the favorite is removed. ADR-0057.
+type SessionFavoriteRow struct {
+	SessionID string    `gorm:"column:session_id;primaryKey"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+}
+
+func (*SessionFavoriteRow) TableName() string { return "session_favorites" }

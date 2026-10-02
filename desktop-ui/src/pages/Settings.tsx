@@ -8,7 +8,7 @@ import { Input } from "../components/ui/input";
 import { Modal } from "../components/ui/modal";
 import { Select } from "../components/ui/select";
 import { Skeleton } from "../components/ui/skeleton";
-import { getAPIKey, getSettings, rotateAPIKey, updateSettings } from "../lib/api";
+import { getAPIKey, getSettings, purgeObservation, rotateAPIKey, updateSettings } from "../lib/api";
 import type { APIKeyView } from "../lib/types";
 
 // Settings page over /api/v1/settings. Two groups with honestly-labelled
@@ -130,7 +130,10 @@ export function Settings() {
       <Card>
         <CardHeader>
           <CardTitle>Trace 采集</CardTitle>
-          <CardDescription>保存即生效，无需重启。</CardDescription>
+          <CardDescription>
+            保存即生效，无需重启。本地单用户场景默认开启正文采集，记录完整 prompt/completion。
+            敏感数据仅存本机，可随时关闭或清理。
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <Field label="报文采集" hint="开启后记录每个请求的完整 messages 与原始报文（Trace 查看器的数据来源）">
@@ -148,7 +151,7 @@ export function Settings() {
                 onChange={(e) => setMaxBodyKB(e.target.value)}
               />
             </Field>
-            <Field label="留存天数" suffix="天" hint="超期的请求日志与 Trace 会被自动清理；0 使用默认 30 天">
+            <Field label="留存天数" suffix="天" hint="超期的请求日志与 Trace 会被自动清理；0 使用默认 30 天。收藏的会话豁免清理。">
               <Input
                 type="number"
                 min={0}
@@ -166,8 +169,67 @@ export function Settings() {
         </Button>
       </div>
 
+      <DataCleanupCard retentionDays={parseInt(retentionDays) || 30} />
+
       <APIKeyCard />
     </div>
+  );
+}
+
+/** DataCleanupCard: immediate cleanup + clear-all, with feedback on deleted rows. */
+function DataCleanupCard({ retentionDays }: { retentionDays: number }) {
+  const [purging, setPurging] = useState(false);
+  const [clearOpen, setClearOpen] = useState(false);
+
+  async function onPurge() {
+    setPurging(true);
+    try {
+      const before = new Date(Date.now() - retentionDays * 86400000).toISOString();
+      const res = await purgeObservation(before);
+      toast.success(`已清理 ${res.deleted} 条过期观测记录（${retentionDays} 天前）。`);
+    } catch (e) {
+      toast.error(String((e as Error)?.message ?? e));
+    }
+    setPurging(false);
+  }
+
+  async function onClearAll() {
+    setClearOpen(false);
+    setPurging(true);
+    try {
+      const res = await purgeObservation();
+      toast.success(`已清空全部 ${res.deleted} 条观测记录。`);
+    } catch (e) {
+      toast.error(String((e as Error)?.message ?? e));
+    }
+    setPurging(false);
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>数据清理</CardTitle>
+        <CardDescription>
+          立即清理过期观测数据或清空全部记录。收藏的会话在「立即清理」时豁免（「清空全部」会清除所有数据包括收藏会话的观测记录，但保留收藏标记本身与配置）。
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-wrap gap-3">
+        <Button variant="outline" onClick={onPurge} disabled={purging}>
+          {purging ? "清理中…" : `立即清理（${retentionDays} 天前）`}
+        </Button>
+        <Button variant="destructive" onClick={() => setClearOpen(true)} disabled={purging}>
+          清空全部观测记录
+        </Button>
+      </CardContent>
+
+      <ConfirmModal
+        open={clearOpen}
+        onCancel={() => setClearOpen(false)}
+        onConfirm={onClearAll}
+        title="确认清空全部观测记录"
+        message="将删除所有请求日志、Trace、分发步骤与 Prompt 收藏来源引用。配置、API 密钥与供应商凭证不受影响。此操作不可撤销。"
+      />
+    </Card>
   );
 }
 

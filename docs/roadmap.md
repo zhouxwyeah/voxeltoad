@@ -27,12 +27,13 @@ desktop 编译失败先撞到。
 - [x] **审计**：管理面 `rbac.auditMutation` 中间件统一拦截非 GET 写操作；数据面每请求落 `request_logs`
 - [x] **多租户**：middleware 层强制，handler 不重复判
 - [x] **provider_credentials 加密**：AES-256-GCM 已落地（ADR-0031）
+
 - [x] **OpenAPI 契约**：43 个端点，server 端实现度高；SDK codegen 重新生成到临时文件并逐字节 diff 校验同步（不要求工作区已提交）
 - [x] **数据库基线**：PG 持久化与月度分区；当前迁移/表/字段计数只见 `design/database.md`，不沿用旧里程碑 snapshot 的统计
 - [x] **前端控制台**：Next.js 16 + React 19 + RSC，20 个 dashboard 页面全部「真实可用」档
 - [x] **SDK**：`@voxeltoad/gateway-sdk` 双产物（数据面 client + 管理面 admin），web 强依赖
-- [x] **测试**：~101 个 _test.go、test/e2e/ 16 个文件、`make ci` 含 16 个 step
-- [x] **CI**：GitHub Actions 双 job（ci-light / ci-heavy）
+- [x] **测试**：145 个 `_test.go`、`test/e2e/` 20 个文件；`make ci` 覆盖 Go、契约与 stack tests，前端门禁在 `ci-web` / `ci-desktop-ui`（CI light job 每 PR 运行）
+- [x] **CI**：GitHub Actions 三 job（ci-light / ci-heavy / desktop-windows-build）
 
 ---
 
@@ -121,21 +122,33 @@ desktop 编译失败先撞到。
 
 ## 当前主线二：Desktop Productization
 
-### desktop 个人网关（ADR-0041）
+### desktop 个人网关（ADR-0041 / ADR-0057）
 
-**目标用户**：个人开发者（作者本人即用户），有多个 LLM 调用源（CodeBuddy/Codex/Claude Code/脚本），需要本地 `127.0.0.1` 收敛入口 + **被动录制所有 prompt/completion 用于学提示词**。
+**目标用户**：个人开发者（作者本人即用户），有多个 LLM 调用源（CodeBuddy/Codex/Claude Code/脚本），需要一个本地、轻量、无需云服务的统一入口。产品主轴是**分发 + 统计**：先让流量稳定路由和故障转移，再看清最终成功率、错误、延迟、token、Provider/Model/Agent 分布，并从请求下钻分发路径、Session Trace 与运行日志。
 
-**明确排除**：多租户、RBAC、配额、跨实例一致性。
+**优先级**：可用性 → 可解释性 → 整理能力。Prompt/completion 浏览与收藏继续保留，但不再是唯一价值主轴。
 
-**当前状态**：
-- [x] SQLite store + 配置 + 主入口 + UI 骨架
-- [x] provider/model/route CRUD + 热重载
-- [x] Wails v2 工程 + macOS .app target
-- [ ] **desktop .dmg 发布准备**——面向个人开发者发布安装包 + 使用文档
+**明确排除**：多租户、RBAC、配额、跨实例一致性、Agent 专属治理、智能动态调度、主动定时探活。
 
-**复用关系**：核心零改动复用；差异收敛在 `internal/desktopstore`（SQLite 替代 PG）、`internal/desktopapi`（无 RBAC 读 API）、`cmd/desktop`（组合根）。
 
-**编译期 canary**：任何改 `internal/proxy` 的 PR 都会被 desktop 编译失败先撞到。
+**当前基线**：
+- [x] SQLite store + 本地 YAML + 主入口 + Vite/Wails UI
+- [x] Model/Route CRUD + 配置热重载
+- [x] 请求日志、Session/Trace、Prompt 收藏、运行日志、设置与连通性测试
+- [x] macOS `.app` + Windows NSIS `.exe` 打包链路
+- [x] Provider UI 对齐 ADR-0049 `endpoints[]`（Batch A 修复，提交/编辑均走每端点 `id/adapter/base_url`）
+- [x] 桌面 SQLite 同步共享 request/trace 新字段（ingress_protocol / provider_endpoint）
+
+**当前演进批次**：
+
+1. **Batch A — 可用性**：修 Provider 契约漂移；补 SQLite 字段同步；补 Provider → Model → Route → Test 四步 SetupReadiness 首页引导。**已完成**。
+2. **Batch B — 可解释性**：请求级运行态首页已落地；DispatchStep observer + SQLite/API/UI 已落地；被动 ProviderHealth 已落地（Providers 页状态列）。**Batch B 已完成**。
+3. **Batch C — 整理能力**：Session 收藏与整会话留存豁免；按 Session/时间/全部清理本地观测数据；Trace 设置敏感性说明与清理反馈。**Batch C 已完成**。
+4. **发布准备**：在前三批达到产品可用后完成 desktop `.dmg`、面向个人开发者的安装与使用文档。**已完成**（`make desktop-build` 产出 ad-hoc 签名 `.app` + `.dmg`；用户文档见 [docs/desktop/getting-started.md](desktop/getting-started.md)；Developer ID 正式签名 + 公证、Windows 签名/ARM64 为后续可选升级）。
+
+**复用关系**：差异仍收敛在 `internal/desktopstore`（SQLite）、`internal/desktopapi`（本地 API）、`cmd/desktop`/`internal/desktopapp`（组合与生命周期）和 `desktop-ui`。ADR-0057 仅允许在共享 Dispatcher 增加可选、fail-open、只观测不决策的 DispatchStep 契约；企业版无需同步持久化。
+
+**编译期 canary**：任何改共享 proxy/config/auth/observability 契约的 PR 都会由 desktop 编译和 wiring test 先暴露关联影响。
 
 ### UI 产品级化（2026-07 启动）
 
@@ -222,5 +235,7 @@ desktop 编译失败先撞到。
 
 - 2026-07-17：初版，基于 grill session 拍板结果
 - 2026-07-18：新增「UI 产品级化」批次（P0 完成，P1/P2 排期）；design-system.md 升级为视觉单一事实源 + `make check-ui` 门禁
+
 - 2026-07-31：重构为双主线（Enterprise Evolution + Desktop Productization）；新增 Enterprise E0～E3 分期与触发式方向；企业演进决策 ADR-0051～0056 Accepted
+- 2026-07-31：桌面定位收敛为“分发 + 统计”，新增 ADR-0057 与可用性→可解释性→整理能力三批演进顺序
 - 2026-09-30：同步 E0 收口与最小 E1 的当前实现；明确周期支出管控允许在途超额、旧余额保留、未知费用核对与恢复；实现/最终验收分栏，Token Allowance/自动降级/外部通知及 E2/E3 仍未实现

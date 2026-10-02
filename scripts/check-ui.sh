@@ -65,6 +65,8 @@ check_rule() {
   local f x skip
   while IFS= read -r f; do
     skip=0
+    # ${arr[@]+...} guards the empty-array case: macOS ships bash 3.2 where
+    # "${exempt[@]}" on an empty array is an unbound-variable error under set -u.
     for x in ${exempt[@]+"${exempt[@]}"}; do
       if [ "$f" = "$x" ]; then skip=1; break; fi
     done

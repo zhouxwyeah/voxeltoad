@@ -22,8 +22,9 @@ import (
 // takes effect without restart (the architecture's hot-reload model; see
 // design/architecture.md). A failed rebuild keeps the last-good dispatcher.
 type DispatcherWatcher struct {
-	source func() *config.Dynamic // current snapshot (e.g. config.Store.Current)
-	cfg    proxy.DispatcherConfig
+	source   func() *config.Dynamic // current snapshot (e.g. config.Store.Current)
+	cfg      proxy.DispatcherConfig
+	observer proxy.DispatchObserver // optional; set via WithObserver before Build
 
 	disp        atomic.Pointer[proxy.Dispatcher]
 	mu          sync.Mutex // serializes rebuilds
@@ -33,6 +34,13 @@ type DispatcherWatcher struct {
 // NewDispatcherWatcher builds a watcher reading config from source.
 func NewDispatcherWatcher(source func() *config.Dynamic, cfg proxy.DispatcherConfig) *DispatcherWatcher {
 	return &DispatcherWatcher{source: source, cfg: cfg}
+}
+
+// WithObserver installs a DispatchObserver that will be set on every rebuilt
+// dispatcher (ADR-0057). Must be called before Build. Nil = no observation.
+func (w *DispatcherWatcher) WithObserver(obs proxy.DispatchObserver) *DispatcherWatcher {
+	w.observer = obs
+	return w
 }
 
 // Current returns the latest successfully-built dispatcher (nil before the first
@@ -70,6 +78,9 @@ func (w *DispatcherWatcher) rebuild(force bool) error {
 	disp, err := proxy.BuildDispatcher(dyn, w.cfg)
 	if err != nil {
 		return err // keep last-good (disp pointer untouched)
+	}
+	if w.observer != nil {
+		disp.WithObserver(w.observer)
 	}
 	w.disp.Store(disp)
 	w.lastVersion = dyn.Version

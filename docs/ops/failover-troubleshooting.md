@@ -13,10 +13,10 @@
 
 | 字段 | 含义 | 取值说明 |
 | --- | --- | --- |
-| `fallback` | 本次请求**是否发生过转移** | `true` = 至少跳过了主供应商；`false` = 首候选即命中 |
+| `fallback` | 兼容用粗粒度候选索引信号 | 当前为“请求在 breaker 过滤后的候选索引 `i > 0` 处终止”；早期位置可能只是缺 forwarder/配置不匹配，熔断过滤和耗尽路径也不能稳定表达，不能等同于精确真实 failover |
 | `provider` | **最终命中**的供应商 | 只记最终落点，不记逐跳过程 |
-| `error_type` | 失败分类 | **仅当所有候选都失败（failover 耗尽）才非空**，值为 `upstream_error`(502) / `timeout_error`(504) |
-| `request_id` | 网关分配/上行透传的关联 ID | 单行精确下钻用 |
+| `error_type` | 最终失败分类 | 客户端最终收到错误时非空；既可能是不可重试错误立即终止，也可能是可重试候选耗尽 |
+| `request_id` | 网关生成的关联 ID（ADR-0050） | 单行精确下钻；客户端原值另存 `client_request_id` |
 | `session_id` | 会话标识（`X-Voxeltoad-Session` 等） | 串起同一会话的多条请求 |
 | `trace_id` | W3C `traceparent` 链路 ID | 跨请求串分布式链路 |
 | `session_source` | 会话来源标签 | `header-config` / `header-generic` / `body-session` / `body-metadata` / `body-user` / `prefix` |
@@ -24,9 +24,9 @@
 
 ### ⚠️ 关键限制（决定排查能走多远）
 
-- **failover 最终成功**（`fallback=true` 但 `error_type` 为空）：你**只能确认「发生过转移」**，但**逐跳明细（哪个供应商先失败、为什么失败）当前不落库**。原因需用「最终命中 provider + 候选顺序 + 上游熔断状态」间接推断（见 §5）。
+- **`fallback=true` 且最终成功**：只能确认请求在过滤后的候选索引 `i > 0` 处成功，不能证明前序候选真的发起过网络调用；它可能是可重试失败，也可能是缺 forwarder/配置不匹配。逐步原因当前不落库，只能结合最终 provider、候选配置、运行日志和熔断快照间接推断（见 §5）。
 - **failover 彻底失败**（`error_type` 非空）：系统会额外打一条 `upstream request failed` 的 ERROR 日志（含 `request_id`/`session_id`/`model`/`provider`/`error_type`），且 `error_type` 字段可读，这是最直接的排查入口。
-- `retry_count`（尝试次数）经 `DispatchResult.RetryCount` 上报为 `llm.retry.count` span 属性，但 **`request_logs` 表当前未单独落 `retry_count` 列**；判断「尝试了几次」主要靠 `fallback=true` 标志 + `provider` 是否偏离主供应商。
+- `retry_count` 当前实际也是候选索引/候选数的粗信号，不等于真实网络尝试次数，且 **`request_logs` 未单独落列**。仅靠 `fallback` + 最终 provider 无法精确还原尝试次数。
 
 ---
 
@@ -54,14 +54,14 @@ req() { curl -s -H "Authorization: Bearer $TOKEN" "$ADMIN$1"; }
 
 ## 3. 场景 A：从 session 日志里看到「部分请求发生了故障转移」
 
-你说的「session 中日志出现部分故障转移」，对应 `request_logs` 里**同一 `session_id` 下部分行 `fallback=true`**。
+现有 session 日志把 `fallback=true` 作为“候选位置发生位移”的粗筛选信号；它适合缩小排查范围，但不能单独证明发生了真实上游 failover。
 
 ### 步骤 1 — 拉出该 session 的完整时间线
 ```bash
 req "/api/v1/request-logs/sessions/{session_id}"
 ```
 返回该 session 按时间 **ASC** 排列的全部请求 + 来自 `usage_records` 的成本汇总。
-- 直接看每行 `fallback` 字段：哪些请求转移了、哪些没有。
+- 先看每行 `fallback` 字段筛出候选位置位移，再结合运行日志判断是否真的发起过多个上游调用。
 - 对比 `provider`：转移的请求 `provider` 是否偏离该 session 的主供应商。
 
 ### 步骤 2 — 只筛出该 session 内发生过转移的请求
@@ -87,7 +87,7 @@ req "/api/v1/request-logs?session_id={session_id}&error_type=timeout_error"
 req "/api/v1/request-logs?request_id={request_id}"
 ```
 精确命中单行，重点看：
-- `fallback`：是否转移
+- `fallback`：是否在过滤后的非首候选位置终止（仅粗筛，不等于真实转移）
 - `provider`：最终命中谁
 - `error_type`：为空 = 转移后成功；非空 = 彻底失败
 - `duration_ms` / `ttft_ms`：转移通常会明显升高
@@ -118,32 +118,33 @@ req "/api/v1/request-logs?fallback=true&from=2026-07-10T00:00:00Z&to=2026-07-10T
   ```bash
   req "/api/v1/request-logs?provider={provider}&fallback=true"
   ```
-- 结合 `provider` + `fallback=true` 的分布，可判断主供应商是否频繁被跳过。
+- `provider` + `fallback=true` 只能显示哪些供应商经常在后续候选位置终止请求；不能单独判断前序供应商是网络失败、配置跳过还是熔断过滤。
 
 ### 离线分析（CSV）
 ```bash
 req "/api/v1/request-logs?fallback=true&format=csv" > failovers.csv
 ```
-字段含：`id,tenant,group_name,api_key_id,provider,model_requested,model_resolved,stream,prompt_tokens,completion_tokens,total_tokens,ttft_ms,duration_ms,error_type,blocked_by,fallback,request_id,session_id,trace_id,session_source,created_at`。
+字段含：`id,tenant,group_name,api_key_id,provider,model_requested,model_resolved,stream,prompt_tokens,completion_tokens,total_tokens,ttft_ms,duration_ms,error_type,blocked_by,fallback,request_id,client_request_id,session_id,trace_id,session_source,agent_type,cache_hit,cache_tier,cache_source,cached_prompt_tokens,upstream_request_id,ingress_protocol,provider_endpoint,created_at`。
 
 ---
 
 ## 6. 关联上游健康：解释「为什么转移」
 
-failover 的触发根因几乎总是主供应商**瞬时 5xx / 超时**或**被熔断**。用以下方式核实：
+failover 的触发根因是第一个真实上游尝试发生**可重试的连接错误 / 5xx / 超时**。熔断候选会在真实尝试前被过滤，属于 preferred-candidate bypass；当前 `fallback` 字段不一定反映这种跳过。用以下方式核实：
 
 ### 查看数据面熔断状态（super-admin）
 ```bash
 req "/api/v1/data-plane-nodes"
 ```
-返回各实例的 `breaker_states`（JSONB），形如 `"<provider>": "open" | "half-open" | "closed"`：
-- 主供应商为 `open` / `half-open` → 已被熔断，新请求会被 `filterHealthy` 跳过，**这是转移的直接原因**。
-- 全部不健康时系统会降级兜底（仍尝试），此时转移是「明知可能坏也要试」。
+返回各实例的 `breaker_states`（JSONB），按 ADR-0049 的 endpoint 粒度记录，形如 `"<provider>/<endpoint>": "open" | "half-open" | "closed"`：
+- 首选 endpoint 为 `open` → 冷却期内会在 `filterHealthy` 阶段被跳过；这是首选绕过，不等同于 `fallback=true`。
+- `half-open` → 冷却期已过，重新允许真实调用，不会被 `filterHealthy` 跳过；当前没有单探针并发门控，多条并发请求都可能进入。成功后 closed，失败则重新 open。
+- 全部 endpoint 均为 open 时系统会兜底保留原候选并尝试，避免无路可走。
 
 ### 结合转移类型推断
-- `error_type` 为空 + `fallback=true` → 转移**成功**，上游是瞬时 5xx/超时，已被下一个候选消化。
-- `error_type=upstream_error` → 所有候选都 5xx，failover 耗尽。
-- `error_type=timeout_error` → 所有候选都超时。
+- `error_type` 为空 + `fallback=true` → 后续候选位置成功；前序位置可能是 5xx/超时，也可能只是配置跳过，需结合运行日志确认。
+- `error_type=upstream_error` → 最终错误分类为上游错误，可能是不可重试错误立即终止，也可能是多个可重试失败后耗尽；当前无法仅凭单行证明每一步都为 5xx。
+- `error_type=timeout_error` → 最终错误分类为超时；当前无法仅凭单行证明所有候选都超时。
 
 > 语义细节见 `docs/adr/0011-routing-and-failover.md`：仅超时/5xx 触发转移，4xx（含 429/401/403/内容审查）**不触发**——所以如果某请求 `error_type=4xx` 类且 `fallback=false`，那不是 failover，是上游直接拒绝。
 
@@ -157,7 +158,7 @@ req "/api/v1/data-plane-nodes"
         ├─ 有 request_id？── 是 ─→ §4 下钻单行（看 fallback/provider/error_type/耗时）
         │
         ├─ 有 session_id？── 是 ─→ §3 拉 session 时间线
-        │       ├─ fallback=true 但 error_type 空 → 转移成功，§5 查上游熔断
+        │       ├─ fallback=true 但 error_type 空 → 后续候选位置成功，结合运行日志确认真实 failover
         │       └─ error_type 非空 → 彻底失败，优先处理，§5 查根因
         │
         └─ 只有时间段？──── 是 ─→ §5 批量筛 fallback=true，CSV 离线分析
@@ -168,8 +169,8 @@ req "/api/v1/data-plane-nodes"
 
 ## 8. 已知盲点与后续增强（仅供参考，不在本文范围）
 
-- **逐跳明细缺失**：一次 failover 里「哪个 provider 先失败、为何重试」当前不落库，failover 成功时看不到中间过程。若需，可在 `telemetryAcc`（`internal/proxy/telemetry.go`）增加 per-candidate 数组字段（每次候选失败的 `provider`/`error_type`/原因），并经 `emit` 落库——属于代码改动。
-- **retry_count 未落 `request_logs` 列**：目前只能靠 `fallback` 标志 + `provider` 偏离推断尝试次数；如需精确值，可新增列并写入 `DispatchResult.RetryCount`。
+- **逐跳明细缺失**：一次 failover 里「哪个 provider 先失败、为何重试」当前不落库，failover 成功时看不到中间过程。ADR-0057 已为 desktop 接受独立有序 `DispatchStep`（区分候选跳过与真实上游尝试）及可选 fail-open observer；功能落地前仍需按本文现有方法间接排查。
+- **retry_count 未落 `request_logs` 列且当前不是精确 attempt 数**：现阶段无法仅靠 `fallback` + provider 推断真实网络尝试次数；ADR-0057 落地后从 attempted DispatchStep 精确得到尝试序列，同时保持 `request_logs` 一请求一行。
 - **trace_id 未作为查询参数**：当前需用 CSV 导出后本地 grep 变通。
 
 ---
@@ -178,5 +179,5 @@ req "/api/v1/data-plane-nodes"
 - `internal/admin/requestlog_handlers.go` — 请求日志 API 入口（`/request-logs`、`/request-logs/sessions/{id}`、CSV 导出）
 - `internal/store/requestlog_query.go` — 过滤字段（`fallback` / `session_id` / `request_id` / `error_type` 等）与查询实现
 - `internal/proxy/dispatcher.go` — failover 编排、`Fallback` / `RetryCount` 定义
-- `docs/openapi/admin.yaml` — Admin API 契约（`/request-logs` 第 860 行起）
+- `docs/openapi/admin.yaml` — Admin API 契约（搜索 `/request-logs`）
 - `docs/adr/0011-routing-and-failover.md` — 故障转移语义权威定义（触发白名单、流式边界、计费）

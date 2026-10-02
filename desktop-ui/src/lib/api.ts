@@ -1,6 +1,8 @@
 import type {
   APIKeyView,
   ConfigWriteResult,
+  DispatchStep,
+  EndpointHealth,
   Model,
   OffsetEnvelope,
   OverviewResult,
@@ -216,4 +218,34 @@ export function updatePrompt(id: number, p: PromptPayload): Promise<ConfigWriteR
 }
 export function deletePrompt(id: number): Promise<ConfigWriteResult> {
   return sendJSON<ConfigWriteResult>("DELETE", `/prompts/${id}`);
+}
+
+// --- dispatch steps (ADR-0057) ---
+
+export function getDispatchSteps(requestId: string): Promise<DispatchStep[]> {
+  return getJSON<DispatchStep[]>(`/dispatch-steps/${requestId}`);
+}
+
+// --- provider health (ADR-0057) ---
+
+export function getProviderHealth(): Promise<EndpointHealth[]> {
+  return getJSON<EndpointHealth[]>("/provider-health");
+}
+
+// --- session favorites + observation purge (ADR-0057 Batch C) ---
+
+export function favoriteSession(sessionId: string): Promise<void> {
+  return sendJSON("PUT", `/session-favorites/${encodeURIComponent(sessionId)}`, {});
+}
+
+export function unfavoriteSession(sessionId: string): Promise<void> {
+  return sendJSON("DELETE", `/session-favorites/${encodeURIComponent(sessionId)}`, {});
+}
+
+export function deleteSession(sessionId: string): Promise<{ deleted: number }> {
+  return sendJSON<{ deleted: number }>("DELETE", `/sessions/${encodeURIComponent(sessionId)}`, {});
+}
+
+export function purgeObservation(before?: string): Promise<{ deleted: number }> {
+  return sendJSON<{ deleted: number }>("POST", "/observation/purge", before ? { before } : {});
 }

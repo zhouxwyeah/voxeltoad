@@ -64,3 +64,4 @@ Produced and refined through `grill-with-docs` sessions.
 | [0054](0054-feedback-event-and-evaluation-boundary.md) | FeedbackEvent and the evaluation boundary | Accepted |
 | [0055](0055-dataset-lineage-promotion-and-storage.md) | Dataset lineage, payload promotion, and storage | Accepted |
 | [0056](0056-harness-run-and-tool-audit-boundary.md) | Harness, Run, and tool-audit boundary | Accepted |
+| [0057](0057-desktop-distribution-observability.md) | Desktop distribution observability — request-centric metrics and ordered dispatch steps | Accepted |

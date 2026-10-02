@@ -46,11 +46,15 @@ func startRetentionSweeper(db *desktopstore.DB, settingsFn func() *cfg.GatewaySe
 		if err != nil {
 			log.Printf("retention: delete trace_payloads failed: %v", err)
 		}
+		nSteps, err := db.DeleteDispatchStepsBefore(ctx, cutoff)
+		if err != nil {
+			log.Printf("retention: delete dispatch_steps failed: %v", err)
+		}
 		if err := db.Checkpoint(); err != nil {
 			log.Printf("retention: WAL checkpoint failed: %v", err)
 		}
-		if nLogs+nTraces > 0 {
-			log.Printf("retention: removed %d request logs + %d trace payloads older than %dd", nLogs, nTraces, days)
+		if nLogs+nTraces+nSteps > 0 {
+			log.Printf("retention: removed %d request logs + %d trace payloads + %d dispatch steps older than %dd", nLogs, nTraces, nSteps, days)
 		}
 	}
 
